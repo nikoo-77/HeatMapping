@@ -1,0 +1,8 @@
+{
+  "name": "Cebu Employee Distribution Map",
+  "description": "An interactive full-featured corporate dashboard visualizing employee distribution and geographic density profiles across Cebu Island and Metro Cebu, joint with an incident simulation toolkit.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
