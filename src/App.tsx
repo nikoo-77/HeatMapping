@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { CEBU_LOCATIONS, generateAllCebuEmployees } from './data_cebu';
+import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees } from './data_islands';
 import { Employee, SafetyStatus, DisasterConfig } from './types';
 import InteractiveMap from './components/InteractiveMap';
 import StatusTracker from './components/StatusTracker';
@@ -15,6 +15,9 @@ export default function App() {
   
   // State to filter employees by a selected city from the left table
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
+
+  // State to filter by island group (null = all)
+  const [selectedIslandGroup, setSelectedIslandGroup] = useState<'Luzon' | 'Visayas' | 'Mindanao' | null>(null);
 
   // Toggle for Incident & Emergency Simulation Deck
   const [simulationActive, setSimulationActive] = useState<boolean>(false);
@@ -52,37 +55,37 @@ export default function App() {
     ]
   });
 
-  // Seeded employee database with 20 records distributed across the locations
+  // Seeded employee database distributed across the three Philippine island groups
   const [employees, setEmployees] = useState<Employee[]>(() => {
-    const saved = localStorage.getItem('cebu_map_employees');
+    const saved = localStorage.getItem('island_map_employees');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Wipe old high-density dataset to prevent lag
-        if (parsed.length > 30) {
-          localStorage.removeItem('cebu_map_employees');
-          return generateAllCebuEmployees();
+        // Wipe old dataset if it lacks the islandGroup field
+        if (parsed.length > 0 && parsed[0].islandGroup === undefined) {
+          localStorage.removeItem('island_map_employees');
+          return generateAllIslandEmployees();
         }
         return parsed;
       } catch (e) {
-        return generateAllCebuEmployees();
+        return generateAllIslandEmployees();
       }
     }
-    return generateAllCebuEmployees();
+    return generateAllIslandEmployees();
   });
 
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
 
   // Live logger terminal entries
-  const [logs, setLogs] = useState<Array<{ id: string; time: string; msg: string; type: 'info' | 'warn' | 'success' | 'err' }>>([
-    { id: '1', time: new Date().toLocaleTimeString(), msg: 'HR distribution metrics database loaded: 20 personnel accounted.', type: 'success' },
-    { id: '2', time: new Date().toLocaleTimeString(), msg: 'Geographic profiles plotted across Cebu and Lapu-Lapu cities.', type: 'info' },
+  const [logs, setLogs] = useState<Array<{ id: string; time: string; msg: string; type: 'info' | 'warn' | 'success' | 'err' }>>([{
+    id: '1', time: new Date().toLocaleTimeString(), msg: 'HR distribution metrics database loaded: personnel from Luzon, Visayas & Mindanao accounted.', type: 'success' },
+    { id: '2', time: new Date().toLocaleTimeString(), msg: 'Geographic profiles plotted across the three primary Philippine island groups.', type: 'info' },
     { id: '3', time: new Date().toLocaleTimeString(), msg: 'Toggle "Disaster & Incident Sim" to launch emergency SMS crisis telemetry.', type: 'warn' },
   ]);
 
   // Save changes to local persistence
   useEffect(() => {
-    localStorage.setItem('cebu_map_employees', JSON.stringify(employees));
+    localStorage.setItem('island_map_employees', JSON.stringify(employees));
   }, [employees]);
 
   // Log dispatch helper
@@ -282,10 +285,11 @@ export default function App() {
   };
 
   const handleResetDatabase = () => {
-    setEmployees(generateAllCebuEmployees());
+    setEmployees(generateAllIslandEmployees());
     setSelectedEmployee(null);
     setSelectedCity(null);
-    pushLog('Database reset. Seeded original 20 Cebu personnel records.', 'info');
+    setSelectedIslandGroup(null);
+    pushLog('Database reset. Restored Philippine island group personnel records.', 'info');
   };
 
   const handleDispatchRescue = (employeeId: string) => {
@@ -412,7 +416,7 @@ export default function App() {
             </h1>
           </div>
           <p className="text-xs text-slate-500 font-medium max-w-xl mt-1">
-            Analyzing workforce and satellite footprints for {employees.length} personnel across Cebu Island.
+            Analyzing workforce and satellite footprints for {employees.length} personnel across the Philippine Islands.
           </p>
         </div>
 
@@ -595,59 +599,155 @@ export default function App() {
       {/* Main Corporate Workspace */}
       <main className="flex-1 max-w-[1550px] w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
         
-        {/* Left Column: Location Table with Alphabetical list + Grand Total Cebu */}
+        {/* Left Column: Island Group Filter Panel */}
         <section className="lg:col-span-3 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col max-h-[750px]">
           <div className="bg-[#002060] px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-            <span className="text-white font-extrabold text-sm tracking-wide">Location</span>
-            <span className="text-white font-extrabold text-sm tracking-wide">FTE Count</span>
+            <span className="text-white font-extrabold text-sm tracking-wide">Island Group</span>
+            <span className="text-white font-extrabold text-sm tracking-wide">FTE</span>
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-            
-            {/* Grand Total Cebu Row */}
+
+            {/* All Philippines Row */}
             <button
               onClick={() => {
+                setSelectedIslandGroup(null);
                 setSelectedCity(null);
-                pushLog(`Viewing total consolidated Cebu headcount (${employees.length} employees).`, 'info');
+                pushLog(`Viewing all Philippine island groups (${employees.length} employees).`, 'info');
               }}
               className={`w-full text-left px-4 py-3 flex items-center justify-between transition-colors cursor-pointer border-b border-slate-200 hover:bg-[#ebf1fc]
-                ${!selectedCity ? 'bg-[#d9e1f2] border-l-4 border-l-[#002060]' : 'bg-slate-50'}`}
+                ${!selectedIslandGroup ? 'bg-[#d9e1f2] border-l-4 border-l-[#002060]' : 'bg-slate-50'}`}
             >
-              <span className="font-extrabold text-[#002060] text-sm md:text-base">Cebu (Total Count)</span>
-              <strong className="font-black text-[#002060] text-base md:text-lg">{employees.length}</strong>
+              <span className="font-extrabold text-[#002060] text-sm">🇵🇭 Philippines (All)</span>
+              <strong className="font-black text-[#002060] text-base">{employees.length}</strong>
             </button>
 
-            {/* Geographical Breakdowns */}
-            {CEBU_LOCATIONS.map((loc) => {
-              const isSelected = selectedCity === loc.name;
+            {/* ── LUZON ─────────────────────────────── */}
+            <button
+              onClick={() => {
+                setSelectedIslandGroup('Luzon');
+                setSelectedCity(null);
+                const count = employees.filter(e => e.islandGroup === 'Luzon').length;
+                pushLog(`Filtering by Luzon island group (${count} employees).`, 'info');
+              }}
+              className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-emerald-50 cursor-pointer
+                ${selectedIslandGroup === 'Luzon' ? 'bg-emerald-50 border-l-4 border-l-emerald-600 font-bold' : ''}`}
+            >
+              <span className="font-extrabold text-emerald-800 text-sm flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                Luzon
+              </span>
+              <span className="font-mono font-black text-emerald-900 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded text-[11px]">
+                {employees.filter(e => e.islandGroup === 'Luzon').length} fte
+              </span>
+            </button>
+            {/* Luzon city breakdown */}
+            {LUZON_LOCATIONS.map((loc) => {
+              const cityEmp = employees.filter(e => e.address?.includes(loc.city)).length;
+              const isSelected = selectedCity === loc.city;
               return (
                 <button
                   key={loc.name}
                   onClick={() => {
-                    setSelectedCity(loc.name);
-                    // Center the conflagration drill range on clicked city to simulate if sim is active
-                    if (simulationActive) {
-                      setEpicenter({
-                        radius: epicenter.radius,
-                        // Conversion back from GPS coordinates to custom grid
-                        y: Math.max(0, Math.min(100, parseFloat((((10.355 - loc.lat) / (10.355 - 10.245)) * 100).toFixed(1)))),
-                        x: Math.max(0, Math.min(100, parseFloat((((loc.lng - 123.82) / (123.99 - 123.82)) * 100).toFixed(1))))
-                      });
-                    }
-                    pushLog(`Focused location data: ${loc.name} (${loc.fte} FTEs). Map centered.`, 'info');
+                    setSelectedIslandGroup('Luzon');
+                    setSelectedCity(loc.city);
+                    pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
                   }}
-                  className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs
-                    ${isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500 font-bold' : ''}`}
+                  className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs
+                    ${isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''}`}
                 >
-                  <span className={`font-semibold ${loc.isMetro ? 'text-slate-800 font-bold' : 'text-slate-500'}`}>
-                    {loc.name} {loc.isMetro && <span className="text-[9px] bg-slate-105 text-slate-500 rounded px-1 ml-1 scale-90">Metro</span>}
-                  </span>
-                  <span className="font-mono font-black text-slate-800 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
+                  <span className="text-slate-600 font-medium truncate">{loc.name}</span>
+                  <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
                     {loc.fte} fte
                   </span>
                 </button>
               );
             })}
+
+            {/* ── VISAYAS ───────────────────────────── */}
+            <button
+              onClick={() => {
+                setSelectedIslandGroup('Visayas');
+                setSelectedCity(null);
+                const count = employees.filter(e => e.islandGroup === 'Visayas').length;
+                pushLog(`Filtering by Visayas island group (${count} employees).`, 'info');
+              }}
+              className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-blue-50 cursor-pointer
+                ${selectedIslandGroup === 'Visayas' ? 'bg-blue-50 border-l-4 border-l-blue-600 font-bold' : ''}`}
+            >
+              <span className="font-extrabold text-blue-800 text-sm flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
+                Visayas
+              </span>
+              <span className="font-mono font-black text-blue-900 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded text-[11px]">
+                {employees.filter(e => e.islandGroup === 'Visayas').length} fte
+              </span>
+            </button>
+            {/* Visayas city breakdown */}
+            {VISAYAS_LOCATIONS.map((loc) => {
+              const cityEmp = employees.filter(e => e.address?.includes(loc.city)).length;
+              const isSelected = selectedCity === loc.city;
+              return (
+                <button
+                  key={loc.name}
+                  onClick={() => {
+                    setSelectedIslandGroup('Visayas');
+                    setSelectedCity(loc.city);
+                    pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
+                  }}
+                  className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs
+                    ${isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''}`}
+                >
+                  <span className="text-slate-600 font-medium truncate">{loc.name}</span>
+                  <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
+                    {loc.fte} fte
+                  </span>
+                </button>
+              );
+            })}
+
+            {/* ── MINDANAO ──────────────────────────── */}
+            <button
+              onClick={() => {
+                setSelectedIslandGroup('Mindanao');
+                setSelectedCity(null);
+                const count = employees.filter(e => e.islandGroup === 'Mindanao').length;
+                pushLog(`Filtering by Mindanao island group (${count} employees).`, 'info');
+              }}
+              className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-amber-50 cursor-pointer
+                ${selectedIslandGroup === 'Mindanao' ? 'bg-amber-50 border-l-4 border-l-amber-600 font-bold' : ''}`}
+            >
+              <span className="font-extrabold text-amber-800 text-sm flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
+                Mindanao
+              </span>
+              <span className="font-mono font-black text-amber-900 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded text-[11px]">
+                {employees.filter(e => e.islandGroup === 'Mindanao').length} fte
+              </span>
+            </button>
+            {/* Mindanao city breakdown */}
+            {MINDANAO_LOCATIONS.map((loc) => {
+              const cityEmp = employees.filter(e => e.address?.includes(loc.city)).length;
+              const isSelected = selectedCity === loc.city;
+              return (
+                <button
+                  key={loc.name}
+                  onClick={() => {
+                    setSelectedIslandGroup('Mindanao');
+                    setSelectedCity(loc.city);
+                    pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
+                  }}
+                  className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs
+                    ${isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''}`}
+                >
+                  <span className="text-slate-600 font-medium truncate">{loc.name}</span>
+                  <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
+                    {loc.fte} fte
+                  </span>
+                </button>
+              );
+            })}
+
           </div>
 
           <div className="bg-slate-50 p-3 border-t border-slate-200 text-[10px] font-mono text-slate-500 font-bold text-center flex flex-col gap-0.5">
@@ -682,6 +782,7 @@ export default function App() {
               mapView={mapView}
               simulationActive={simulationActive}
               selectedCity={selectedCity}
+              selectedIslandGroup={selectedIslandGroup}
             />
 
             {/* Static Overlay Card inside Metro Cebu Map View */}
@@ -810,15 +911,29 @@ export default function App() {
               </div>
               <div>
                 <h3 className="font-extrabold text-sm md:text-base text-[#002060] uppercase">
-                  {selectedCity ? `${selectedCity} Personnel Database` : 'Consolidated Cebu Personnel Directory'}
+                  {selectedCity
+                    ? `${selectedCity} Personnel Database`
+                    : selectedIslandGroup
+                    ? `${selectedIslandGroup} Island Group Directory`
+                    : 'Consolidated Philippine Personnel Directory'}
                 </h3>
                 <p className="text-xs text-slate-500 font-medium">
-                  Showing {employees.filter(emp => !selectedCity || emp.address?.includes(selectedCity)).length} employees in this selection map profile.
+                  Showing {employees.filter(emp =>
+                    (!selectedCity || emp.address?.includes(selectedCity)) &&
+                    (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup)
+                  ).length} employees in this selection map profile.
                 </p>
               </div>
             </div>
 
-            <div className="text-xs font-mono text-slate-500">
+            <div className="text-xs font-mono text-slate-500 flex flex-wrap items-center gap-2">
+              {selectedIslandGroup && (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                  selectedIslandGroup === 'Luzon' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                  selectedIslandGroup === 'Visayas' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                  'bg-amber-50 text-amber-700 border-amber-200'
+                }`}>{selectedIslandGroup}</span>
+              )}
               Database Sync: <strong className="text-[#002060]">{employees.filter(e => e.status === 'Green').length} Safe</strong> • <strong className="text-amber-600">{employees.filter(e => e.status === 'Yellow').length} Awaiting Reply</strong> • <span className="text-rose-600 font-bold">{employees.filter(e => e.status === 'Red').length} Telecom Muted</span>
             </div>
           </div>
@@ -828,7 +943,10 @@ export default function App() {
             {/* Left side within directory: Interactive employee lists */}
             <div className="lg:col-span-8 flex flex-col gap-3">
               <StatusTracker
-                employees={employees.filter(emp => !selectedCity || emp.address?.includes(selectedCity))}
+                employees={employees.filter(emp =>
+                  (!selectedCity || emp.address?.includes(selectedCity)) &&
+                  (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup)
+                )}
                 epicenter={epicenter}
                 onSelectEmployee={setSelectedEmployee}
                 selectedEmployee={selectedEmployee}

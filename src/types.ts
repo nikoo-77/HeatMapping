@@ -20,6 +20,7 @@ export interface Employee {
   safetyMessage?: string;
   avatar: string;
   address?: string; // Home address
+  islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
   distanceToEpicenter?: number;
   rescueDispatched?: boolean;
   contacted?: boolean;

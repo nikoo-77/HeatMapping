@@ -1,15 +1,24 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Employee, DisasterConfig } from '../types';
-import { CEBU_LOCATIONS } from '../data_cebu';
+import { ALL_ISLAND_LOCATIONS } from '../data_islands';
 import { Flame, MapPin, Search, Users, ShieldAlert, Crosshair, HelpCircle, Signal, Battery, Home, Info, Compass, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import L from 'leaflet';
 
-// Coordinated bounds mapping for Cebu
+// Coordinated bounds mapping for Cebu (used for the legacy grid ↔ GPS helpers)
 const LAT_MIN = 10.245;
 const LAT_MAX = 10.355;
 const LNG_MIN = 123.82;
 const LNG_MAX = 123.99;
+
+// ─── Island group geographic bounding boxes ────────────────────────────────
+// Each entry is [swLat, swLng, neLat, neLng] (south-west → north-east)
+const ISLAND_GROUP_BOUNDS: Record<'Luzon' | 'Visayas' | 'Mindanao' | 'Philippines', [number, number, number, number]> = {
+  Philippines: [4.5, 116.0, 21.5, 127.0],
+  Luzon:       [12.5, 119.5, 20.5, 124.0],
+  Visayas:     [9.0,  121.5, 12.5, 126.0],
+  Mindanao:    [5.0,  121.0,  9.5, 127.0],
+};
 
 // Linear conversion: Grid (0-100) -> GPS Lat/Lng (for legacy compat)
 export function customToLatLng(customLng: number, customLat: number): { lat: number; lng: number } {
@@ -62,6 +71,7 @@ interface InteractiveMapProps {
   mapView?: 'island' | 'metro';
   simulationActive?: boolean;
   selectedCity?: string | null;
+  selectedIslandGroup?: 'Luzon' | 'Visayas' | 'Mindanao' | null;
 }
 
 export default function InteractiveMap({
@@ -75,6 +85,7 @@ export default function InteractiveMap({
   mapView = 'island',
   simulationActive = false,
   selectedCity = null,
+  selectedIslandGroup = null,
 }: InteractiveMapProps) {
   const mockMapRef = useRef<SVGSVGElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -112,9 +123,9 @@ export default function InteractiveMap({
       return;
     }
 
-    // Initialize physical leaflet map - Center of Cebu Island initially
-    const initialCenter: L.LatLngExpression = mapView === 'island' ? [10.45, 123.75] : [10.3157, 123.8854];
-    const initialZoom = mapView === 'island' ? 9 : 12;
+    // Initialize physical leaflet map - default to Philippines overview
+    const initialCenter: L.LatLngExpression = mapView === 'island' ? [12.0, 122.5] : [10.3157, 123.8854];
+    const initialZoom = mapView === 'island' ? 6 : 12;
 
     const map = L.map(mapContainerRef.current, {
       center: initialCenter,
@@ -153,21 +164,27 @@ export default function InteractiveMap({
     };
   }, [mapType]);
 
-  // Adjust zoom and center when the user toggles Cebu Island vs Metro Cebu View
+  // Fly to island group bounds when the selected island group changes
   useEffect(() => {
     if (!mapInstanceRef.current || mapType === 'mock') return;
     const map = mapInstanceRef.current;
 
-    if (mapView === 'island') {
-      map.setView([10.45, 123.75], 9);
-    } else {
-      map.setView([10.3157, 123.8854], 12);
+    if (mapView === 'metro') {
+      // Metro view always stays on Cebu CBD
+      map.setView([10.3157, 123.8854], 12, { animate: true, duration: 1.0 });
+      return;
     }
-    
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 150);
-  }, [mapView, mapType]);
+
+    const key = selectedIslandGroup ?? 'Philippines';
+    const bounds = ISLAND_GROUP_BOUNDS[key];
+    // fitBounds: [swLat, swLng], [neLat, neLng]
+    map.fitBounds(
+      [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
+      { animate: true, duration: 0.8, padding: [30, 30] }
+    );
+
+    setTimeout(() => { map.invalidateSize(); }, 150);
+  }, [mapView, mapType, selectedIslandGroup]);
 
   // Automatically pan/center on selected employee
   useEffect(() => {
@@ -184,14 +201,14 @@ export default function InteractiveMap({
     });
   }, [selectedEmployee, mapType]);
 
-  // Automatically pan/center on selected side-panel city
+  // Automatically pan/center on a selected city from the side-panel
   useEffect(() => {
     if (!mapInstanceRef.current || mapType === 'mock' || !selectedCity) return;
     const map = mapInstanceRef.current;
     
-    const matchedLoc = CEBU_LOCATIONS.find(loc => loc.name === selectedCity);
+    const matchedLoc = ALL_ISLAND_LOCATIONS.find(loc => loc.city === selectedCity);
     if (matchedLoc) {
-      map.setView([matchedLoc.lat, matchedLoc.lng], 13, {
+      map.setView([matchedLoc.gpsLat, matchedLoc.gpsLng], 12, {
         animate: true,
         duration: 1.0
       });
@@ -228,35 +245,47 @@ export default function InteractiveMap({
   useEffect(() => {
     if (!mapInstanceRef.current || !layersGroupRef.current || mapType === 'mock') return;
     const layers = layersGroupRef.current;
+
+    // Determine which employees to render based on active filter
+    const visibleEmployees = employees.filter(emp => {
+      if (selectedCity) return emp.address?.includes(selectedCity);
+      if (selectedIslandGroup) return emp.islandGroup === selectedIslandGroup;
+      return true;
+    });
     layers.clearLayers();
 
-    // 1. CONSTANT COMPONENT: Red/Maroon Headcount Footprint Bubbles (Always visible to represent geographic density)
+    // 1. CONSTANT COMPONENT: Red/Maroon Headcount Footprint Bubbles
     if (activeLayers.showOfficeBubbles) {
-      CEBU_LOCATIONS.forEach(loc => {
-        // Compute radius proportional to square root of FTE size for precise aesthetic scaling
-        const bubbleRadMeters = Math.sqrt(loc.fte) * (mapView === 'island' ? 440 : 250);
+      // Only show bubbles for locations that match the current filter
+      const visibleLocations = ALL_ISLAND_LOCATIONS.filter(loc => {
+        if (selectedCity) return loc.city === selectedCity;
+        if (selectedIslandGroup) return loc.islandGroup === selectedIslandGroup;
+        return true;
+      });
+
+      visibleLocations.forEach(loc => {
+        // Color by island group
+        const strokeColor = loc.islandGroup === 'Luzon' ? '#065f46' : loc.islandGroup === 'Visayas' ? '#1e3a8a' : '#92400e';
+        const fillColor   = loc.islandGroup === 'Luzon' ? '#10b981' : loc.islandGroup === 'Visayas' ? '#3b82f6' : '#f59e0b';
+        const bubbleRadMeters = Math.sqrt(loc.fte) * 6000;
         
-        const circle = L.circle([loc.lat, loc.lng], {
+        const circle = L.circle([loc.gpsLat, loc.gpsLng], {
           radius: bubbleRadMeters,
-          color: '#7f1d1d',       // Deep maroon stroke
+          color: strokeColor,
           weight: 1.5,
-          fillColor: '#b91c1c',   // High-contrast red fill
-          fillOpacity: 0.35,
-          className: 'transition-all duration-300 hover:fill-opacity-60 cursor-pointer'
+          fillColor,
+          fillOpacity: 0.30,
+          className: 'transition-all duration-300 cursor-pointer'
         }).addTo(layers);
 
-        // Bind interactive rich search tooltips
         circle.bindTooltip(`
           <div class="font-sans p-1.5 text-xs text-slate-900 leading-snug">
             <strong class="text-indigo-950 uppercase text-[11px] block border-b border-slate-200 pb-0.5 mb-1">${loc.name}</strong>
-            <span>Active Employee Base Count: <strong class="text-red-700 block text-base font-black">${loc.fte} FTEs</strong></span>
-            <span class="text-[9.5px] text-slate-500 font-mono block mt-0.5">Coordinates: [${loc.lng}°E, ${loc.lat}°N]</span>
+            <span class="text-[10px] text-slate-500">${loc.islandGroup}</span>
+            <span>FTE: <strong class="text-red-700 text-base font-black">${loc.fte}</strong></span>
+            <span class="text-[9.5px] text-slate-500 font-mono block mt-0.5">[${loc.gpsLng.toFixed(4)}°E, ${loc.gpsLat.toFixed(4)}°N]</span>
           </div>
-        `, {
-          permanent: false,
-          direction: 'top',
-          opacity: 0.95
-        });
+        `, { permanent: false, direction: 'top', opacity: 0.95 });
       });
     }
 
@@ -428,8 +457,8 @@ export default function InteractiveMap({
       })
     }).addTo(layers).bindPopup('<b>Innodata operations-center HQ</b><br/>First-Responder Base.');
 
-    // 4. INDIVIDUAL RESIDENT PINS (Visible by default to track operational headcount)
-    employees.forEach((emp) => {
+    // 4. INDIVIDUAL RESIDENT PINS – only show filtered subset
+    visibleEmployees.forEach((emp) => {
       // Individual GPS coordinates mapping
       const empGps = emp.gpsLat && emp.gpsLng 
         ? { lat: emp.gpsLat, lng: emp.gpsLng } 
@@ -523,7 +552,7 @@ export default function InteractiveMap({
       });
     });
 
-  }, [employees, epicenter, selectedEmployee, activeDisaster, mapType, activeLayers, mapView, simulationActive]);
+  }, [employees, epicenter, selectedEmployee, activeDisaster, mapType, activeLayers, mapView, simulationActive, selectedIslandGroup, selectedCity]);
 
   // --- MOCK SVG CHOP MAP HANDLERS (As secondary fallback diagram mode) ---
   const handleMapClickOnMock = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -641,37 +670,37 @@ export default function InteractiveMap({
               />
             </g>
 
-            {/* Render bubbles in Mock SVG */}
-            {activeLayers.showOfficeBubbles && CEBU_LOCATIONS.map(loc => {
-              // Convert actual GPS coords to estimated grid coordinates (legacy x,y math bounds)
-              const customCoords = latLngToCustom(loc.lat, loc.lng);
-              const svgRad = Math.sqrt(loc.fte) * (mapView === 'island' ? 0.35 : 0.2);
-              return (
-                <g key={`svg-loc-${loc.name}`}>
-                  <circle
-                    cx={customCoords.x}
-                    cy={customCoords.y}
-                    r={svgRad}
-                    fill="#ef4444"
-                    fillOpacity="0.45"
-                    stroke="#7f1d1d"
-                    strokeWidth="0.15"
-                  />
-                  {loc.fte > 50 && (
+            {/* Render bubbles in Mock SVG – filtered by island group */}
+            {activeLayers.showOfficeBubbles && ALL_ISLAND_LOCATIONS
+              .filter(loc => !selectedIslandGroup || loc.islandGroup === selectedIslandGroup)
+              .map(loc => {
+                const customCoords = latLngToCustom(loc.gpsLat, loc.gpsLng);
+                const svgRad = Math.sqrt(loc.fte) * 0.35;
+                const fillC = loc.islandGroup === 'Luzon' ? '#10b981' : loc.islandGroup === 'Visayas' ? '#3b82f6' : '#f59e0b';
+                return (
+                  <g key={`svg-loc-${loc.name}`}>
+                    <circle
+                      cx={customCoords.x}
+                      cy={customCoords.y}
+                      r={svgRad}
+                      fill={fillC}
+                      fillOpacity="0.45"
+                      stroke="#475569"
+                      strokeWidth="0.15"
+                    />
                     <text
                       x={customCoords.x}
                       y={customCoords.y - svgRad - 0.5}
-                      fill="#fca5a5"
-                      fontSize="1.6"
+                      fill="#e2e8f0"
+                      fontSize="1.5"
                       fontFamily="monospace"
                       textAnchor="middle"
                       fontWeight="bold"
                     >
-                      {loc.name} ({loc.fte})
+                      {loc.city}
                     </text>
-                  )}
-                </g>
-              );
+                  </g>
+                );
             })}
 
             {/* Active Disaster site elements inside SVG mock */}
