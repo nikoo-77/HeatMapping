@@ -420,53 +420,6 @@ export default function App() {
           </p>
         </div>
 
-        {/* Center: Interactive View Selection + Simulation Mode toggle */}
-        <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-200">
-          <button
-            onClick={() => {
-              setMapView('island');
-              setSelectedCity(null);
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-              mapView === 'island' && !selectedCity
-                ? 'bg-[#002060] text-white shadow'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Compass className="w-3.5 h-3.5" />
-            <span>Cebu Island Map</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setMapView('metro');
-              setSelectedCity(null);
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-              mapView === 'metro'
-                ? 'bg-[#002060] text-white shadow'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5" />
-            <span>Metro Cebu View</span>
-          </button>
-
-          <div className="w-px h-5 bg-slate-350 mx-1"></div>
-
-          <button
-            onClick={() => setSimulationActive(!simulationActive)}
-            className={`px-3 py-1.5 rounded-md text-xs font-extrabold transition-all duration-150 flex items-center gap-1.5 border cursor-pointer ${
-              simulationActive
-                ? 'bg-rose-50 border-rose-350 text-rose-700 animate-pulse'
-                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-            }`}
-            title="Toggle localized emergency drills & mobile transmission failure simulations"
-          >
-            <Flame className={`w-3.5 h-3.5 ${simulationActive ? 'text-rose-500' : 'text-slate-500'}`} />
-            <span>🚨 Crisis drills: {simulationActive ? 'ON' : 'OFF'}</span>
-          </button>
-        </div>
 
         {/* Right Side: Co-labelled corporate logos */}
         <div className="flex items-center gap-4 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
@@ -498,103 +451,6 @@ export default function App() {
 
       </header>
 
-      {/* Emergency Simulation Dashboard Area (Top section when toggled ON) */}
-      {simulationActive && (
-        <section className="bg-gradient-to-r from-slate-900 to-[#1e1b4b] text-white px-6 py-4 border-b border-rose-950/70 p-4 transition-all animate-slide-down">
-          <div className="max-w-7xl mx-auto flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
-            
-            <div className="flex items-center gap-3">
-              <div className="bg-rose-900/40 p-2.5 rounded border border-rose-800 text-rose-400 animate-pulse">
-                <ShieldAlert className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="bg-rose-900 text-rose-200 text-[10px] font-black font-mono px-2 py-0.5 rounded border border-rose-700 uppercase">
-                    ACTIVE INCIDENT SIMULATOR
-                  </span>
-                  <span className="text-slate-400 text-xs font-mono">
-                    Select a risk scenario below to stress-test communication lines
-                  </span>
-                </div>
-                <p className="text-xs text-slate-300 mt-1 max-w-2xl font-mono">
-                  Inject disasters onto the grid to measure delivery rates, find unreachable employees, and trigger rescue paths.
-                </p>
-              </div>
-            </div>
-
-            {/* Quick Action Presets */}
-            <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
-              <button
-                onClick={() => handleTriggerSimulation('Residential Outbreak Fire', 28, 34, 11, 'High-temperature residential block fire triggering gas shutdowns in central Cebu.')}
-                className="px-3 py-1.5 bg-gradient-to-r from-orange-950 to-orange-900 hover:from-orange-900 hover:to-orange-800 border border-orange-800 rounded text-xs font-mono font-bold text-orange-100 flex items-center gap-1 cursor-pointer transition active:scale-95 shadow"
-              >
-                🔥 Labangon Fire
-              </button>
-              <button
-                onClick={() => handleTriggerSimulation('Undersea Fault Tectonic Earthquake', 45, 52, 22, 'A shallow offshore earthquake fracturing communication masts and cutting local phone lines.')}
-                className="px-3 py-1.5 bg-gradient-to-r from-rose-950 to-rose-900 hover:from-rose-900 hover:to-rose-800 border border-rose-800 rounded text-xs font-mono font-bold text-rose-100 flex items-center gap-1 cursor-pointer transition active:scale-95 shadow"
-              >
-                🚨 M6.8 Earthquake
-              </button>
-              <button
-                onClick={() => handleTriggerSimulation('Super Typhoon "Odette II"', 58, 38, 35, 'Massive wind wall disrupting coastal cell towers and flooding lowlands.')}
-                className="px-3 py-1.5 bg-gradient-to-r from-cyan-950 to-cyan-900 hover:from-cyan-900 hover:to-cyan-800 border border-cyan-800 rounded text-xs font-mono font-bold text-cyan-100 flex items-center gap-1 cursor-pointer transition active:scale-95 shadow"
-              >
-                🌀 Super Typhoon
-              </button>
-              <button
-                onClick={() => {
-                  const rx = Math.round(20 + Math.random() * 60);
-                  const ry = Math.round(20 + Math.random() * 60);
-                  const rr = Math.round(8 + Math.random() * 12);
-                  handleTriggerSimulation('Surprise Localized Gas Leak', rx, ry, rr, `Unpredicted hazardous gas leakage alert simulated within Cebu grid coordinates.`);
-                }}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-750 text-white rounded text-xs font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95 shadow"
-              >
-                🎲 Random Leak
-              </button>
-              <button
-                onClick={handleResetDatabase}
-                className="px-3 py-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-800 text-emerald-100 rounded text-xs font-mono font-bold flex items-center gap-1 cursor-pointer transition"
-                title="Restore all employees back to clear normal status"
-              >
-                <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-                <span>Reset Clear</span>
-              </button>
-            </div>
-
-          </div>
-
-          {/* Slider controller */}
-          <div className="max-w-7xl mx-auto border-t border-slate-800 mt-3 pt-3 flex flex-col md:flex-row items-center justify-between gap-4 font-mono text-[11px] text-slate-300">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-orange-500 animate-bounce" />
-              <span>RADIUS BUFFER SETTINGS:</span>
-              <strong className="text-orange-400 capitalize">{activeDisaster.id} epicenter active at Grid [{epicenter.x}%, {epicenter.y}%]</strong>
-            </div>
-
-            <div className="flex items-center gap-4 w-full md:w-auto max-w-md">
-              <span className="whitespace-nowrap font-bold">Threat Range Boundary:</span>
-              <input
-                type="range"
-                min="4"
-                max="35"
-                step="1"
-                value={epicenter.radius}
-                onChange={(e) => handleEpicenterChange({ ...epicenter, radius: Number(e.target.value) })}
-                className="w-full bg-slate-800 rounded-lg appearance-none h-2 cursor-pointer accent-orange-500"
-              />
-              <span className="bg-orange-950/85 border border-orange-850 px-2.5 py-0.5 rounded text-orange-400 font-extrabold shrink-0">
-                {epicenter.radius} Grid Units (~{(epicenter.radius * 241 / 1000).toFixed(2)} km)
-              </span>
-            </div>
-            
-            <div className="hidden lg:block text-slate-400">
-              ⚡ Status: <span className="text-rose-400 font-bold">{affectedStaff} inside range</span> ({safeStaffCount} safe, {pendingCount} sent, {offlineDangerCount} disconnected)
-            </div>
-          </div>
-        </section>
-      )}
 
       {/* Main Corporate Workspace */}
       <main className="flex-1 max-w-[1550px] w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
@@ -756,16 +612,95 @@ export default function App() {
           </div>
         </section>
 
-        {/* Center Column: Interactive Proportional Bubble Map on Leaflet */}
         <section className="lg:col-span-6 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col h-full min-h-[500px]">
           
-          <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between font-mono text-xs text-slate-600 shrink-0">
-            <span className="font-extrabold uppercase text-slate-800 flex items-center gap-1.5">
+          {/* Map column header: title left, crisis drill controls right */}
+          <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0 flex-wrap">
+            {/* Left: live indicator + title */}
+            <span className="font-extrabold uppercase text-slate-800 text-xs flex items-center gap-1.5 font-mono shrink-0">
               <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
-              {mapView === 'island' ? 'Cebu Island Province - Wide Density' : 'Metro Cebu Business Hub Cluster'}
+              {selectedIslandGroup
+                ? `${selectedIslandGroup} — Workforce Density`
+                : selectedCity
+                ? `${selectedCity} — Local View`
+                : 'Philippines — National Overview'}
             </span>
-            <div className="text-[10px] text-slate-500 font-normal">
-              Hover bubbles for headcount • Click row to fly bounds
+
+            {/* Right: Crisis Drill inline controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Toggle button */}
+              <button
+                onClick={() => setSimulationActive(!simulationActive)}
+                className={`px-3 py-1.5 rounded-md text-[10px] font-extrabold transition-all duration-150 flex items-center gap-1.5 border cursor-pointer shrink-0 ${
+                  simulationActive
+                    ? 'bg-rose-600 border-rose-700 text-white shadow animate-pulse'
+                    : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+                title="Toggle localized emergency drills & mobile transmission failure simulations"
+              >
+                <Flame className={`w-3 h-3 shrink-0 ${simulationActive ? 'text-white' : 'text-slate-400'}`} />
+                <span>Crisis Drill: {simulationActive ? 'ON' : 'OFF'}</span>
+              </button>
+
+              {/* Scenario presets — only visible when simulation is ON */}
+              {simulationActive && (
+                <>
+                  <button
+                    onClick={() => handleTriggerSimulation('Residential Outbreak Fire', 28, 34, 11, 'High-temperature residential block fire triggering gas shutdowns.')}
+                    className="px-2.5 py-1 bg-gradient-to-r from-orange-950 to-orange-900 hover:from-orange-900 hover:to-orange-800 border border-orange-800 rounded text-[10px] font-mono font-bold text-orange-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
+                  >
+                    🔥 Fire
+                  </button>
+                  <button
+                    onClick={() => handleTriggerSimulation('Undersea Fault Tectonic Earthquake', 45, 52, 22, 'A shallow offshore earthquake fracturing communication masts.')}
+                    className="px-2.5 py-1 bg-gradient-to-r from-rose-950 to-rose-900 hover:from-rose-900 hover:to-rose-800 border border-rose-800 rounded text-[10px] font-mono font-bold text-rose-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
+                  >
+                    🚨 Earthquake
+                  </button>
+                  <button
+                    onClick={() => handleTriggerSimulation('Super Typhoon "Odette II"', 58, 38, 35, 'Massive wind wall disrupting coastal cell towers and flooding lowlands.')}
+                    className="px-2.5 py-1 bg-gradient-to-r from-cyan-950 to-cyan-900 hover:from-cyan-900 hover:to-cyan-800 border border-cyan-800 rounded text-[10px] font-mono font-bold text-cyan-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
+                  >
+                    🌀 Typhoon
+                  </button>
+                  <button
+                    onClick={() => {
+                      const rx = Math.round(20 + Math.random() * 60);
+                      const ry = Math.round(20 + Math.random() * 60);
+                      const rr = Math.round(8 + Math.random() * 12);
+                      handleTriggerSimulation('Surprise Localized Gas Leak', rx, ry, rr, 'Unpredicted hazardous gas leakage alert simulated on the grid.');
+                    }}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
+                  >
+                    🎲 Random
+                  </button>
+
+                  {/* Radius slider */}
+                  <div className="flex items-center gap-2 font-mono text-[10px] text-slate-600 bg-slate-100 border border-slate-200 rounded px-2.5 py-1">
+                    <Activity className="w-3 h-3 text-orange-500 shrink-0" />
+                    <span className="text-slate-500 font-bold whitespace-nowrap">Radius:</span>
+                    <input
+                      type="range"
+                      min="4"
+                      max="35"
+                      step="1"
+                      value={epicenter.radius}
+                      onChange={(e) => handleEpicenterChange({ ...epicenter, radius: Number(e.target.value) })}
+                      className="w-20 accent-orange-500 cursor-pointer h-2"
+                    />
+                    <span className="text-orange-600 font-black whitespace-nowrap">{epicenter.radius}u</span>
+                  </div>
+
+                  <button
+                    onClick={handleResetDatabase}
+                    className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 border border-emerald-600 text-white rounded text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
+                    title="Reset all employee statuses"
+                  >
+                    <RefreshCw className="w-3 h-3 shrink-0" />
+                    <span>Reset</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
