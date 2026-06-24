@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface StatusTrackerProps {
   employees: Employee[];
-  epicenter: { x: number; y: number; radius: number };
+  epicenter: { lat: number; lng: number; radiusKm: number };
   onSelectEmployee: (emp: Employee | null) => void;
   selectedEmployee: Employee | null;
   onSimulateReply: (employeeId: string, forcedStatus?: SafetyStatus) => void;
@@ -81,16 +81,21 @@ export default function StatusTracker({
     return `${userName}@innodata.com`;
   };
 
-  // Compute affected employees (inside conflagration radius)
+  // Compute affected employees using real GPS Haversine distance (km)
   const getDistance = (emp: Employee) => {
-    const dx = emp.lng - epicenter.x;
-    const dy = emp.lat - epicenter.y;
-    return Math.sqrt(dx * dx + dy * dy);
+    const R = 6371;
+    const lat1 = epicenter.lat, lng1 = epicenter.lng;
+    const lat2 = emp.gpsLat ?? emp.lat;
+    const lng2 = emp.gpsLng ?? emp.lng;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
   const affectedEmployees = employees.filter((emp) => {
-    const dist = getDistance(emp);
-    return dist <= epicenter.radius;
+    return getDistance(emp) <= epicenter.radiusKm;
   });
 
   // Filter lists based on search and severity clicks
@@ -628,7 +633,7 @@ export default function StatusTracker({
             <div className="flex-1 overflow-y-auto space-y-2.5 max-h-[380px] pr-1">
               {filteredAll.map((emp) => {
                 const isSelected = selectedEmployee?.id === emp.id;
-                const isAffected = getDistance(emp) <= epicenter.radius;
+                const isAffected = getDistance(emp) <= epicenter.radiusKm;
 
                 return (
                   <div

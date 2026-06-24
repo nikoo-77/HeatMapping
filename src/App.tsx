@@ -16,14 +16,24 @@ export default function App() {
   // State to filter employees by a selected city from the left table
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
 
+  // Haversine GPS distance in kilometers
+  const haversineKm = useCallback((lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, []);
+
   // State to filter by island group (null = all)
   const [selectedIslandGroup, setSelectedIslandGroup] = useState<'Luzon' | 'Visayas' | 'Mindanao' | null>(null);
 
   // Toggle for Incident & Emergency Simulation Deck
   const [simulationActive, setSimulationActive] = useState<boolean>(false);
 
-  // Active Disaster Location Grid coordinates
-  const [epicenter, setEpicenter] = useState({ x: 28, y: 34, radius: 11 });
+  // Active Disaster Location — stored as real GPS coordinates + radius in km
+  const [epicenter, setEpicenter] = useState({ lat: 10.3311, lng: 123.9053, radiusKm: 5 });
   const [activeDisaster, setActiveDisaster] = useState<DisasterConfig>({
     id: 'fire',
     name: 'Dense Residential Block Fire',
@@ -32,10 +42,10 @@ export default function App() {
     color: 'orange',
     colorClass: 'text-orange-700 bg-orange-50 border-orange-200',
     hexColor: '#f97316',
-    defaultX: 28,
-    defaultY: 34,
-    defaultRadius: 11,
-    locationName: 'Cebu Commercial High-density Block',
+    defaultX: 10.3311,
+    defaultY: 123.9053,
+    defaultRadius: 5,
+    locationName: 'Cebu IT Park Area',
     description: 'An intense, rapid, localized residential conflagration causing dangerous thermal plumes, thick carbon fumes, and utility wire power shutdowns.',
     greenTemplates: [
       'Thick black smoke clouds. Evacuated sector safely.',
@@ -97,24 +107,20 @@ export default function App() {
     ]);
   }, []);
 
-  // Compute grid formula distance to disaster conflagration epicenter
+  // Compute GPS Haversine distance (km) from epicenter to employee home
   const getDistance = useCallback((emp: Employee) => {
-    const dx = emp.lng - epicenter.x;
-    const dy = emp.lat - epicenter.y;
-    return Math.sqrt(dx * dx + dy * dy);
-  }, [epicenter]);
+    const empLat = emp.gpsLat ?? emp.lat;
+    const empLng = emp.gpsLng ?? emp.lng;
+    return haversineKm(epicenter.lat, epicenter.lng, empLat, empLng);
+  }, [epicenter, haversineKm]);
 
   // Interactive radius count of employees inside concentric circles (from Metro hub)
   const countInGpsRadius = useCallback((centerLat: number, centerLng: number, radiusKm: number) => {
     return employees.filter(emp => {
       if (!emp.gpsLat || !emp.gpsLng) return false;
-      const dx = emp.gpsLng - centerLng;
-      const dy = emp.gpsLat - centerLat;
-      const distanceDeg = Math.sqrt(dx * dx + dy * dy);
-      const distanceKm = distanceDeg * 111.32; // ~111.32 km per degree
-      return distanceKm <= radiusKm;
+      return haversineKm(centerLat, centerLng, emp.gpsLat, emp.gpsLng) <= radiusKm;
     }).length;
-  }, [employees]);
+  }, [employees, haversineKm]);
 
   // Fixed values shown in Metro Cebu Image 2 for pristine alignment
   const fteInside5km = useMemo(() => {
@@ -130,23 +136,24 @@ export default function App() {
     return diff > 0 ? diff : 94; // Fallback to 94 exactly
   }, [countInGpsRadius]);
 
-  // Handle epicenter change manually / click
-  const handleEpicenterChange = (newEpic: { x: number; y: number; radius: number }) => {
+  // Handle epicenter change from map drag or radius slider
+  const handleEpicenterChange = (newEpic: { lat: number; lng: number; radiusKm: number }) => {
     setEpicenter(newEpic);
-    
-    // Auto-detect newly affected residents in grid
+
+    // Auto-detect newly affected residents using GPS distance
     const newAffected: string[] = [];
     employees.forEach(emp => {
-      const dist = Math.sqrt((emp.lng - newEpic.x) ** 2 + (emp.lat - newEpic.y) ** 2);
-      if (dist <= newEpic.radius) {
+      const empLat = emp.gpsLat ?? emp.lat;
+      const empLng = emp.gpsLng ?? emp.lng;
+      if (haversineKm(newEpic.lat, newEpic.lng, empLat, empLng) <= newEpic.radiusKm) {
         newAffected.push(emp.name);
       }
     });
 
     const categoryText = activeDisaster.name.includes('Fire') ? 'Fire' : activeDisaster.name.includes('Flood') ? 'Flood' : 'Incident';
-    pushLog(`${categoryText} coordinate epicenter moved to [Y: ${newEpic.y}%, X: ${newEpic.x}%]. Radius adjusted to ${newEpic.radius} range units.`, 'warn');
+    pushLog(`${categoryText} epicenter moved to [${newEpic.lat.toFixed(4)}°N, ${newEpic.lng.toFixed(4)}°E]. Radius: ${newEpic.radiusKm} km.`, 'warn');
     if (newAffected.length > 0) {
-      pushLog(`Active sensor scan: ${newAffected.length} employees home grid plots are inside danger perimeter.`, 'err');
+      pushLog(`Active sensor scan: ${newAffected.length} employees are inside the ${newEpic.radiusKm} km danger perimeter.`, 'err');
     }
   };
 
@@ -178,7 +185,7 @@ export default function App() {
     setEmployees((prev) =>
       prev.map((emp) => {
         const dist = getDistance(emp);
-        if (dist <= epicenter.radius) {
+        if (dist <= epicenter.radiusKm) {
           triggeredCount++;
           const isFailedDelivery = emp.carrier === 'DITO';
           return {
@@ -307,7 +314,7 @@ export default function App() {
     );
   };
 
-  const handleTriggerSimulation = (name: string, x: number, y: number, radius: number, desc: string) => {
+  const handleTriggerSimulation = (name: string, lat: number, lng: number, radiusKm: number, desc: string) => {
     let disasterId: 'fire' | 'earthquake' | 'typhoon' = 'fire';
     let subName = 'Barangay Block Outbreak';
     let icon = 'fire' as any;
@@ -341,25 +348,25 @@ export default function App() {
       color,
       colorClass,
       hexColor,
-      defaultX: x,
-      defaultY: y,
-      defaultRadius: radius,
+      defaultX: lat,
+      defaultY: lng,
+      defaultRadius: radiusKm,
       locationName: name + ' Risk Outpost',
       description: desc,
       greenTemplates,
       replyTemplates
     });
 
-    setEpicenter({ x, y, radius });
+    setEpicenter({ lat, lng, radiusKm });
     setSelectedEmployee(null);
 
-     // Apply immediate impact statuses to the generated 1,107 database!
+     // Apply immediate impact statuses using accurate GPS Haversine distance
      setEmployees((prev) =>
        prev.map((emp) => {
-         const dx = emp.lng - x;
-         const dy = emp.lat - y;
-         const dist = Math.sqrt(dx * dx + dy * dy);
-         if (dist <= radius) {
+         const empLat = emp.gpsLat ?? emp.lat;
+         const empLng = emp.gpsLng ?? emp.lng;
+         const dist = haversineKm(lat, lng, empLat, empLng);
+         if (dist <= radiusKm) {
            return {
              ...emp,
              status: 'Yellow' as SafetyStatus,
@@ -381,7 +388,7 @@ export default function App() {
        })
      );
 
-    pushLog(`🚨 SIMULATION ACTIVE: "${name}"`, 'err');
+    pushLog(`🚨 SIMULATION ACTIVE: "${name}" @ [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E] — Radius: ${radiusKm} km`, 'err');
     pushLog(`Description: ${desc}`, 'warn');
   };
 
@@ -394,10 +401,10 @@ export default function App() {
   }, [employees, selectedEmployee]);
 
   // Counters
-  const affectedStaff = employees.filter(emp => getDistance(emp) <= epicenter.radius).length;
-  const safeStaffCount = employees.filter(emp => getDistance(emp) <= epicenter.radius && emp.status === 'Green').length;
-  const pendingCount = employees.filter(emp => getDistance(emp) <= epicenter.radius && emp.status === 'Yellow').length;
-  const offlineDangerCount = employees.filter(emp => getDistance(emp) <= epicenter.radius && emp.status === 'Red').length;
+  const affectedStaff = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm).length;
+  const safeStaffCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Green').length;
+  const pendingCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Yellow').length;
+  const offlineDangerCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Red').length;
 
   return (
     <div className="bg-[#f8fafc] text-slate-900 min-h-screen flex flex-col font-sans transition-colors duration-250">
@@ -646,49 +653,56 @@ export default function App() {
               {simulationActive && (
                 <>
                   <button
-                    onClick={() => handleTriggerSimulation('Residential Outbreak Fire', 28, 34, 11, 'High-temperature residential block fire triggering gas shutdowns.')}
+                    onClick={() => handleTriggerSimulation('Residential Outbreak Fire', 10.3311, 123.9053, 3, 'High-temperature residential block fire in Cebu IT Park area triggering gas shutdowns.')}
                     className="px-2.5 py-1 bg-gradient-to-r from-orange-950 to-orange-900 hover:from-orange-900 hover:to-orange-800 border border-orange-800 rounded text-[10px] font-mono font-bold text-orange-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
                   >
                     🔥 Fire
                   </button>
                   <button
-                    onClick={() => handleTriggerSimulation('Undersea Fault Tectonic Earthquake', 45, 52, 22, 'A shallow offshore earthquake fracturing communication masts.')}
+                    onClick={() => handleTriggerSimulation('Undersea Fault Tectonic Earthquake', 10.6967, 122.5644, 80, 'A shallow offshore earthquake near Iloilo fracturing communication masts.')}
                     className="px-2.5 py-1 bg-gradient-to-r from-rose-950 to-rose-900 hover:from-rose-900 hover:to-rose-800 border border-rose-800 rounded text-[10px] font-mono font-bold text-rose-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
                   >
                     🚨 Earthquake
                   </button>
                   <button
-                    onClick={() => handleTriggerSimulation('Super Typhoon "Odette II"', 58, 38, 35, 'Massive wind wall disrupting coastal cell towers and flooding lowlands.')}
+                    onClick={() => handleTriggerSimulation('Super Typhoon "Odette II"', 10.3156, 123.9784, 50, 'Massive wind wall near Lapu-Lapu disrupting coastal cell towers and flooding lowlands.')}
                     className="px-2.5 py-1 bg-gradient-to-r from-cyan-950 to-cyan-900 hover:from-cyan-900 hover:to-cyan-800 border border-cyan-800 rounded text-[10px] font-mono font-bold text-cyan-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
                   >
                     🌀 Typhoon
                   </button>
                   <button
                     onClick={() => {
-                      const rx = Math.round(20 + Math.random() * 60);
-                      const ry = Math.round(20 + Math.random() * 60);
-                      const rr = Math.round(8 + Math.random() * 12);
-                      handleTriggerSimulation('Surprise Localized Gas Leak', rx, ry, rr, 'Unpredicted hazardous gas leakage alert simulated on the grid.');
+                      // Pick a random real employee location as the epicenter
+                      const allGpsLocations = [
+                        { lat: 14.5547, lng: 121.0244 }, // Makati
+                        { lat: 10.3311, lng: 123.9053 }, // Cebu IT Park
+                        { lat: 7.0708,  lng: 125.6087 }, // Davao
+                        { lat: 8.4542,  lng: 124.6319 }, // Cagayan de Oro
+                        { lat: 10.6967, lng: 122.5644 }, // Iloilo
+                      ];
+                      const pick = allGpsLocations[Math.floor(Math.random() * allGpsLocations.length)];
+                      const rr = Math.round(5 + Math.random() * 30);
+                      handleTriggerSimulation('Surprise Localized Gas Leak', pick.lat, pick.lng, rr, 'Unpredicted hazardous gas leakage alert at a Philippine urban hub.');
                     }}
                     className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
                   >
                     🎲 Random
                   </button>
 
-                  {/* Radius slider */}
+                  {/* Radius slider — now in real kilometers */}
                   <div className="flex items-center gap-2 font-mono text-[10px] text-slate-600 bg-slate-100 border border-slate-200 rounded px-2.5 py-1">
                     <Activity className="w-3 h-3 text-orange-500 shrink-0" />
                     <span className="text-slate-500 font-bold whitespace-nowrap">Radius:</span>
                     <input
                       type="range"
-                      min="4"
-                      max="35"
+                      min="1"
+                      max="200"
                       step="1"
-                      value={epicenter.radius}
-                      onChange={(e) => handleEpicenterChange({ ...epicenter, radius: Number(e.target.value) })}
+                      value={epicenter.radiusKm}
+                      onChange={(e) => handleEpicenterChange({ ...epicenter, radiusKm: Number(e.target.value) })}
                       className="w-20 accent-orange-500 cursor-pointer h-2"
                     />
-                    <span className="text-orange-600 font-black whitespace-nowrap">{epicenter.radius}u</span>
+                    <span className="text-orange-600 font-black whitespace-nowrap">{epicenter.radiusKm} km</span>
                   </div>
 
                   <button
