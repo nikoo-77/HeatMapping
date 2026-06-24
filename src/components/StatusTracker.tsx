@@ -48,6 +48,32 @@ export default function StatusTracker({
   const [newEmpAddress, setNewEmpAddress] = useState('');
   const [newEmpX, setNewEmpX] = useState(38);
   const [newEmpY, setNewEmpY] = useState(42);
+  
+  // Geographic conversion bounds (kept in sync with InteractiveMap constants)
+  const LAT_MIN = 10.245;
+  const LAT_MAX = 10.355;
+  const LNG_MIN = 123.82;
+  const LNG_MAX = 123.99;
+
+  // Helper converters between grid (0-100) and GPS
+  const gridToGps = (gridX: number, gridY: number) => {
+    const lat = LAT_MAX - (gridY / 100) * (LAT_MAX - LAT_MIN);
+    const lng = LNG_MIN + (gridX / 100) * (LNG_MAX - LNG_MIN);
+    return { lat, lng };
+  };
+
+  const gpsToGrid = (lat: number, lng: number) => {
+    const customLat = ((LAT_MAX - lat) / (LAT_MAX - LAT_MIN)) * 100;
+    const customLng = ((lng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+    return {
+      x: Math.max(0, Math.min(100, parseFloat(customLng.toFixed(1)))),
+      y: Math.max(0, Math.min(100, parseFloat(customLat.toFixed(1))))
+    };
+  };
+
+  // Store GPS inputs (text/number) and keep grid coords synced
+  const [newEmpGpsLat, setNewEmpGpsLat] = useState(() => gridToGps(38, 42).lat);
+  const [newEmpGpsLng, setNewEmpGpsLng] = useState(() => gridToGps(38, 42).lng);
 
   const toggleSimulation = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -146,8 +172,8 @@ export default function StatusTracker({
       // Map back coordinates cleanly
       lat: Number(newEmpY),
       lng: Number(newEmpX),
-      gpsLat: parseFloat((10.355 - (Number(newEmpY) / 100) * (10.355 - 10.245)).toFixed(5)),
-      gpsLng: parseFloat((123.82 + (Number(newEmpX) / 100) * (123.99 - 123.82)).toFixed(5)),
+      gpsLat: Number(newEmpGpsLat),
+      gpsLng: Number(newEmpGpsLng),
       carrier: 'Globe',
       normalSignalStrength: -75,
       battery: Math.round(50 + Math.random() * 50),
@@ -743,31 +769,41 @@ export default function StatusTracker({
 
               <div className="grid grid-cols-2 gap-2.5 bg-white border p-3 rounded-lg shadow-inner">
                 <div className="space-y-1">
-                  <span className="text-[8.5px] font-extrabold text-slate-400 block uppercase font-mono">Grid Lat Y ({newEmpY}%)</span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="range"
-                      min="1"
-                      max="99"
-                      value={newEmpY}
-                      onChange={(e) => setNewEmpY(Number(e.target.value))}
-                      className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#002060]"
-                    />
-                  </div>
+                  <label className="text-[8.5px] font-extrabold text-slate-400 block uppercase font-mono">GPS Latitude (decimal)</label>
+                  <input
+                    type="number"
+                    step="0.00001"
+                    value={newEmpGpsLat}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value || '0');
+                      setNewEmpGpsLat(v);
+                      const g = gpsToGrid(v, newEmpGpsLng);
+                      setNewEmpX(g.x);
+                      setNewEmpY(g.y);
+                    }}
+                    placeholder="e.g. 10.3157"
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-[#002060] font-sans"
+                  />
+                  <div className="text-[10px] text-slate-400 font-mono">Grid Y: <strong className="text-slate-700">{newEmpY}%</strong></div>
                 </div>
 
                 <div className="space-y-1">
-                  <span className="text-[8.5px] font-extrabold text-slate-400 block uppercase font-mono">Grid Lng X ({newEmpX}%)</span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="range"
-                      min="1"
-                      max="99"
-                      value={newEmpX}
-                      onChange={(e) => setNewEmpX(Number(e.target.value))}
-                      className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#002060]"
-                    />
-                  </div>
+                  <label className="text-[8.5px] font-extrabold text-slate-400 block uppercase font-mono">GPS Longitude (decimal)</label>
+                  <input
+                    type="number"
+                    step="0.00001"
+                    value={newEmpGpsLng}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value || '0');
+                      setNewEmpGpsLng(v);
+                      const g = gpsToGrid(newEmpGpsLat, v);
+                      setNewEmpX(g.x);
+                      setNewEmpY(g.y);
+                    }}
+                    placeholder="e.g. 123.8854"
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-[#002060] font-sans"
+                  />
+                  <div className="text-[10px] text-slate-400 font-mono">Grid X: <strong className="text-slate-700">{newEmpX}%</strong></div>
                 </div>
               </div>
 
