@@ -440,23 +440,6 @@ export default function InteractiveMap({
       }
     }
 
-    // Security Headquarters Anchor (Always visible)
-    const hqGps = [10.3157, 123.8854];
-    L.marker([hqGps[0], hqGps[1]], {
-      icon: L.divIcon({
-        className: '',
-        html: `
-          <div class="relative flex flex-col items-center justify-center" style="width: 38px; height: 38px; margin-left: -19px; margin-top: -19px;">
-            <div class="w-7 h-7 rounded bg-indigo-950 border border-amber-500 shadow-xl flex items-center justify-center text-xs z-50">
-              🏢
-            </div>
-          </div>
-        `,
-        iconSize: [38, 38],
-        iconAnchor: [19, 19],
-      })
-    }).addTo(layers).bindPopup('<b>Innodata operations-center HQ</b><br/>First-Responder Base.');
-
     // 4. INDIVIDUAL RESIDENT PINS – only show filtered subset
     visibleEmployees.forEach((emp) => {
       // Individual GPS coordinates mapping
