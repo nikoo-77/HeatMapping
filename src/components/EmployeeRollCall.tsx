@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Employee, SafetyStatus } from '../types';
 import { 
   Search, Users, AlertCircle, CheckCircle, HelpCircle, 
-  Send, Mail, AlertTriangle, Shield, Check, Volume2, Landmark, Phone
+  Send, Mail, AlertTriangle, Shield, Check, Volume2, Landmark, Phone, X
 } from 'lucide-react';
 
 interface EmployeeRollCallProps {
@@ -43,6 +43,14 @@ export default function EmployeeRollCall({
       setActiveTab('In zone'); // Auto-focus on affected zone when crisis begins
     }
   }, [simulationActive]);
+
+  // Update search when a new employee is selected from the map
+  useEffect(() => {
+    if (selectedEmployee) {
+      setSearchQuery(selectedEmployee.name);
+      setActiveTab('All');
+    }
+  }, [selectedEmployee]);
 
   // Compute conflagration distance
   const getDistance = (emp: Employee) => {
@@ -263,9 +271,19 @@ export default function EmployeeRollCall({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-[#1e1e1e] border border-zinc-800 rounded-lg pl-8 p-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-650"
+            className="w-full bg-[#1e1e1e] border border-zinc-800 rounded-lg pl-8 p-1.5 pr-10 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-650"
             placeholder="Search name, role, department..."
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200"
+              aria-label="Clear search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* PILLS ROW IN IMAGE: All, In zone, Contacted, Safe, Need help, Unresponsive */}
