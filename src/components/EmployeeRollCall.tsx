@@ -7,7 +7,7 @@ import {
 
 interface EmployeeRollCallProps {
   employees: Employee[];
-  epicenter: { x: number; y: number; radius: number };
+  epicenter: { lat: number; lng: number; radiusKm: number };
   onSelectEmployee: (emp: Employee | null) => void;
   selectedEmployee: Employee | null;
   onReportStatus: (employeeId: string, status: SafetyStatus, isUnresponsive?: boolean) => void;
@@ -52,16 +52,22 @@ export default function EmployeeRollCall({
     }
   }, [selectedEmployee]);
 
-  // Compute conflagration distance
+  // Compute GPS Haversine distance (km) from epicenter to employee home
   const getDistance = (emp: Employee) => {
-    const dx = emp.lng - epicenter.x;
-    const dy = emp.lat - epicenter.y;
-    return Math.sqrt(dx * dx + dy * dy);
+    const R = 6371;
+    const lat1 = epicenter.lat, lng1 = epicenter.lng;
+    const lat2 = emp.gpsLat ?? emp.lat;
+    const lng2 = emp.gpsLng ?? emp.lng;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
   // Employees located in the zone
   const inZoneEmployees = useMemo(() => {
-    return employees.filter((emp) => getDistance(emp) <= epicenter.radius);
+    return employees.filter((emp) => getDistance(emp) <= epicenter.radiusKm);
   }, [employees, epicenter]);
 
   // Counts for high fidelity metrics
@@ -320,7 +326,7 @@ export default function EmployeeRollCall({
         ) : (
           filteredEmployees.map((emp) => {
             const isSelected = selectedEmployee?.id === emp.id;
-            const isInRiskZone = getDistance(emp) <= epicenter.radius;
+            const isInRiskZone = getDistance(emp) <= epicenter.radiusKm;
 
             // Determine badge next to name based on status
             let headerBadgeText = 'Uncontacted';
