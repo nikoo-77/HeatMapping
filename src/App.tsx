@@ -179,6 +179,29 @@ export default function App() {
     );
   };
 
+  const handleSendEmail = (employeeId: string) => {
+    setEmployees((prev) =>
+      prev.map((emp) => {
+        if (emp.id === employeeId) {
+          const isFailedDelivery = emp.carrier === 'DITO';
+          const finalStatus: SafetyStatus = isFailedDelivery ? 'Red' : 'Yellow';
+          const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          pushLog(`EMAIL DISPATCH REGISTERED: HR reached out to ${emp.name} via corporate email. Status: ${finalStatus === 'Red' ? 'TRANSMISSION FAILURE' : 'PENDING REPLY'}`, finalStatus === 'Red' ? 'err' : 'info');
+          return {
+            ...emp,
+            status: finalStatus,
+            contacted: true,
+            emailed: true,
+            unresponsive: false,
+            safetyMessage: undefined,
+            lastEmailSent: stamp,
+          };
+        }
+        return emp;
+      })
+    );
+  };
+
   const handleSendCheckInAllAffected = () => {
     let triggeredCount = 0;
     const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -762,17 +785,18 @@ export default function App() {
         {/* Right Column: Dynamic Insight Panel & Legend matching the layouts */}
         <section className="lg:col-span-3 flex flex-col gap-6 max-h-[750px] overflow-y-auto">
           
-          {/* Employee Roll-Call Panel */}
-          <EmployeeRollCall
-            employees={employees}
-            epicenter={epicenter}
-            onSelectEmployee={setSelectedEmployee}
-            selectedEmployee={selectedEmployee}
-            onReportStatus={handleReportStatus}
-            simulationActive={simulationActive}
-            onSendCheckIn={handleSendCheckIn}
-            onDispatchRescue={handleDispatchRescue}
-          />
+{/* Employee Roll-Call Panel */}
+           <EmployeeRollCall
+             employees={employees}
+             epicenter={epicenter}
+             onSelectEmployee={setSelectedEmployee}
+             selectedEmployee={selectedEmployee}
+             onReportStatus={handleReportStatus}
+             simulationActive={simulationActive}
+             onSendCheckIn={handleSendCheckIn}
+             onSendEmail={handleSendEmail}
+             onDispatchRescue={handleDispatchRescue}
+           />
 
           {/* Clean Legend Graphic Panel */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-4">
@@ -891,22 +915,23 @@ export default function App() {
             
             {/* Left side within directory: Interactive employee lists */}
             <div className="lg:col-span-8 flex flex-col gap-3">
-              <StatusTracker
-                employees={employees.filter(emp =>
-                  (!selectedCity || emp.address?.includes(selectedCity)) &&
-                  (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup)
-                )}
-                epicenter={epicenter}
-                onSelectEmployee={setSelectedEmployee}
-                selectedEmployee={selectedEmployee}
-                onSimulateReply={handleSimulateReply}
-                onSendCheckIn={handleSendCheckIn}
-                onSendCheckInAllAffected={handleSendCheckInAllAffected}
-                onAddEmployee={handleAddEmployee}
-                onResetDatabase={handleResetDatabase}
-                onDispatchRescue={handleDispatchRescue}
-                activeDisaster={activeDisaster}
-              />
+<StatusTracker
+                 employees={employees.filter(emp =>
+                   (!selectedCity || emp.address?.includes(selectedCity)) &&
+                   (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup)
+                 )}
+                 epicenter={epicenter}
+                 onSelectEmployee={setSelectedEmployee}
+                 selectedEmployee={selectedEmployee}
+                 onSimulateReply={handleSimulateReply}
+                 onSendCheckIn={handleSendCheckIn}
+                 onSendEmail={handleSendEmail}
+                 onSendCheckInAllAffected={handleSendCheckInAllAffected}
+                 onAddEmployee={handleAddEmployee}
+                 onResetDatabase={handleResetDatabase}
+                 onDispatchRescue={handleDispatchRescue}
+                 activeDisaster={activeDisaster}
+               />
             </div>
 
             {/* Right side within directory: Systems logs channel */}
