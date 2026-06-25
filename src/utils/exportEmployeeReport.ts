@@ -195,3 +195,106 @@ export function exportEmployeeReportToExcel(options: ExportReportOptions): numbe
 
   return affectedCount;
 }
+
+function buildEmployeeListRows(
+  employees: Employee[],
+  epicenter: { lat: number; lng: number; radiusKm: number },
+  activeDisaster: DisasterConfig
+): string[][] {
+  const header = [
+    'Employee Name',
+    'Team',
+    'Role',
+    'Department',
+    'Address',
+    'Affected by Calamity',
+    'Alert Sent',
+    'Responded to Alert',
+    'Employee Safe',
+    'Type of Damage Experienced',
+    'Help / Aid Received',
+    'Distance to Epicenter (km)',
+    'Carrier',
+    'Status',
+  ];
+
+  const rows = employees.map((emp) => {
+    const distance = haversineKm(
+      epicenter.lat,
+      epicenter.lng,
+      emp.gpsLat ?? emp.lat,
+      emp.gpsLng ?? emp.lng
+    );
+
+    return [
+      emp.name,
+      emp.team ?? 'Unassigned',
+      emp.role,
+      emp.department,
+      emp.address ?? '',
+      'Yes',
+      getAlertSent(emp),
+      getRespondedToAlert(emp),
+      getEmployeeSafe(emp),
+      getDamageExperienced(emp, activeDisaster, true),
+      getAidReceived(emp),
+      distance.toFixed(2),
+      emp.carrier,
+      emp.status,
+    ];
+  });
+
+  return [header, ...rows];
+}
+
+export interface CalamityReportExportMeta {
+  incidentName: string;
+  type: string;
+  timestamp: string;
+  locationLabel: string;
+  lat: number;
+  lng: number;
+  radiusKm: number;
+}
+
+export function exportCalamityReportEmployees(
+  employees: Employee[],
+  report: CalamityReportExportMeta,
+  activeDisaster: DisasterConfig
+): number {
+  const epicenter = { lat: report.lat, lng: report.lng, radiusKm: report.radiusKm };
+  const dataRows = buildEmployeeListRows(employees, epicenter, activeDisaster);
+  const exportedCount = dataRows.length - 1;
+
+  const metaRows: string[][] = [
+    ['Calamity Employee Report'],
+    ['Generated', new Date().toLocaleString()],
+    ['Incident', report.incidentName],
+    ['Disaster Type', report.type],
+    ['Filed', report.timestamp],
+    ['Location', report.locationLabel || '—'],
+    ['Epicenter', `${report.lat.toFixed(4)}°N, ${report.lng.toFixed(4)}°E`],
+    ['Hazard Radius (km)', String(report.radiusKm)],
+    ['Affected Employees Exported', String(exportedCount)],
+    [],
+  ];
+
+  const allRows = [...metaRows, ...dataRows];
+  const csvContent =
+    '\uFEFF' +
+    allRows.map((row) => row.map(escapeCsv).join(',')).join('\r\n');
+
+  const safeName = report.incidentName.replace(/[^a-zA-Z0-9]+/g, '-').slice(0, 40);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const filename = `calamity-report-${safeName}-${dateStamp}.csv`;
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+
+  return exportedCount;
+}

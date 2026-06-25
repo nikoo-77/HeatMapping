@@ -2,9 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees } from './data_islands';
 import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam } from './types';
 import InteractiveMap from './components/InteractiveMap';
-import StatusTracker from './components/StatusTracker';
 import EmployeeRollCall from './components/EmployeeRollCall';
-import { exportEmployeeReportToExcel } from './utils/exportEmployeeReport';
+import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw, 
   AlertOctagon, Sparkles, Map, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
@@ -812,21 +811,15 @@ export default function App() {
   const pendingCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Yellow').length;
   const offlineDangerCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Red').length;
 
-  const handleExportEmployeeReport = () => {
-    const count = exportEmployeeReportToExcel({
-      employees: visibleEmployees,
-      epicenter,
-      activeDisaster,
-      filterByTeam,
-      viewerRole,
-      selectedIslandGroup,
-      selectedCity,
-    });
-    const teamScope = filterByTeam ? `${viewerRole} team` : 'all teams';
+  const handleExportCalamityReport = (
+    report: typeof calamityReports[number],
+    affectedEmps: Employee[]
+  ) => {
+    const count = exportCalamityReportEmployees(affectedEmps, report, activeDisaster);
     pushLog(
       count > 0
-        ? `Exported calamity report: ${count} affected employee(s) (${teamScope}).`
-        : `Export completed — no affected employees found for current filters (${teamScope}).`,
+        ? `Exported calamity report "${report.incidentName}": ${count} affected employee(s).`
+        : `Export completed — no affected employees in report "${report.incidentName}".`,
       count > 0 ? 'success' : 'warn'
     );
   };
@@ -1247,45 +1240,32 @@ export default function App() {
              onDispatchRescue={handleDispatchRescue}
            />
 
-          {/* Clean Legend Graphic Panel */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-4">
-            <h3 className="text-slate-850 font-extrabold text-xs uppercase tracking-widest border-b border-slate-200 pb-2 flex items-center justify-between">
-              <span>LEGEND INDICATORS</span>
-              <span className="text-[9px] text-slate-500 font-mono">MAP BUBBLES</span>
-            </h3>
+          {/* Live Operations Logs feed */}
+          <div className="bg-slate-950/95 border border-slate-850 rounded-xl p-4 flex flex-col font-mono text-white shadow-inner min-h-[200px] max-h-[320px] overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2 font-sans text-xs uppercase font-extrabold tracking-wider">
+              <span className="flex items-center gap-1 text-orange-400">
+                <Activity className="w-4 h-4 text-orange-500 animate-pulse" />
+                Live Operations Logs feed
+              </span>
+              <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[10px] text-slate-400">
+                {logs.length} EVENTS
+              </span>
+            </div>
 
-            <div className="flex flex-col gap-4">
-              
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-full bg-red-800/15 border-2 border-red-800/90 flex items-center justify-center shrink-0">
-                  <div className="w-3 h-3 rounded-full bg-red-800"></div>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-extrabold text-slate-900">100 Employees up</span>
-                  <span className="text-[10px] text-slate-500 font-mono">E.g. Cebu, Mandaue, Lapu-Lapu</span>
-                </div>
-              </div>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+              {logs.map((log) => {
+                let logColor = 'text-slate-300';
+                if (log.type === 'warn') logColor = 'text-amber-450';
+                if (log.type === 'success') logColor = 'text-emerald-400 font-semibold';
+                if (log.type === 'err') logColor = 'text-rose-400 font-extrabold animate-pulse';
 
-              <div className="flex items-center gap-3.5">
-                <div className="w-8 h-8 rounded-full bg-red-800/15 border-2 border-red-800/70 flex items-center justify-center shrink-0">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-700"></div>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-800">50 – 99 Employees</span>
-                  <span className="text-[10px] text-slate-500 font-mono">Secondary suburb hubs</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3.5">
-                <div className="w-6 h-6 rounded-full bg-red-800/15 border-2 border-red-800/50 flex items-center justify-center shrink-0">
-                  <div className="w-1.5 h-1.5 rounded-full bg-red-600"></div>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-semibold text-slate-700">49 Employees below</span>
-                  <span className="text-[10px] text-slate-500 font-mono">Residential outer margins</span>
-                </div>
-              </div>
-
+                return (
+                  <div key={log.id} className="text-[10px] leading-relaxed flex items-start gap-1 p-0.5 border-b border-slate-900/50">
+                    <span className="text-slate-500 select-none font-bold">[{log.time}]</span>
+                    <span className={logColor}>{log.msg}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -1321,113 +1301,6 @@ export default function App() {
         </section>
 
       </main>
-
-      {/* Filtered / Active Employee Details section at the footer area */}
-      <section className="bg-white border-t border-slate-250 p-4 md:p-6 w-full shrink-0">
-        <div className="max-w-[1550px] mx-auto flex flex-col gap-4">
-          
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-3 border-b border-slate-205">
-            <div className="flex items-center gap-3">
-              <div className="bg-[#002060] text-white p-2 rounded-lg flex items-center justify-center shadow-inner">
-                <Users className="w-5 h-5 shrink-0" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-sm md:text-base text-[#002060] uppercase">
-                  {selectedCity
-                    ? `${selectedCity} Personnel Database`
-                    : selectedIslandGroup
-                    ? `${selectedIslandGroup} Island Group Directory`
-                    : 'Consolidated Philippine Personnel Directory'}
-                </h3>
-                <p className="text-xs text-slate-500 font-medium">
-                  Showing {visibleEmployees.length} employees in this selection map profile
-                  {filterByTeam ? ` (${viewerRole} team)` : ''}.
-                </p>
-              </div>
-            </div>
-
-            <div className="text-xs font-mono text-slate-500 flex flex-wrap items-center gap-2">
-              <button
-                onClick={handleExportEmployeeReport}
-                className="px-3 py-1.5 rounded-md text-[10px] font-extrabold transition-all duration-150 flex items-center gap-1.5 border cursor-pointer shrink-0 bg-emerald-600 hover:bg-emerald-500 border-emerald-700 text-white shadow-sm hover:shadow-emerald-400/30 active:scale-95"
-                title="Export affected employee calamity report to Excel (respects team & geographic filters)"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
-                <span>Export to Excel</span>
-              </button>
-              {selectedIslandGroup && (
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                  selectedIslandGroup === 'Luzon' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                  selectedIslandGroup === 'Visayas' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                  'bg-amber-50 text-amber-700 border-amber-200'
-                }`}>{selectedIslandGroup}</span>
-              )}
-              {filterByTeam && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-purple-50 text-purple-700 border-purple-200">
-                  {viewerRole} Team
-                </span>
-              )}
-              Database Sync: <strong className="text-[#002060]">{visibleEmployees.filter(e => e.status === 'Green').length} Safe</strong> • <strong className="text-amber-600">{visibleEmployees.filter(e => e.status === 'Yellow').length} Awaiting Reply</strong> • <span className="text-rose-600 font-bold">{visibleEmployees.filter(e => e.status === 'Red').length} Telecom Muted</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[300px]">
-            
-            {/* Left side within directory: Interactive employee lists */}
-            <div className="lg:col-span-8 flex flex-col gap-3">
-<StatusTracker
-                 employees={visibleEmployees}
-                 viewerRole={viewerRole}
-                 epicenter={epicenter}
-                 onSelectEmployee={setSelectedEmployee}
-                 selectedEmployee={selectedEmployee}
-                 onSimulateReply={handleSimulateReply}
-                 onSendCheckIn={handleSendCheckIn}
-                 onSendEmail={handleSendEmail}
-                 onSendCheckInAllAffected={handleSendCheckInAllAffected}
-                 onAddEmployee={handleAddEmployee}
-                 onResetDatabase={handleResetDatabase}
-                 onDispatchRescue={handleDispatchRescue}
-                 activeDisaster={activeDisaster}
-                 onExportReport={handleExportEmployeeReport}
-               />
-            </div>
-
-            {/* Right side within directory: Systems logs channel */}
-            <div className="lg:col-span-4 flex flex-col gap-3">
-              <div className="bg-slate-950/95 border border-slate-850 rounded-xl p-4 flex flex-col h-full font-mono text-white shadow-inner max-h-[360px] overflow-hidden">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2 font-sans text-xs uppercase font-extrabold tracking-wider">
-                  <span className="flex items-center gap-1 text-orange-400">
-                    <Activity className="w-4 h-4 text-orange-500 animate-pulse" />
-                    Live Operations Logs feed
-                  </span>
-                  <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[10px] text-slate-400">
-                    {logs.length} EVENTS
-                  </span>
-                </div>
-
-                <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-                  {logs.map((log) => {
-                    let logColor = 'text-slate-300';
-                    if (log.type === 'warn') logColor = 'text-amber-450';
-                    if (log.type === 'success') logColor = 'text-emerald-400 font-semibold';
-                    if (log.type === 'err') logColor = 'text-rose-400 font-extrabold animate-pulse';
-
-                    return (
-                      <div key={log.id} className="text-[10px] leading-relaxed flex items-start gap-1 p-0.5 border-b border-slate-900/50">
-                        <span className="text-slate-500 select-none font-bold">[{log.time}]</span>
-                        <span className={logColor}>{log.msg}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-        </div>
-      </section>
 
       {/* Footer inside dashboard */}
       <footer className="bg-[#002060] border-t border-[#001848] py-4 px-6 text-[11px] font-mono text-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 shadow-inner uppercase font-bold mt-auto">
@@ -1837,6 +1710,19 @@ export default function App() {
                       {/* Expandable employee list */}
                       {isExpanded && affectedEmps.length > 0 && (
                         <div className="border-t border-slate-200">
+                          <div className="px-4 py-2.5 flex items-center justify-between bg-[#f8fafc] border-b border-slate-100">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                              Affected Personnel ({affectedEmps.length})
+                            </span>
+                            <button
+                              onClick={() => handleExportCalamityReport(r, affectedEmps)}
+                              className="px-3 py-1.5 rounded-md text-[10px] font-extrabold transition-all duration-150 flex items-center gap-1.5 border cursor-pointer shrink-0 bg-emerald-600 hover:bg-emerald-500 border-emerald-700 text-white shadow-sm hover:shadow-emerald-400/30 active:scale-95"
+                              title="Export affected employees for this calamity report to Excel"
+                            >
+                              <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                              <span>Export to Excel</span>
+                            </button>
+                          </div>
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="bg-[#f0f4ff] text-[#002060] text-[10px] uppercase tracking-widest">
