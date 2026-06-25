@@ -7,10 +7,29 @@ import EmployeeRollCall from './components/EmployeeRollCall';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw, 
   AlertOctagon, Sparkles, Map, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
-  FileWarning, X, MapPin, Crosshair
+  FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList
 } from 'lucide-react';
 
 export default function App() {
+  // ── Page navigation ─────────────────────────────────────────────────────
+  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'reports'>('dashboard');
+
+  // ── Calamity Report History ──────────────────────────────────────────────
+  const [calamityReports, setCalamityReports] = useState<Array<{
+    id: string;
+    timestamp: string;
+    type: string;
+    incidentName: string;
+    locationLabel: string;
+    lat: number;
+    lng: number;
+    radiusKm: number;
+    affectedCount: number;
+    magnitude?: string;
+    signalLevel?: string;
+    description: string;
+  }>>([]);
+
   // State for Map View mode: 'island' or 'metro'
   const [mapView, setMapView] = useState<'island' | 'metro'>('island');
   
