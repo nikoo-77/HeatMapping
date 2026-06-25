@@ -26,10 +26,14 @@ export default function App() {
     lng: number;
     radiusKm: number;
     affectedCount: number;
+    affectedEmployeeIds: string[];   // IDs captured at time of filing
     magnitude?: string;
     signalLevel?: string;
     description: string;
-  }>>([]);
+  }>>([])
+
+  // Track which report card has its employee list expanded
+  const [expandedReportId, setExpandedReportId] = useState<string | null>(null);;
 
   // State for Map View mode: 'island' or 'metro'
   const [mapView, setMapView] = useState<'island' | 'metro'>('island');
@@ -501,8 +505,34 @@ export default function App() {
       ? description + extraDetails
       : `${incidentName} calamity reported by HR/Management at [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E].${extraDetails}`;
 
+    // Capture which employees are in zone at filing time
+    const affectedEmployeeIds = employees
+      .filter(emp => {
+        const eLat = emp.gpsLat ?? emp.lat;
+        const eLng = emp.gpsLng ?? emp.lng;
+        return haversineKm(lat, lng, eLat, eLng) <= radiusKm;
+      })
+      .map(emp => emp.id);
+
     handleTriggerSimulation(fullName, lat, lng, radiusKm, desc);
     setSimulationActive(true);
+    // Save to reports history
+    const newReport = {
+      id: `${Date.now()}`,
+      timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      type,
+      incidentName: fullName,
+      locationLabel,
+      lat,
+      lng,
+      radiusKm,
+      affectedCount: affectedEmployeeIds.length,
+      affectedEmployeeIds,
+      magnitude: (type === 'Earthquake' && magnitude.trim()) ? magnitude.trim() : undefined,
+      signalLevel: type === 'Typhoon' ? signalLevel : undefined,
+      description: desc,
+    };
+    setCalamityReports(prev => [newReport, ...prev]);
     pushLog(`📋 CALAMITY REPORT FILED: "${fullName}" by HR/Manager. ${calamityAffectedCount} personnel in ${radiusKm} km zone.`, 'err');
     setShowCalamityModal(false);
     setCalamityForm(prev => ({ ...prev, locationPinned: false, description: '', locationLabel: '', hazardName: '', magnitude: '' }));
@@ -793,6 +823,75 @@ export default function App() {
 
       </header>
 
+      {/* ── Body: Sidebar + Page Content ── */}
+      <div className="flex flex-1 min-h-0">
+
+        {/* ── Sidebar Navigation ── */}
+        <nav
+          className="w-[220px] shrink-0 bg-[#002060] flex flex-col sticky top-0 z-40 shadow-xl"
+          style={{ height: 'calc(100vh - 73px)', position: 'sticky', top: 73 }}
+        >
+          <div className="px-5 pt-6 pb-3">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/60">Navigation</span>
+          </div>
+
+          <div className="flex flex-col gap-1 px-3">
+            {([
+              { id: 'dashboard' as const, label: 'Main Dashboard',    Icon: LayoutDashboard },
+              { id: 'directory' as const, label: 'Employee Directory', Icon: BookUser },
+              { id: 'reports'   as const, label: 'Calamity Reports',  Icon: ClipboardList, badge: calamityReports.length },
+            ]).map(({ id, label, Icon, badge }) => (
+              <button
+                key={id}
+                onClick={() => setActivePage(id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all duration-150 cursor-pointer text-left group ${
+                  activePage === id
+                    ? 'bg-white/15 text-white shadow-inner border border-white/10'
+                    : 'text-blue-200/80 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <Icon className={`w-4.5 h-4.5 shrink-0 transition-colors ${ activePage === id ? 'text-white' : 'text-blue-300 group-hover:text-white' }`} />
+                <span className="flex-1 leading-tight">{label}</span>
+                {badge != null && badge > 0 && (
+                  <span className="bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
+                    {badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="mx-5 my-4 border-t border-white/10" />
+
+          {/* Status card */}
+          <div className="px-4">
+            <div className="bg-white/8 border border-white/10 rounded-xl p-3 flex flex-col gap-2">
+              <span className="text-[9px] font-black uppercase tracking-widest text-blue-300/60">System Status</span>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <span className="text-[11px] text-emerald-300 font-bold">Database Live</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${ simulationActive ? 'bg-orange-400 animate-pulse' : 'bg-slate-600' }`} />
+                <span className={`text-[11px] font-bold ${ simulationActive ? 'text-orange-300' : 'text-blue-300/60' }`}>
+                  { simulationActive ? 'Incident Active' : 'No Active Alert' }
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                <span className="text-[10px] text-blue-300/50 font-mono">{employees.length} FTE</span>
+                <span className="text-[10px] text-emerald-400/70 font-mono">
+                  {employees.filter(e => e.status === 'Green').length} safe
+                </span>
+              </div>
+            </div>
+          </div>
+        </nav>
+
+        {/* ── Page Content Area ── */}
+        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+
+        {/* ──────────── DASHBOARD PAGE ──────────── */}
+        {activePage === 'dashboard' && <>
 
       {/* Main Corporate Workspace */}
       <main className="flex-1 max-w-[1550px] w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
@@ -1234,14 +1333,276 @@ export default function App() {
         </div>
       </section>
 
-      {/* Pristine Minimal Security & Info Footer block */}
-      <footer className="bg-[#002060] border-t border-[#001848] py-4 px-6 text-center text-[11px] font-mono text-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 shadow-inner uppercase font-bold mt-auto">
-        <span>WORKORCE GEOGRAPHIC PROFILES PORTAL • SAVILLS & INNODATA JOINT INFRASTRUCTURE MAP</span>
+      {/* Footer inside dashboard */}
+      <footer className="bg-[#002060] border-t border-[#001848] py-4 px-6 text-[11px] font-mono text-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 shadow-inner uppercase font-bold mt-auto">
+        <span>WORKFORCE GEOGRAPHIC PROFILES PORTAL • SAVILLS &amp; INNODATA JOINT INFRASTRUCTURE MAP</span>
         <span className="flex items-center gap-1.5 tracking-wider text-slate-300">
           <Activity className="w-4 h-4 text-amber-400 animate-pulse" />
           <span>DATABASE METRICS: OPERATIONAL</span>
         </span>
       </footer>
+
+      {/* ──────────── END DASHBOARD PAGE ──────────── */}
+      </>
+      }
+
+      {/* ──────────── EMPLOYEE DIRECTORY PAGE ──────────── */}
+      {activePage === 'directory' && (
+        <div className="flex-1 p-6">
+          <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
+
+            {/* Page header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
+                  <BookUser className="w-5 h-5" /> Employee Directory
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Full roster of {employees.length} personnel across all Philippine island groups.
+                </p>
+              </div>
+              <span className="text-xs font-mono text-slate-400">
+                {employees.filter(e => e.status === 'Green').length} safe · {employees.filter(e => e.status === 'Yellow').length} awaiting · {employees.filter(e => e.status === 'Red').length} muted
+              </span>
+            </div>
+
+            {/* Reuse StatusTracker full-width */}
+            <StatusTracker
+              employees={employees}
+              epicenter={epicenter}
+              onSelectEmployee={setSelectedEmployee}
+              selectedEmployee={selectedEmployee}
+              onSimulateReply={handleSimulateReply}
+              onSendCheckIn={handleSendCheckIn}
+              onSendEmail={handleSendEmail}
+              onSendCheckInAllAffected={handleSendCheckInAllAffected}
+              onAddEmployee={handleAddEmployee}
+              onResetDatabase={handleResetDatabase}
+              onDispatchRescue={handleDispatchRescue}
+              activeDisaster={activeDisaster}
+            />
+
+          </div>
+        </div>
+      )}
+
+      {/* ──────────── CALAMITY REPORTS PAGE ──────────── */}
+      {activePage === 'reports' && (
+        <div className="flex-1 p-6">
+          <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
+
+            {/* Page header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
+                  <ClipboardList className="w-5 h-5" /> Calamity Reports
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  History of all manually filed incident reports by HR / Management.
+                </p>
+              </div>
+              {calamityReports.length > 0 && (
+                <span className="bg-orange-100 text-orange-700 border border-orange-200 text-xs font-black px-3 py-1 rounded-full">
+                  {calamityReports.length} report{calamityReports.length !== 1 ? 's' : ''} filed
+                </span>
+              )}
+            </div>
+
+            {/* Empty state */}
+            {calamityReports.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-4 py-24 bg-white border border-dashed border-slate-200 rounded-2xl text-slate-400">
+                <ClipboardList className="w-12 h-12 text-slate-200" />
+                <p className="font-bold text-sm">No calamity reports filed yet.</p>
+                <p className="text-xs">Use the <strong className="text-[#002060]">Calamity Report</strong> button to file an incident.</p>
+                <button
+                  onClick={() => { setActivePage('dashboard'); setShowCalamityModal(true); }}
+                  className="mt-2 bg-[#002060] hover:bg-[#003399] text-white text-xs font-black px-5 py-2 rounded-lg flex items-center gap-2 cursor-pointer transition active:scale-95"
+                >
+                  <FileWarning className="w-3.5 h-3.5" /> File a Report
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-5">
+                {calamityReports.map(r => {
+                  const typeEmoji: Record<string, string> = { Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' };
+                  const typeBg: Record<string, string> = {
+                    Fire: 'bg-orange-50 border-orange-200 text-orange-800',
+                    Earthquake: 'bg-rose-50 border-rose-200 text-rose-800',
+                    Typhoon: 'bg-cyan-50 border-cyan-200 text-cyan-800',
+                    Other: 'bg-amber-50 border-amber-200 text-amber-800',
+                  };
+
+                  // Live-lookup affected employees from current state
+                  const affectedEmps = employees.filter(e => r.affectedEmployeeIds.includes(e.id));
+                  const safeCount    = affectedEmps.filter(e => e.status === 'Green').length;
+                  const awaitCount   = affectedEmps.filter(e => e.status === 'Yellow').length;
+                  const mutedCount   = affectedEmps.filter(e => e.status === 'Red').length;
+                  const isExpanded   = expandedReportId === r.id;
+
+                  return (
+                    <div key={r.id} className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+
+                      {/* Card header */}
+                      <div className="bg-gradient-to-r from-[#002060] to-[#0055cc] px-5 py-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">{typeEmoji[r.type] ?? '⚠️'}</span>
+                          <div>
+                            <p className="text-white font-black text-sm leading-tight">{r.incidentName}</p>
+                            <p className="text-blue-200 text-[11px] font-mono">{r.timestamp}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border uppercase ${ typeBg[r.type] ?? typeBg['Other'] }`}>
+                            {r.type}
+                          </span>
+                          {r.affectedCount > 0 && (
+                            <span className="bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full">
+                              {r.affectedCount} in zone
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Meta row */}
+                      <div className="px-5 py-3 grid grid-cols-2 md:grid-cols-4 gap-4 border-b border-slate-100">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Location</span>
+                          <span className="text-xs font-semibold text-slate-700">{r.locationLabel || '—'}</span>
+                          <span className="text-[10px] font-mono text-slate-400">{r.lat.toFixed(4)}°N, {r.lng.toFixed(4)}°E</span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Radius</span>
+                          <span className="text-xs font-semibold text-slate-700">{r.radiusKm.toFixed(2)} km</span>
+                        </div>
+                        {r.magnitude && (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Magnitude</span>
+                            <span className="text-xs font-semibold text-rose-700">{r.magnitude}</span>
+                          </div>
+                        )}
+                        {r.signalLevel && (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Signal Level</span>
+                            <span className="text-xs font-semibold text-cyan-700">{r.signalLevel}</span>
+                          </div>
+                        )}
+                        <div className="col-span-2 md:col-span-4 flex flex-col gap-0.5">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Description</span>
+                          <span className="text-xs text-slate-600 leading-relaxed">{r.description}</span>
+                        </div>
+                      </div>
+
+                      {/* Status summary + toggle */}
+                      <div className="px-5 py-3 flex items-center justify-between bg-slate-50">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Personnel Status:</span>
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                            ✔ {safeCount} Safe
+                          </span>
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                            ⧖ {awaitCount} Awaiting
+                          </span>
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+                            ✕ {mutedCount} No Signal
+                          </span>
+                        </div>
+                        {affectedEmps.length > 0 && (
+                          <button
+                            onClick={() => setExpandedReportId(isExpanded ? null : r.id)}
+                            className="flex items-center gap-1.5 text-[11px] font-black text-[#002060] hover:text-[#003399] bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition cursor-pointer"
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                            {isExpanded ? 'Hide' : 'Show'} Affected Employees ({affectedEmps.length})
+                            <span className={`transition-transform duration-200 ${ isExpanded ? 'rotate-180' : '' }`}>&#x25BE;</span>
+                          </button>
+                        )}
+                        {affectedEmps.length === 0 && (
+                          <span className="text-[11px] text-slate-400 font-mono italic">No employees were in zone at time of filing.</span>
+                        )}
+                      </div>
+
+                      {/* Expandable employee list */}
+                      {isExpanded && affectedEmps.length > 0 && (
+                        <div className="border-t border-slate-200">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-[#f0f4ff] text-[#002060] text-[10px] uppercase tracking-widest">
+                                <th className="text-left px-4 py-2.5 font-black">#</th>
+                                <th className="text-left px-4 py-2.5 font-black">Employee</th>
+                                <th className="text-left px-4 py-2.5 font-black">Role / Department</th>
+                                <th className="text-left px-4 py-2.5 font-black">Address</th>
+                                <th className="text-left px-4 py-2.5 font-black">Check-in Sent</th>
+                                <th className="text-left px-4 py-2.5 font-black">Last Response</th>
+                                <th className="text-center px-4 py-2.5 font-black">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {affectedEmps.map((emp, idx) => {
+                                const statusCfg = {
+                                  Green:  { label: 'Safe',         bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
+                                  Yellow: { label: 'Awaiting',     bg: 'bg-amber-100 text-amber-800 border-amber-300',       dot: 'bg-amber-400'  },
+                                  Red:    { label: 'No Signal',    bg: 'bg-rose-100 text-rose-800 border-rose-300',           dot: 'bg-rose-500'   },
+                                }[emp.status];
+                                return (
+                                  <tr key={emp.id} className={`border-t border-slate-100 ${ idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50' } hover:bg-blue-50/40 transition-colors`}>
+                                    <td className="px-4 py-3 text-slate-400 font-mono text-[10px]">{idx + 1}</td>
+                                    <td className="px-4 py-3">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-7 h-7 rounded-full bg-[#002060] text-white text-[10px] font-black flex items-center justify-center shrink-0">
+                                          {emp.avatar || emp.name.charAt(0)}
+                                        </div>
+                                        <span className="font-bold text-slate-800">{emp.name}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-slate-600">
+                                      <div className="flex flex-col">
+                                        <span className="font-semibold">{emp.role}</span>
+                                        <span className="text-[10px] text-slate-400">{emp.department}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-slate-500 text-[11px] max-w-[180px]">
+                                      <span className="truncate block">{emp.address || '—'}</span>
+                                    </td>
+                                    <td className="px-4 py-3 text-[11px]">
+                                      {emp.contacted || emp.lastMessageSent
+                                        ? <span className="text-emerald-600 font-bold">✔ Sent {emp.lastMessageSent ? `· ${emp.lastMessageSent}` : ''}</span>
+                                        : <span className="text-slate-400 italic">Not yet</span>
+                                      }
+                                    </td>
+                                    <td className="px-4 py-3 text-[11px]">
+                                      {emp.lastResponseRecv
+                                        ? <span className="text-blue-700 font-semibold">{emp.lastResponseRecv}</span>
+                                        : emp.unresponsive
+                                        ? <span className="text-rose-500 font-bold">Unresponsive</span>
+                                        : <span className="text-slate-400 italic">—</span>
+                                      }
+                                    </td>
+                                    <td className="px-4 py-3 text-center">
+                                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black ${ statusCfg.bg }`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${ statusCfg.dot }`} />
+                                        {statusCfg.label}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+
+        </div>{/* end page content */}
+      </div>{/* end body row */}
 
       {/* ── Calamity Report Modal ────────────────────────────────────────── */}
       {showCalamityModal && (
