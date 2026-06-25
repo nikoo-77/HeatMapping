@@ -718,7 +718,7 @@ export default function App() {
               <Map className="w-5 h-5 shrink-0" />
             </div>
             <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#002060] uppercase animate-fade-in">
-              HEAT MAP
+              CSR Crisis Intelligence Dashboard
             </h1>
           </div>
           <p className="text-xs text-slate-500 font-medium max-w-xl mt-1">
