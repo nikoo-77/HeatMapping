@@ -385,7 +385,7 @@ export default function InteractiveMap({
                 <span class="text-sm">${getDisasterEmoji(activeDisaster.icon)}</span>
               </div>
               <div class="absolute -top-7 bg-indigo-950 border border-slate-700 text-white text-[8px] font-mono px-1.5 py-0.5 rounded shadow-md whitespace-nowrap uppercase font-black tracking-widest z-50 animate-bounce">
-                DRAG DRILL CENTER
+                ${getDisasterEmoji(activeDisaster.icon)} ${getDisasterCategory(activeDisaster.name).toUpperCase()} INCIDENT
               </div>
             </div>
           `,
