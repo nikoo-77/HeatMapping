@@ -1,6 +1,7 @@
 export type Carrier = 'Globe' | 'Smart' | 'DITO';
 export type SafetyStatus = 'Green' | 'Yellow' | 'Red';
 export type TowerStatus = 'ONLINE' | 'CONGESTED' | 'OFFLINE';
+export type EmployeeTeam = 'HR/CSR' | 'Manager';
 
 export interface Employee {
   id: string;
@@ -22,6 +23,7 @@ export interface Employee {
   avatar: string;
   address?: string; // Home address
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
+  team?: EmployeeTeam;
   distanceToEpicenter?: number;
   rescueDispatched?: boolean;
   contacted?: boolean;

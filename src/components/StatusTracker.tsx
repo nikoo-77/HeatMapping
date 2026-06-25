@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Employee, SafetyStatus, DisasterConfig } from '../types';
+import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam } from '../types';
 import { 
   Search, Send, ShieldAlert, Plus, HelpCircle, Flame, MapPin, 
   Users, Battery, RefreshCw, Phone, Mail, Signal, CheckCircle, 
@@ -20,6 +20,7 @@ interface StatusTrackerProps {
   onResetDatabase: () => void;
   onDispatchRescue: (employeeId: string) => void;
   activeDisaster: DisasterConfig;
+  viewerRole?: EmployeeTeam;
 }
 
 export default function StatusTracker({
@@ -35,6 +36,7 @@ export default function StatusTracker({
   onResetDatabase,
   onDispatchRescue,
   activeDisaster,
+  viewerRole = 'HR/CSR',
 }: StatusTrackerProps) {
   const [activeTab, setActiveTab] = useState<'AFFECTED' | 'ALL_EMPLOYEES' | 'ADD_NEW'>('AFFECTED');
   const [searchQuery, setSearchQuery] = useState('');
@@ -187,6 +189,7 @@ export default function StatusTracker({
       status: 'Yellow', // defaults to yellow on placement during crisis
       avatar: avatar,
       address: newEmpAddress || 'Cebu City, PH',
+      team: viewerRole,
     };
 
     onAddEmployee(newEmp);

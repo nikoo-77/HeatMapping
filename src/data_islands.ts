@@ -119,6 +119,7 @@ export function generateAllIslandEmployees(): Employee[] {
       const r3 = seededRandom(seed + 2);
       const r4 = seededRandom(seed + 3);
       const r5 = seededRandom(seed + 4);
+      const r6 = seededRandom(seed + 10);
 
       const firstName = FIRST_NAMES[Math.floor(r1 * FIRST_NAMES.length)];
       const lastName  = LAST_NAMES [Math.floor(r2 * LAST_NAMES.length)];
@@ -139,6 +140,7 @@ export function generateAllIslandEmployees(): Employee[] {
       const normalSignalStrength = -120 + Math.round(seededRandom(seed + 8) * 60);
       const statusSeed         = seededRandom(seed + 9);
       const status = statusSeed > 0.92 ? 'Yellow' : 'Green';
+      const team = r6 < 0.5 ? 'HR/CSR' : 'Manager';
 
       employees.push({
         id: `emp-island-${trackerId}`,
@@ -156,6 +158,7 @@ export function generateAllIslandEmployees(): Employee[] {
         avatar: firstName[0] + lastName[0],
         address: `${location.name}, ${location.city}, ${location.province}`,
         islandGroup: location.islandGroup,
+        team: team as 'HR/CSR' | 'Manager',
       });
 
       trackerId++;

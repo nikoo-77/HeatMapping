@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees } from './data_islands';
-import { Employee, SafetyStatus, DisasterConfig } from './types';
+import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam } from './types';
 import InteractiveMap from './components/InteractiveMap';
 import StatusTracker from './components/StatusTracker';
 import EmployeeRollCall from './components/EmployeeRollCall';
@@ -48,6 +48,10 @@ export default function App() {
 
   // State to filter by island group (null = all)
   const [selectedIslandGroup, setSelectedIslandGroup] = useState<'Luzon' | 'Visayas' | 'Mindanao' | null>(null);
+
+  // Viewer role & team filter
+  const [viewerRole, setViewerRole] = useState<EmployeeTeam>('HR/CSR');
+  const [filterByTeam, setFilterByTeam] = useState(false);
 
   // Toggle for Incident & Emergency Simulation Deck
   const [simulationActive, setSimulationActive] = useState<boolean>(false);
@@ -126,8 +130,8 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Wipe old dataset if it lacks the islandGroup field
-        if (parsed.length > 0 && parsed[0].islandGroup === undefined) {
+        // Wipe old dataset if it lacks the islandGroup or team field
+        if (parsed.length > 0 && (parsed[0].islandGroup === undefined || parsed[0].team === undefined)) {
           localStorage.removeItem('island_map_employees');
           return generateAllIslandEmployees();
         }
@@ -176,6 +180,16 @@ export default function App() {
       return haversineKm(centerLat, centerLng, emp.gpsLat, emp.gpsLng) <= radiusKm;
     }).length;
   }, [employees, haversineKm]);
+
+  const visibleEmployees = useMemo(() => {
+    return employees.filter(emp => {
+      const geoMatch =
+        (!selectedCity || emp.address?.includes(selectedCity)) &&
+        (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup);
+      const teamMatch = !filterByTeam || emp.team === viewerRole;
+      return geoMatch && teamMatch;
+    });
+  }, [employees, selectedCity, selectedIslandGroup, filterByTeam, viewerRole]);
 
   // Fixed values shown in Metro Cebu Image 2 for pristine alignment
   const fteInside5km = useMemo(() => {
@@ -374,6 +388,7 @@ export default function App() {
     setSelectedEmployee(null);
     setSelectedCity(null);
     setSelectedIslandGroup(null);
+    setFilterByTeam(false);
     setSimulationActive(false);
     pushLog('Database reset. All personnel records restored and active calamity report cleared.', 'info');
   };
@@ -691,6 +706,42 @@ export default function App() {
           </p>
         </div>
 
+        {/* Center: Role selector & team filter */}
+        <div className="flex flex-wrap items-center gap-3 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
+          <label htmlFor="viewer-role" className="text-xs font-bold text-slate-600 whitespace-nowrap">
+            Are you:
+          </label>
+          <select
+            id="viewer-role"
+            value={viewerRole}
+            onChange={(e) => {
+              const role = e.target.value as EmployeeTeam;
+              setViewerRole(role);
+              pushLog(`Viewing portal as ${role}.`, 'info');
+            }}
+            className="text-xs font-bold text-[#002060] bg-white border border-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#002060]/30"
+          >
+            <option value="HR/CSR">HR/CSR</option>
+            <option value="Manager">Manager</option>
+          </select>
+          <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={filterByTeam}
+              onChange={(e) => {
+                setFilterByTeam(e.target.checked);
+                pushLog(
+                  e.target.checked
+                    ? `Filtering to ${viewerRole} team employees only.`
+                    : 'Showing all team employees.',
+                  'info'
+                );
+              }}
+              className="rounded border-slate-300 text-[#002060] focus:ring-[#002060]/30 cursor-pointer"
+            />
+            Show my team only
+          </label>
+        </div>
 
         {/* Right Side: Co-labelled corporate logos */}
         <div className="flex items-center gap-4 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
@@ -927,7 +978,7 @@ export default function App() {
           {/* Map Layer container */}
           <div className="flex-1 relative min-h-[400px]">
             <InteractiveMap
-              employees={employees}
+              employees={visibleEmployees}
               epicenter={epicenter}
               selectedEmployee={selectedEmployee}
               onSelectEmployee={setSelectedEmployee}
@@ -970,7 +1021,7 @@ export default function App() {
           
 {/* Employee Roll-Call Panel */}
            <EmployeeRollCall
-             employees={employees}
+             employees={visibleEmployees}
              epicenter={epicenter}
              onSelectEmployee={setSelectedEmployee}
              selectedEmployee={selectedEmployee}
@@ -1074,10 +1125,8 @@ export default function App() {
                     : 'Consolidated Philippine Personnel Directory'}
                 </h3>
                 <p className="text-xs text-slate-500 font-medium">
-                  Showing {employees.filter(emp =>
-                    (!selectedCity || emp.address?.includes(selectedCity)) &&
-                    (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup)
-                  ).length} employees in this selection map profile.
+                  Showing {visibleEmployees.length} employees in this selection map profile
+                  {filterByTeam ? ` (${viewerRole} team)` : ''}.
                 </p>
               </div>
             </div>
@@ -1090,7 +1139,12 @@ export default function App() {
                   'bg-amber-50 text-amber-700 border-amber-200'
                 }`}>{selectedIslandGroup}</span>
               )}
-              Database Sync: <strong className="text-[#002060]">{employees.filter(e => e.status === 'Green').length} Safe</strong> • <strong className="text-amber-600">{employees.filter(e => e.status === 'Yellow').length} Awaiting Reply</strong> • <span className="text-rose-600 font-bold">{employees.filter(e => e.status === 'Red').length} Telecom Muted</span>
+              {filterByTeam && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-purple-50 text-purple-700 border-purple-200">
+                  {viewerRole} Team
+                </span>
+              )}
+              Database Sync: <strong className="text-[#002060]">{visibleEmployees.filter(e => e.status === 'Green').length} Safe</strong> • <strong className="text-amber-600">{visibleEmployees.filter(e => e.status === 'Yellow').length} Awaiting Reply</strong> • <span className="text-rose-600 font-bold">{visibleEmployees.filter(e => e.status === 'Red').length} Telecom Muted</span>
             </div>
           </div>
 
@@ -1099,10 +1153,8 @@ export default function App() {
             {/* Left side within directory: Interactive employee lists */}
             <div className="lg:col-span-8 flex flex-col gap-3">
 <StatusTracker
-                 employees={employees.filter(emp =>
-                   (!selectedCity || emp.address?.includes(selectedCity)) &&
-                   (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup)
-                 )}
+                 employees={visibleEmployees}
+                 viewerRole={viewerRole}
                  epicenter={epicenter}
                  onSelectEmployee={setSelectedEmployee}
                  selectedEmployee={selectedEmployee}
