@@ -16,6 +16,7 @@ export interface Employee {
   battery: number; // percentage
   status: SafetyStatus;
   lastMessageSent?: string;
+  lastEmailSent?: string;
   lastResponseRecv?: string;
   safetyMessage?: string;
   avatar: string;
@@ -25,6 +26,7 @@ export interface Employee {
   rescueDispatched?: boolean;
   contacted?: boolean;
   unresponsive?: boolean;
+  emailed?: boolean;
 }
 
 export interface SignalTower {
