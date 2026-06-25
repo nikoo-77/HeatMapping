@@ -16,6 +16,8 @@ export interface Employee {
   normalSignalStrength: number; // dBm
   battery: number; // percentage
   status: SafetyStatus;
+  phone?: string;
+  email?: string;
   lastMessageSent?: string;
   lastEmailSent?: string;
   lastResponseRecv?: string;

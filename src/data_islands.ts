@@ -142,6 +142,22 @@ export function generateAllIslandEmployees(): Employee[] {
       const status = statusSeed > 0.92 ? 'Yellow' : 'Green';
       const team = r6 < 0.5 ? 'HR/CSR' : 'Manager';
 
+      const r7 = seededRandom(seed + 11);
+      const r8 = seededRandom(seed + 12);
+
+      // PH mobile: Globe 0917/0927/0977, Smart 0918/0919/0928, DITO 0991/0992
+      const prefixes: Record<string, string[]> = {
+        Globe: ['0917', '0927', '0977'],
+        Smart: ['0918', '0919', '0928'],
+        DITO:  ['0991', '0992'],
+      };
+      const prefix = prefixes[carrier][Math.floor(r7 * prefixes[carrier].length)];
+      const digits = String(Math.floor(r8 * 9000000 + 1000000));
+      const phone = `${prefix} ${digits.slice(0,3)} ${digits.slice(3)}`;
+
+      // Company email: firstname.lastname@innodata.com
+      const email = `${firstName.toLowerCase()}.${lastName.toLowerCase().replace(/\s+/g, '')}_${trackerId}@innodata.com`;
+
       employees.push({
         id: `emp-island-${trackerId}`,
         name,
@@ -155,6 +171,8 @@ export function generateAllIslandEmployees(): Employee[] {
         normalSignalStrength,
         battery,
         status: status as 'Green' | 'Yellow',
+        phone,
+        email,
         avatar: firstName[0] + lastName[0],
         address: `${location.name}, ${location.city}, ${location.province}`,
         islandGroup: location.islandGroup,
