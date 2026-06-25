@@ -1,6 +1,7 @@
 export type Carrier = 'Globe' | 'Smart' | 'DITO';
 export type SafetyStatus = 'Green' | 'Yellow' | 'Red';
 export type TowerStatus = 'ONLINE' | 'CONGESTED' | 'OFFLINE';
+export type EmployeeTeam = 'HR/CSR' | 'Manager';
 
 export interface Employee {
   id: string;
@@ -16,15 +17,18 @@ export interface Employee {
   battery: number; // percentage
   status: SafetyStatus;
   lastMessageSent?: string;
+  lastEmailSent?: string;
   lastResponseRecv?: string;
   safetyMessage?: string;
   avatar: string;
   address?: string; // Home address
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
+  team?: EmployeeTeam;
   distanceToEpicenter?: number;
   rescueDispatched?: boolean;
   contacted?: boolean;
   unresponsive?: boolean;
+  emailed?: boolean;
 }
 
 export interface SignalTower {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Employee, SafetyStatus, DisasterConfig } from '../types';
+import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam } from '../types';
 import { 
   Search, Send, ShieldAlert, Plus, HelpCircle, Flame, MapPin, 
   Users, Battery, RefreshCw, Phone, Mail, Signal, CheckCircle, 
@@ -9,16 +9,18 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface StatusTrackerProps {
   employees: Employee[];
-  epicenter: { x: number; y: number; radius: number };
+  epicenter: { lat: number; lng: number; radiusKm: number };
   onSelectEmployee: (emp: Employee | null) => void;
   selectedEmployee: Employee | null;
   onSimulateReply: (employeeId: string, forcedStatus?: SafetyStatus) => void;
   onSendCheckIn: (employeeId: string) => void;
+  onSendEmail?: (employeeId: string) => void;
   onSendCheckInAllAffected: () => void;
   onAddEmployee: (newEmp: Employee) => void;
   onResetDatabase: () => void;
   onDispatchRescue: (employeeId: string) => void;
   activeDisaster: DisasterConfig;
+  viewerRole?: EmployeeTeam;
 }
 
 export default function StatusTracker({
@@ -28,11 +30,13 @@ export default function StatusTracker({
   selectedEmployee,
   onSimulateReply,
   onSendCheckIn,
+  onSendEmail,
   onSendCheckInAllAffected,
   onAddEmployee,
   onResetDatabase,
   onDispatchRescue,
   activeDisaster,
+  viewerRole = 'HR/CSR',
 }: StatusTrackerProps) {
   const [activeTab, setActiveTab] = useState<'AFFECTED' | 'ALL_EMPLOYEES' | 'ADD_NEW'>('AFFECTED');
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,6 +52,32 @@ export default function StatusTracker({
   const [newEmpAddress, setNewEmpAddress] = useState('');
   const [newEmpX, setNewEmpX] = useState(38);
   const [newEmpY, setNewEmpY] = useState(42);
+  
+  // Geographic conversion bounds (kept in sync with InteractiveMap constants)
+  const LAT_MIN = 10.245;
+  const LAT_MAX = 10.355;
+  const LNG_MIN = 123.82;
+  const LNG_MAX = 123.99;
+
+  // Helper converters between grid (0-100) and GPS
+  const gridToGps = (gridX: number, gridY: number) => {
+    const lat = LAT_MAX - (gridY / 100) * (LAT_MAX - LAT_MIN);
+    const lng = LNG_MIN + (gridX / 100) * (LNG_MAX - LNG_MIN);
+    return { lat, lng };
+  };
+
+  const gpsToGrid = (lat: number, lng: number) => {
+    const customLat = ((LAT_MAX - lat) / (LAT_MAX - LAT_MIN)) * 100;
+    const customLng = ((lng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+    return {
+      x: Math.max(0, Math.min(100, parseFloat(customLng.toFixed(1)))),
+      y: Math.max(0, Math.min(100, parseFloat(customLat.toFixed(1))))
+    };
+  };
+
+  // Store GPS inputs (text/number) and keep grid coords synced
+  const [newEmpGpsLat, setNewEmpGpsLat] = useState(() => gridToGps(38, 42).lat);
+  const [newEmpGpsLng, setNewEmpGpsLng] = useState(() => gridToGps(38, 42).lng);
 
   const toggleSimulation = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -81,16 +111,21 @@ export default function StatusTracker({
     return `${userName}@innodata.com`;
   };
 
-  // Compute affected employees (inside conflagration radius)
+  // Compute affected employees using real GPS Haversine distance (km)
   const getDistance = (emp: Employee) => {
-    const dx = emp.lng - epicenter.x;
-    const dy = emp.lat - epicenter.y;
-    return Math.sqrt(dx * dx + dy * dy);
+    const R = 6371;
+    const lat1 = epicenter.lat, lng1 = epicenter.lng;
+    const lat2 = emp.gpsLat ?? emp.lat;
+    const lng2 = emp.gpsLng ?? emp.lng;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
   const affectedEmployees = employees.filter((emp) => {
-    const dist = getDistance(emp);
-    return dist <= epicenter.radius;
+    return getDistance(emp) <= epicenter.radiusKm;
   });
 
   // Filter lists based on search and severity clicks
@@ -146,14 +181,15 @@ export default function StatusTracker({
       // Map back coordinates cleanly
       lat: Number(newEmpY),
       lng: Number(newEmpX),
-      gpsLat: parseFloat((10.355 - (Number(newEmpY) / 100) * (10.355 - 10.245)).toFixed(5)),
-      gpsLng: parseFloat((123.82 + (Number(newEmpX) / 100) * (123.99 - 123.82)).toFixed(5)),
+      gpsLat: Number(newEmpGpsLat),
+      gpsLng: Number(newEmpGpsLng),
       carrier: 'Globe',
       normalSignalStrength: -75,
       battery: Math.round(50 + Math.random() * 50),
       status: 'Yellow', // defaults to yellow on placement during crisis
       avatar: avatar,
       address: newEmpAddress || 'Cebu City, PH',
+      team: viewerRole,
     };
 
     onAddEmployee(newEmp);
@@ -522,41 +558,94 @@ export default function StatusTracker({
                         </div>
                       )}
 
-                      {/* Msg payload / simulation buttons */}
-                      <div className="pl-2 border-t border-slate-100 pt-2 flex flex-col gap-2">
-                        {emp.status === 'Green' ? (
-                          <div className="bg-emerald-50/60 p-2.5 rounded border border-emerald-100 text-[11px] text-emerald-800 font-sans font-semibold italic flex items-start gap-1.5">
-                            <span className="text-base leading-none">💬</span>
-                            <span>Broadcast Report: &ldquo;{emp.safetyMessage || 'Evacuated sector safely.'}&rdquo;</span>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col gap-2">
-                            <div className="flex items-center gap-2">
-                              {/* Send SMS ping */}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onSendCheckIn(emp.id);
-                                }}
-                                className="flex-1 bg-amber-55 text-amber-900 hover:bg-amber-100/80 text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-amber-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
-                                title="Send manual disaster notification SMS"
-                              >
-                                <Send className="w-3 h-3 text-amber-700" />
-                                <span>{!emp.contacted ? "Send Manual SMS" : "Manual SMS Re-Send"}</span>
-                              </button>
+{/* Msg payload / simulation buttons */}
+                       <div className="pl-2 border-t border-slate-100 pt-2 flex flex-col gap-2">
+                         {emp.status === 'Green' ? (
+                           <div className="bg-emerald-50/60 p-2.5 rounded border border-emerald-100 text-[11px] text-emerald-800 font-sans font-semibold italic flex items-start gap-1.5">
+                             <span className="text-base leading-none">💬</span>
+                             <span>Broadcast Report: &ldquo;{emp.safetyMessage || 'Evacuated sector safely.'}&rdquo;</span>
+                           </div>
+                         ) : (
+                           <div className="flex flex-col gap-2">
+                             <div className="flex gap-2">
+                               {/* Send SMS ping - shows as "Send SMS" if email was already sent */}
+                               {emp.emailed && !emp.lastMessageSent ? (
+                                 <button
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     onSendCheckIn(emp.id);
+                                   }}
+                                   className="flex-1 bg-sky-600 hover:bg-sky-500 text-white text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-sky-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
+                                   title="Send SMS as alternative contact"
+                                 >
+                                   <Send className="w-3 h-3 text-white" />
+                                   <span>Send SMS</span>
+                                 </button>
+                               ) : (
+                                 <button
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     onSendCheckIn(emp.id);
+                                   }}
+                                   className="flex-1 bg-amber-55 text-amber-900 hover:bg-amber-100/80 text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-amber-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
+                                   title="Send manual disaster notification SMS"
+                                 >
+                                   <Send className="w-3 h-3 text-amber-700" />
+                                   <span>{!emp.contacted ? "Send Manual SMS" : "Manual SMS Re-Send"}</span>
+                                 </button>
+                               )}
 
-                              {/* Toggle developer panel */}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleSimulation(emp.id, e);
-                                }}
-                                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10.5px] font-mono py-2 px-2.5 rounded-lg border border-slate-300 transition cursor-pointer select-none"
-                                title="Simulate crisis answer code"
-                              >
-                                {isSimOpen ? '🔒 Closed Sim' : '🛠️ Force Safety Response'}
-                              </button>
-                            </div>
+                               {/* Send Email button - shows as "Send Email" if SMS was already sent */}
+                               {emp.lastMessageSent && !emp.emailed ? (
+                                 <button
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     onSendEmail && onSendEmail(emp.id);
+                                   }}
+                                   className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-indigo-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
+                                   title="Send email as alternative contact"
+                                 >
+                                   <Mail className="w-3 h-3 text-white" />
+                                   <span>Send Email</span>
+                                 </button>
+                               ) : !emp.emailed ? (
+                                 <button
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     onSendEmail && onSendEmail(emp.id);
+                                   }}
+                                   className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-indigo-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
+                                   title="Send corporate email notification"
+                                 >
+                                   <Mail className="w-3 h-3 text-white" />
+                                   <span>{!emp.emailed ? "Send Email" : "Email Re-Send"}</span>
+                                 </button>
+                               ) : (
+                                 <button
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     onSendEmail && onSendEmail(emp.id);
+                                   }}
+                                   className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-indigo-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
+                                   title="Send email as alternative contact"
+                                 >
+                                   <Mail className="w-3 h-3 text-white" />
+                                   <span>Send Email</span>
+                                 </button>
+                               )}
+
+                               {/* Toggle developer panel */}
+                               <button
+                                 onClick={(e) => {
+                                   e.stopPropagation();
+                                   toggleSimulation(emp.id, e);
+                                 }}
+                                 className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10.5px] font-mono py-2 px-2.5 rounded-lg border border-slate-300 transition cursor-pointer select-none"
+                                 title="Simulate crisis answer code"
+                               >
+                                 {isSimOpen ? '🔒 Closed Sim' : '🛠️ Force Safety Response'}
+                               </button>
+                             </div>
 
                             {/* Collapsible Simulation controls helper */}
                             {isSimOpen && (
@@ -628,7 +717,7 @@ export default function StatusTracker({
             <div className="flex-1 overflow-y-auto space-y-2.5 max-h-[380px] pr-1">
               {filteredAll.map((emp) => {
                 const isSelected = selectedEmployee?.id === emp.id;
-                const isAffected = getDistance(emp) <= epicenter.radius;
+                const isAffected = getDistance(emp) <= epicenter.radiusKm;
 
                 return (
                   <div
@@ -743,31 +832,41 @@ export default function StatusTracker({
 
               <div className="grid grid-cols-2 gap-2.5 bg-white border p-3 rounded-lg shadow-inner">
                 <div className="space-y-1">
-                  <span className="text-[8.5px] font-extrabold text-slate-400 block uppercase font-mono">Grid Lat Y ({newEmpY}%)</span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="range"
-                      min="1"
-                      max="99"
-                      value={newEmpY}
-                      onChange={(e) => setNewEmpY(Number(e.target.value))}
-                      className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#002060]"
-                    />
-                  </div>
+                  <label className="text-[8.5px] font-extrabold text-slate-400 block uppercase font-mono">GPS Latitude (decimal)</label>
+                  <input
+                    type="number"
+                    step="0.00001"
+                    value={newEmpGpsLat}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value || '0');
+                      setNewEmpGpsLat(v);
+                      const g = gpsToGrid(v, newEmpGpsLng);
+                      setNewEmpX(g.x);
+                      setNewEmpY(g.y);
+                    }}
+                    placeholder="e.g. 10.3157"
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-[#002060] font-sans"
+                  />
+                  <div className="text-[10px] text-slate-400 font-mono">Grid Y: <strong className="text-slate-700">{newEmpY}%</strong></div>
                 </div>
 
                 <div className="space-y-1">
-                  <span className="text-[8.5px] font-extrabold text-slate-400 block uppercase font-mono">Grid Lng X ({newEmpX}%)</span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="range"
-                      min="1"
-                      max="99"
-                      value={newEmpX}
-                      onChange={(e) => setNewEmpX(Number(e.target.value))}
-                      className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#002060]"
-                    />
-                  </div>
+                  <label className="text-[8.5px] font-extrabold text-slate-400 block uppercase font-mono">GPS Longitude (decimal)</label>
+                  <input
+                    type="number"
+                    step="0.00001"
+                    value={newEmpGpsLng}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value || '0');
+                      setNewEmpGpsLng(v);
+                      const g = gpsToGrid(newEmpGpsLat, v);
+                      setNewEmpX(g.x);
+                      setNewEmpY(g.y);
+                    }}
+                    placeholder="e.g. 123.8854"
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-[#002060] font-sans"
+                  />
+                  <div className="text-[10px] text-slate-400 font-mono">Grid X: <strong className="text-slate-700">{newEmpX}%</strong></div>
                 </div>
               </div>
 

@@ -7,12 +7,13 @@ import {
 
 interface EmployeeRollCallProps {
   employees: Employee[];
-  epicenter: { x: number; y: number; radius: number };
+  epicenter: { lat: number; lng: number; radiusKm: number };
   onSelectEmployee: (emp: Employee | null) => void;
   selectedEmployee: Employee | null;
   onReportStatus: (employeeId: string, status: SafetyStatus, isUnresponsive?: boolean) => void;
   simulationActive?: boolean;
   onSendCheckIn?: (employeeId: string) => void;
+  onSendEmail?: (employeeId: string) => void;
   onDispatchRescue?: (employeeId: string) => void;
 }
 
@@ -24,6 +25,7 @@ export default function EmployeeRollCall({
   onReportStatus,
   simulationActive = false,
   onSendCheckIn,
+  onSendEmail,
   onDispatchRescue,
 }: EmployeeRollCallProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,16 +54,22 @@ export default function EmployeeRollCall({
     }
   }, [selectedEmployee]);
 
-  // Compute conflagration distance
+  // Compute GPS Haversine distance (km) from epicenter to employee home
   const getDistance = (emp: Employee) => {
-    const dx = emp.lng - epicenter.x;
-    const dy = emp.lat - epicenter.y;
-    return Math.sqrt(dx * dx + dy * dy);
+    const R = 6371;
+    const lat1 = epicenter.lat, lng1 = epicenter.lng;
+    const lat2 = emp.gpsLat ?? emp.lat;
+    const lng2 = emp.gpsLng ?? emp.lng;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
   // Employees located in the zone
   const inZoneEmployees = useMemo(() => {
-    return employees.filter((emp) => getDistance(emp) <= epicenter.radius);
+    return employees.filter((emp) => getDistance(emp) <= epicenter.radiusKm);
   }, [employees, epicenter]);
 
   // Counts for high fidelity metrics
@@ -320,7 +328,7 @@ export default function EmployeeRollCall({
         ) : (
           filteredEmployees.map((emp) => {
             const isSelected = selectedEmployee?.id === emp.id;
-            const isInRiskZone = getDistance(emp) <= epicenter.radius;
+            const isInRiskZone = getDistance(emp) <= epicenter.radiusKm;
 
             // Determine badge next to name based on status
             let headerBadgeText = 'Uncontacted';
@@ -411,11 +419,11 @@ export default function EmployeeRollCall({
                     </div>
                   </div>
 
-                  {emp.contacted && emp.lastMessageSent ? (
-                    <span className="text-[10px] text-zinc-400 font-mono font-bold select-none text-right shrink-0 mt-1" title={`Contacted at ${emp.lastMessageSent}`}>
-                      ✉️ {emp.lastMessageSent}
-                    </span>
-                  ) : (
+{emp.contacted && (emp.lastMessageSent || emp.lastEmailSent) ? (
+                     <span className="text-[10px] text-zinc-400 font-mono font-bold select-none text-right shrink-0 mt-1" title={emp.lastMessageSent ? `SMS sent at ${emp.lastMessageSent}` : `Email sent at ${emp.lastEmailSent}`}>
+                       {emp.lastMessageSent ? '📱 SMS:' : '📧 Email:'} {emp.lastMessageSent || emp.lastEmailSent}
+                     </span>
+                   ) : (
                     <span className="text-[10px] text-zinc-600 font-mono select-none text-right shrink-0 mt-1">
                       —
                     </span>
@@ -425,59 +433,90 @@ export default function EmployeeRollCall({
                 {/* Simulated Comms Interaction block in card bottom */}
                 <div className="border-t border-zinc-800/50 pt-2.5 flex flex-wrap items-center justify-between gap-2 pl-12">
                   
-                  {/* UNCONTACTED CASE */}
-                  {emp.contacted !== true && (
-                    <div className="w-full flex items-center justify-between gap-2">
-                      <span className="text-[10px] text-zinc-500 font-medium">Pending manual reachout</span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (onSendCheckIn) {
-                            onSendCheckIn(emp.id);
-                          }
-                        }}
-                        className="bg-sky-600 hover:bg-sky-500 text-white rounded px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1 active:scale-95 transition-transform cursor-pointer"
-                      >
-                        <Send className="w-3 h-3 text-white" />
-                        Manual SMS
-                      </button>
-                    </div>
-                  )}
+{/* UNCONTACTED CASE */}
+                   {emp.contacted !== true && (
+                     <div className="w-full flex flex-col gap-1.5">
+                       <div className="flex items-center justify-between gap-2">
+                         <span className="text-[10px] text-zinc-500 font-medium">Pending manual reachout</span>
+                       </div>
+                       <div className="flex gap-1.5">
+                         <button
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             if (onSendCheckIn) {
+                               onSendCheckIn(emp.id);
+                             }
+                           }}
+                           className="flex-1 bg-sky-600 hover:bg-sky-500 text-white rounded px-3 py-1.5 text-[11px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 active:scale-95 transition-transform cursor-pointer"
+                         >
+                           <Send className="w-3 h-3 text-white" />
+                           SMS
+                         </button>
+                         <button
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             if (onSendEmail) {
+                               onSendEmail(emp.id);
+                             }
+                           }}
+                           className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-1.5 text-[11px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 active:scale-95 transition-transform cursor-pointer"
+                         >
+                           <Mail className="w-3 h-3 text-white" />
+                           Email
+                         </button>
+                       </div>
+                     </div>
+                   )}
 
-                  {/* UNRESPONSIVE CASE */}
-                  {emp.unresponsive === true && (
-                    <div className="w-full flex items-center justify-between gap-2">
-                      <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1 select-none">
-                        <AlertCircle className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                        <span>No reply • Telemetry offline</span>
-                      </span>
-                      <div className="flex gap-1.5">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (onSendCheckIn) {
-                              onSendCheckIn(emp.id);
-                            }
-                          }}
-                          className="border border-zinc-700 bg-zinc-95/40 hover:bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors"
-                        >
-                          Retry
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onReportStatus(emp.id, 'Red');
-                            if (onDispatchRescue) {
-                              onDispatchRescue(emp.id);
-                            }
-                          }}
-                          className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors uppercase tracking-widest text-[9px]"
-                        >
-                          Send Corporate Aid
-                        </button>
-                      </div>
-                    </div>
-                  )}
+{/* UNRESPONSIVE CASE */}
+                   {emp.unresponsive === true && (
+                     <div className="w-full flex flex-col gap-2">
+                       <div className="flex items-center justify-between gap-2">
+                         <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1 select-none">
+                           <AlertCircle className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                           <span>No reply • Telemetry offline</span>
+                         </span>
+                       </div>
+                       <div className="flex gap-1.5">
+                         <button
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             if (onSendCheckIn) {
+                               onSendCheckIn(emp.id);
+                             }
+                           }}
+                           className="flex-1 border border-zinc-700 bg-zinc-95/40 hover:bg-zinc-800 text-zinc-300 px-2.5 py-1.5 rounded text-[11px] font-bold cursor-pointer transition-colors flex items-center justify-center gap-1"
+                         >
+                           <Send className="w-3 h-3" />
+                           Retry SMS
+                         </button>
+                         <button
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             if (onSendEmail) {
+                               onSendEmail(emp.id);
+                             }
+                           }}
+                           className="flex-1 border border-zinc-700 bg-zinc-95/40 hover:bg-zinc-800 text-zinc-300 px-2.5 py-1.5 rounded text-[11px] font-bold cursor-pointer transition-colors flex items-center justify-center gap-1"
+                         >
+                           <Mail className="w-3 h-3" />
+                           Send Email
+                         </button>
+                         <button
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             onReportStatus(emp.id, 'Red');
+                             if (onDispatchRescue) {
+                               onDispatchRescue(emp.id);
+                             }
+                           }}
+                           className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded text-[11px] font-bold cursor-pointer transition-colors uppercase tracking-widest"
+                         >
+                           Send Aid
+                         </button>
+                       </div>
+                     </div>
+                   )}
 
                   {/* GREEN SAFE CONFIRMED TEXT STATE */}
                   {emp.contacted === true && emp.status === 'Green' && emp.unresponsive !== true && (
@@ -487,43 +526,71 @@ export default function EmployeeRollCall({
                     </div>
                   )}
 
-                  {/* YELLOW PENDING REPLY STATE -> RECORD USER ACTION DECISIONS */}
-                  {emp.contacted === true && emp.status === 'Yellow' && emp.unresponsive !== true && (
-                    <div className="flex flex-wrap items-center gap-1 w-full">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onReportStatus(emp.id, 'Green');
-                        }}
-                        className="flex-1 min-w-[55px] border border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-200 hover:text-white px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        Safe
-                      </button>
+{/* YELLOW PENDING REPLY STATE -> RECORD USER ACTION DECISIONS */}
+                   {emp.contacted === true && emp.status === 'Yellow' && emp.unresponsive !== true && (
+                     <div className="flex flex-wrap items-center gap-1 w-full">
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           onReportStatus(emp.id, 'Green');
+                         }}
+                         className="flex-1 min-w-[55px] border border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-200 hover:text-white px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                       >
+                         <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                         Safe
+                       </button>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onReportStatus(emp.id, 'Red');
-                        }}
-                        className="flex-1 min-w-[70px] bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer border border-transparent shadow-sm"
-                      >
-                        <AlertCircle className="w-3.5 h-3.5 text-white shrink-0" />
-                        Needs help
-                      </button>
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           onReportStatus(emp.id, 'Red');
+                         }}
+                         className="flex-1 min-w-[70px] bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer border border-transparent shadow-sm"
+                       >
+                         <AlertCircle className="w-3.5 h-3.5 text-white shrink-0" />
+                         Needs help
+                       </button>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Simulates "No reply / Unresponsive" behavior
-                          onReportStatus(emp.id, 'Yellow', true);
-                        }}
-                        className="flex-1 min-w-[60px] border border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-200 hover:text-white px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        No reply
-                      </button>
-                    </div>
-                  )}
+{/* Show alternative contact option if only one method was used */}
+                        {emp.lastMessageSent && !emp.emailed ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onSendEmail) {
+                                onSendEmail(emp.id);
+                              }
+                            }}
+                            className="flex-1 min-w-[60px] border border-indigo-700 bg-indigo-950/30 hover:bg-indigo-900/40 text-indigo-300 px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <Mail className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                            Send Email
+                          </button>
+                        ) : !emp.lastMessageSent && emp.emailed ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onSendCheckIn) {
+                                onSendCheckIn(emp.id);
+                              }
+                            }}
+                            className="flex-1 min-w-[60px] border border-sky-700 bg-sky-950/30 hover:bg-sky-900/40 text-sky-300 px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <Send className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                            Send SMS
+                          </button>
+                        ) : null}
+
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           onReportStatus(emp.id, 'Yellow', true);
+                         }}
+                         className="flex-1 min-w-[60px] border border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-200 hover:text-white px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                       >
+                         No reply
+                       </button>
+                     </div>
+                   )}
 
                   {/* RED HELP ACTIVE STATE -> DISPATCH RESCUE BUTTON */}
                   {emp.contacted === true && emp.status === 'Red' && emp.unresponsive !== true && (

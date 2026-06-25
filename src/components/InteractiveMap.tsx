@@ -60,12 +60,22 @@ export function hexToRgb(hex: string): string {
   return `${r},${g},${b}`;
 }
 
+// Haversine distance in km
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 interface InteractiveMapProps {
   employees: Employee[];
-  epicenter: { x: number; y: number; radius: number };
+  epicenter: { lat: number; lng: number; radiusKm: number };
   selectedEmployee: Employee | null;
   onSelectEmployee: (emp: Employee | null) => void;
-  onEpicenterChange: (newEpicenter: { x: number; y: number; radius: number }) => void;
+  onEpicenterChange: (newEpicenter: { lat: number; lng: number; radiusKm: number }) => void;
   activeDisaster: DisasterConfig;
   onDispatchRescue?: (employeeId: string) => void;
   mapView?: 'island' | 'metro';
@@ -107,8 +117,8 @@ export default function InteractiveMap({
     showOfficeBubbles: false,
   });
 
-  const getRadiusInMeters = (customUnits: number) => {
-    return customUnits * 241;
+  const getRadiusInMeters = (radiusKm: number) => {
+    return radiusKm * 1000;
   };
 
   // --- LEAFLET IN-PAGE MOUNT LIFECYCLE ---
@@ -137,15 +147,14 @@ export default function InteractiveMap({
     mapInstanceRef.current = map;
     layersGroupRef.current = L.layerGroup().addTo(map);
 
-    // Grid coordinates alignment when map is clicked
+    // Move disaster epicenter to wherever user clicks on the map
     map.on('click', (e: any) => {
       if (!simulationActive) return;
-      const customCoords = latLngToCustom(e.latlng.lat, e.latlng.lng);
       setTimeout(() => {
         onEpicenterChange({
           ...epicenter,
-          x: customCoords.x,
-          y: customCoords.y,
+          lat: parseFloat(e.latlng.lat.toFixed(5)),
+          lng: parseFloat(e.latlng.lng.toFixed(5)),
         });
       }, 100);
     });
@@ -338,7 +347,7 @@ export default function InteractiveMap({
 
     // 3. EMERGENCY INCIDENTS & CONFLAGRATIONS (Rendered exclusively when simulationActive is enabled)
     if (simulationActive) {
-      const centerGps = customToLatLng(epicenter.x, epicenter.y);
+      const centerGps = { lat: epicenter.lat, lng: epicenter.lng };
 
       // Gradient danger heatmap circles
       const radialHeatRings = [
@@ -351,7 +360,7 @@ export default function InteractiveMap({
 
       radialHeatRings.forEach(ring => {
         L.circle([centerGps.lat, centerGps.lng], {
-          radius: getRadiusInMeters(epicenter.radius) * ring.radiusMult,
+          radius: getRadiusInMeters(epicenter.radiusKm) * ring.radiusMult,
           color: 'transparent',
           fillColor: ring.fillColor,
           fillOpacity: ring.opacity,
@@ -376,7 +385,7 @@ export default function InteractiveMap({
                 <span class="text-sm">${getDisasterEmoji(activeDisaster.icon)}</span>
               </div>
               <div class="absolute -top-7 bg-indigo-950 border border-slate-700 text-white text-[8px] font-mono px-1.5 py-0.5 rounded shadow-md whitespace-nowrap uppercase font-black tracking-widest z-50 animate-bounce">
-                DRAG DRILL CENTER
+                ${getDisasterEmoji(activeDisaster.icon)} ${getDisasterCategory(activeDisaster.name).toUpperCase()} INCIDENT
               </div>
             </div>
           `,
@@ -387,12 +396,11 @@ export default function InteractiveMap({
 
       epicenterMarker.on('dragend', (e: any) => {
         const position = e.target.getLatLng();
-        const customCoords = latLngToCustom(position.lat, position.lng);
         setTimeout(() => {
           onEpicenterChange({
             ...epicenter,
-            x: customCoords.x,
-            y: customCoords.y,
+            lat: parseFloat(position.lat.toFixed(5)),
+            lng: parseFloat(position.lng.toFixed(5)),
           });
         }, 100);
       });
@@ -447,9 +455,8 @@ export default function InteractiveMap({
         ? { lat: emp.gpsLat, lng: emp.gpsLng } 
         : customToLatLng(emp.lng, emp.lat);
 
-      const dX = emp.lng - epicenter.x;
-      const dY = emp.lat - epicenter.y;
-      const isInsideDisaster = simulationActive && (Math.sqrt(dX * dX + dY * dY) <= epicenter.radius);
+      const distKm = haversineKm(epicenter.lat, epicenter.lng, empGps.lat, empGps.lng);
+      const isInsideDisaster = simulationActive && distKm <= epicenter.radiusKm;
 
       if (simulationActive && activeLayers.showOnlyAffected && !isInsideDisaster) {
         return;
@@ -472,6 +479,9 @@ export default function InteractiveMap({
       }
 
       const isSelected = selectedEmployee?.id === emp.id;
+
+      // HQ/Office reference point for rescue route lines (Cebu IT Park)
+      const hqGps: [number, number] = [10.3311, 123.9053];
 
       // Draw individual route line if rescue dispatched and simulation is active
       if (simulationActive && emp.rescueDispatched) {
@@ -544,10 +554,15 @@ export default function InteractiveMap({
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
+    // For the mock SVG map, convert GPS epicenter to SVG grid coordinates
+    const mockEpicCenter = latLngToCustom(epicenter.lat, epicenter.lng);
+    // Convert radiusKm to approximate SVG units (Philippine bbox: ~1900km wide = 11 units)
+    const mockRadius = Math.max(1, epicenter.radiusKm * 0.06);
+
     onEpicenterChange({
       ...epicenter,
-      x: parseFloat(x.toFixed(1)),
-      y: parseFloat(y.toFixed(1)),
+      lat: parseFloat(epicenter.lat.toFixed(5)),
+      lng: parseFloat(epicenter.lng.toFixed(5)),
     });
   };
 
@@ -687,16 +702,20 @@ export default function InteractiveMap({
             })}
 
             {/* Active Disaster site elements inside SVG mock */}
-            {simulationActive && (
-              <g opacity="0.85">
-                <circle cx={epicenter.x} cy={epicenter.y} r={epicenter.radius} fill="#fb923c" fillOpacity="0.1" />
-                <circle cx={epicenter.x} cy={epicenter.y} r={epicenter.radius * 0.35} fill="#ef4444" fillOpacity="0.25" />
-                <circle cx={epicenter.x} cy={epicenter.y} r="1.5" fill="#f43f5e" className="animate-pulse" />
-                <text x={epicenter.x} y={epicenter.y - 2.5} fill="#fda4af" fontSize="2" fontFamily="monospace" textAnchor="middle" fontWeight="black">
-                  {getDisasterEmoji(activeDisaster.icon)} ACTIVE CRISIS AREA
-                </text>
-              </g>
-            )}
+            {simulationActive && (() => {
+              const mockEpicCenter = latLngToCustom(epicenter.lat, epicenter.lng);
+              const mockRadius = Math.max(1, epicenter.radiusKm * 0.06);
+              return (
+                <g opacity="0.85">
+                  <circle cx={mockEpicCenter.x} cy={mockEpicCenter.y} r={mockRadius} fill="#fb923c" fillOpacity="0.1" />
+                  <circle cx={mockEpicCenter.x} cy={mockEpicCenter.y} r={mockRadius * 0.35} fill="#ef4444" fillOpacity="0.25" />
+                  <circle cx={mockEpicCenter.x} cy={mockEpicCenter.y} r="1.5" fill="#f43f5e" className="animate-pulse" />
+                  <text x={mockEpicCenter.x} y={mockEpicCenter.y - 2.5} fill="#fda4af" fontSize="2" fontFamily="monospace" textAnchor="middle" fontWeight="black">
+                    {getDisasterEmoji(activeDisaster.icon)} ACTIVE CRISIS AREA
+                  </text>
+                </g>
+              );
+            })()}
           </svg>
         )}
 
@@ -793,7 +812,7 @@ export default function InteractiveMap({
               <Compass className="w-4 h-4 text-slate-400 animate-spin-slow shrink-0" />
               <span className="text-center text-slate-500">
                 {simulationActive 
-                  ? `Crisis Drill: Centered at Grid [Y: ${epicenter.y}%, X: ${epicenter.x}%]. Move the fire emblem or click the map coordinates to trace evacuation routes.`
+                  ? `Crisis Drill: Epicenter at [${epicenter.lat.toFixed(4)}°N, ${epicenter.lng.toFixed(4)}°E] — Radius: ${epicenter.radiusKm} km. Drag the marker or click the map to move the epicenter.`
                   : `Innodata Workforce Density Dashboard. Hover over municipality footprint bubbles or check the locations table on the left to review employee sizes.`
                 }
               </span>

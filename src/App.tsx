@@ -1,29 +1,98 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees } from './data_islands';
-import { Employee, SafetyStatus, DisasterConfig } from './types';
+import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam } from './types';
 import InteractiveMap from './components/InteractiveMap';
 import StatusTracker from './components/StatusTracker';
 import EmployeeRollCall from './components/EmployeeRollCall';
 import { 
-  ShieldAlert, Activity, Flame, Send, CheckCircle, Info, RefreshCw, 
-  AlertOctagon, Sparkles, Map, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle
+  ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw, 
+  AlertOctagon, Sparkles, Map, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
+  FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList
 } from 'lucide-react';
 
 export default function App() {
+  // ── Page navigation ─────────────────────────────────────────────────────
+  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'reports'>('dashboard');
+
+  // ── Calamity Report History ──────────────────────────────────────────────
+  const [calamityReports, setCalamityReports] = useState<Array<{
+    id: string;
+    timestamp: string;
+    type: string;
+    incidentName: string;
+    locationLabel: string;
+    lat: number;
+    lng: number;
+    radiusKm: number;
+    affectedCount: number;
+    magnitude?: string;
+    signalLevel?: string;
+    description: string;
+  }>>([]);
+
   // State for Map View mode: 'island' or 'metro'
   const [mapView, setMapView] = useState<'island' | 'metro'>('island');
   
   // State to filter employees by a selected city from the left table
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
 
+  // Haversine GPS distance in kilometers
+  const haversineKm = useCallback((lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, []);
+
   // State to filter by island group (null = all)
   const [selectedIslandGroup, setSelectedIslandGroup] = useState<'Luzon' | 'Visayas' | 'Mindanao' | null>(null);
+
+  // Viewer role & team filter
+  const [viewerRole, setViewerRole] = useState<EmployeeTeam>('HR/CSR');
+  const [filterByTeam, setFilterByTeam] = useState(false);
 
   // Toggle for Incident & Emergency Simulation Deck
   const [simulationActive, setSimulationActive] = useState<boolean>(false);
 
-  // Active Disaster Location Grid coordinates
-  const [epicenter, setEpicenter] = useState({ x: 28, y: 34, radius: 11 });
+  // ── Calamity Report Modal State ──────────────────────────────────────────
+  const [showCalamityModal, setShowCalamityModal] = useState(false);
+  const [calamityForm, setCalamityForm] = useState<{
+    type: 'Fire' | 'Earthquake' | 'Typhoon' | 'Other';
+    description: string;
+    locationLabel: string;
+    lat: number;
+    lng: number;
+    radiusKm: number;
+    locationPinned: boolean;
+    hazardName: string;      // used when type === 'Other'
+    magnitude: string;       // used when type === 'Earthquake'
+    signalLevel: string;     // used when type === 'Typhoon'
+  }>({
+    type: 'Fire',
+    description: '',
+    locationLabel: '',
+    lat: 14.5995,
+    lng: 120.9842,
+    radiusKm: 0.3,
+    locationPinned: false,
+    hazardName: '',
+    magnitude: '',
+    signalLevel: 'Signal No. 1',
+  });
+  // ref to hold the mini leaflet map inside the modal
+  const calamityMapRef = React.useRef<HTMLDivElement | null>(null);
+  const calamityLeafletRef = React.useRef<any>(null);
+  const calamityMarkerRef = React.useRef<any>(null);
+  const calamityCircleRef = React.useRef<any>(null);
+  const calamityFormRef = React.useRef(calamityForm);
+  // Geocoding state
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [geocodeError, setGeocodeError] = useState<string | null>(null);
+
+  // Active Disaster Location — stored as real GPS coordinates + radius in km
+  const [epicenter, setEpicenter] = useState({ lat: 10.3311, lng: 123.9053, radiusKm: 5 });
   const [activeDisaster, setActiveDisaster] = useState<DisasterConfig>({
     id: 'fire',
     name: 'Dense Residential Block Fire',
@@ -32,10 +101,10 @@ export default function App() {
     color: 'orange',
     colorClass: 'text-orange-700 bg-orange-50 border-orange-200',
     hexColor: '#f97316',
-    defaultX: 28,
-    defaultY: 34,
-    defaultRadius: 11,
-    locationName: 'Cebu Commercial High-density Block',
+    defaultX: 10.3311,
+    defaultY: 123.9053,
+    defaultRadius: 5,
+    locationName: 'Cebu IT Park Area',
     description: 'An intense, rapid, localized residential conflagration causing dangerous thermal plumes, thick carbon fumes, and utility wire power shutdowns.',
     greenTemplates: [
       'Thick black smoke clouds. Evacuated sector safely.',
@@ -61,8 +130,8 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Wipe old dataset if it lacks the islandGroup field
-        if (parsed.length > 0 && parsed[0].islandGroup === undefined) {
+        // Wipe old dataset if it lacks the islandGroup or team field
+        if (parsed.length > 0 && (parsed[0].islandGroup === undefined || parsed[0].team === undefined)) {
           localStorage.removeItem('island_map_employees');
           return generateAllIslandEmployees();
         }
@@ -97,24 +166,30 @@ export default function App() {
     ]);
   }, []);
 
-  // Compute grid formula distance to disaster conflagration epicenter
+  // Compute GPS Haversine distance (km) from epicenter to employee home
   const getDistance = useCallback((emp: Employee) => {
-    const dx = emp.lng - epicenter.x;
-    const dy = emp.lat - epicenter.y;
-    return Math.sqrt(dx * dx + dy * dy);
-  }, [epicenter]);
+    const empLat = emp.gpsLat ?? emp.lat;
+    const empLng = emp.gpsLng ?? emp.lng;
+    return haversineKm(epicenter.lat, epicenter.lng, empLat, empLng);
+  }, [epicenter, haversineKm]);
 
   // Interactive radius count of employees inside concentric circles (from Metro hub)
   const countInGpsRadius = useCallback((centerLat: number, centerLng: number, radiusKm: number) => {
     return employees.filter(emp => {
       if (!emp.gpsLat || !emp.gpsLng) return false;
-      const dx = emp.gpsLng - centerLng;
-      const dy = emp.gpsLat - centerLat;
-      const distanceDeg = Math.sqrt(dx * dx + dy * dy);
-      const distanceKm = distanceDeg * 111.32; // ~111.32 km per degree
-      return distanceKm <= radiusKm;
+      return haversineKm(centerLat, centerLng, emp.gpsLat, emp.gpsLng) <= radiusKm;
     }).length;
-  }, [employees]);
+  }, [employees, haversineKm]);
+
+  const visibleEmployees = useMemo(() => {
+    return employees.filter(emp => {
+      const geoMatch =
+        (!selectedCity || emp.address?.includes(selectedCity)) &&
+        (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup);
+      const teamMatch = !filterByTeam || emp.team === viewerRole;
+      return geoMatch && teamMatch;
+    });
+  }, [employees, selectedCity, selectedIslandGroup, filterByTeam, viewerRole]);
 
   // Fixed values shown in Metro Cebu Image 2 for pristine alignment
   const fteInside5km = useMemo(() => {
@@ -130,23 +205,24 @@ export default function App() {
     return diff > 0 ? diff : 94; // Fallback to 94 exactly
   }, [countInGpsRadius]);
 
-  // Handle epicenter change manually / click
-  const handleEpicenterChange = (newEpic: { x: number; y: number; radius: number }) => {
+  // Handle epicenter change from map drag or radius slider
+  const handleEpicenterChange = (newEpic: { lat: number; lng: number; radiusKm: number }) => {
     setEpicenter(newEpic);
-    
-    // Auto-detect newly affected residents in grid
+
+    // Auto-detect newly affected residents using GPS distance
     const newAffected: string[] = [];
     employees.forEach(emp => {
-      const dist = Math.sqrt((emp.lng - newEpic.x) ** 2 + (emp.lat - newEpic.y) ** 2);
-      if (dist <= newEpic.radius) {
+      const empLat = emp.gpsLat ?? emp.lat;
+      const empLng = emp.gpsLng ?? emp.lng;
+      if (haversineKm(newEpic.lat, newEpic.lng, empLat, empLng) <= newEpic.radiusKm) {
         newAffected.push(emp.name);
       }
     });
 
     const categoryText = activeDisaster.name.includes('Fire') ? 'Fire' : activeDisaster.name.includes('Flood') ? 'Flood' : 'Incident';
-    pushLog(`${categoryText} coordinate epicenter moved to [Y: ${newEpic.y}%, X: ${newEpic.x}%]. Radius adjusted to ${newEpic.radius} range units.`, 'warn');
+    pushLog(`${categoryText} epicenter moved to [${newEpic.lat.toFixed(4)}°N, ${newEpic.lng.toFixed(4)}°E]. Radius: ${newEpic.radiusKm} km.`, 'warn');
     if (newAffected.length > 0) {
-      pushLog(`Active sensor scan: ${newAffected.length} employees home grid plots are inside danger perimeter.`, 'err');
+      pushLog(`Active sensor scan: ${newAffected.length} employees are inside the ${newEpic.radiusKm} km danger perimeter.`, 'err');
     }
   };
 
@@ -172,13 +248,36 @@ export default function App() {
     );
   };
 
+  const handleSendEmail = (employeeId: string) => {
+    setEmployees((prev) =>
+      prev.map((emp) => {
+        if (emp.id === employeeId) {
+          const isFailedDelivery = emp.carrier === 'DITO';
+          const finalStatus: SafetyStatus = isFailedDelivery ? 'Red' : 'Yellow';
+          const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          pushLog(`EMAIL DISPATCH REGISTERED: HR reached out to ${emp.name} via corporate email. Status: ${finalStatus === 'Red' ? 'TRANSMISSION FAILURE' : 'PENDING REPLY'}`, finalStatus === 'Red' ? 'err' : 'info');
+          return {
+            ...emp,
+            status: finalStatus,
+            contacted: true,
+            emailed: true,
+            unresponsive: false,
+            safetyMessage: undefined,
+            lastEmailSent: stamp,
+          };
+        }
+        return emp;
+      })
+    );
+  };
+
   const handleSendCheckInAllAffected = () => {
     let triggeredCount = 0;
     const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setEmployees((prev) =>
       prev.map((emp) => {
         const dist = getDistance(emp);
-        if (dist <= epicenter.radius) {
+        if (dist <= epicenter.radiusKm) {
           triggeredCount++;
           const isFailedDelivery = emp.carrier === 'DITO';
           return {
@@ -289,7 +388,194 @@ export default function App() {
     setSelectedEmployee(null);
     setSelectedCity(null);
     setSelectedIslandGroup(null);
-    pushLog('Database reset. Restored Philippine island group personnel records.', 'info');
+    setFilterByTeam(false);
+    setSimulationActive(false);
+    pushLog('Database reset. All personnel records restored and active calamity report cleared.', 'info');
+  };
+
+  // Keep the calamityFormRef in sync so Leaflet click handlers always see fresh state
+  React.useEffect(() => {
+    calamityFormRef.current = calamityForm;
+  }, [calamityForm]);
+
+  // Mount the mini Leaflet map inside the Calamity Report modal
+  React.useEffect(() => {
+    if (!showCalamityModal) {
+      // Destroy map when modal closes
+      if (calamityLeafletRef.current) {
+        calamityLeafletRef.current.remove();
+        calamityLeafletRef.current = null;
+        calamityMarkerRef.current = null;
+        calamityCircleRef.current = null;
+      }
+      return;
+    }
+    // Small delay so the modal DOM is painted
+    const timer = setTimeout(() => {
+      if (!calamityMapRef.current || calamityLeafletRef.current) return;
+      const L = (window as any).L || require('leaflet');
+      // Center on Philippines
+      const map = L.map(calamityMapRef.current, {
+        center: [12.0, 122.5],
+        zoom: 6,
+        zoomControl: true,
+      });
+      calamityLeafletRef.current = map;
+
+      // Light tile layer
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 19,
+      }).addTo(map);
+
+      // Click handler to pin location
+      map.on('click', (e: any) => {
+        const { lat, lng } = e.latlng;
+        setCalamityForm(prev => ({ ...prev, lat, lng, locationPinned: true }));
+
+        // Draw / update marker
+        if (calamityMarkerRef.current) {
+          calamityMarkerRef.current.setLatLng([lat, lng]);
+        } else {
+          const icon = L.divIcon({
+            className: '',
+            html: `<div style="width:20px;height:20px;background:#dc2626;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);"></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 20],
+          });
+          calamityMarkerRef.current = L.marker([lat, lng], { icon }).addTo(map);
+        }
+
+        // Draw / update circle
+        const radius = calamityFormRef.current.radiusKm * 1000;
+        if (calamityCircleRef.current) {
+          calamityCircleRef.current.setLatLng([lat, lng]).setRadius(radius);
+        } else {
+          calamityCircleRef.current = L.circle([lat, lng], {
+            radius,
+            color: '#dc2626',
+            fillColor: '#dc2626',
+            fillOpacity: 0.12,
+            weight: 2,
+            dashArray: '6 4',
+          }).addTo(map);
+        }
+      });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [showCalamityModal]);
+
+  // Keep circle radius in sync when the slider changes (while modal is open)
+  React.useEffect(() => {
+    if (!calamityCircleRef.current) return;
+    calamityCircleRef.current.setRadius(calamityForm.radiusKm * 1000);
+  }, [calamityForm.radiusKm]);
+
+  // Compute live count of employees inside the calamity geofence
+  const calamityAffectedCount = React.useMemo(() => {
+    if (!calamityForm.locationPinned) return 0;
+    return employees.filter(emp => {
+      const lat = emp.gpsLat ?? emp.lat;
+      const lng = emp.gpsLng ?? emp.lng;
+      return haversineKm(calamityForm.lat, calamityForm.lng, lat, lng) <= calamityForm.radiusKm;
+    }).length;
+  }, [calamityForm.lat, calamityForm.lng, calamityForm.radiusKm, calamityForm.locationPinned, employees, haversineKm]);
+
+  const handleSubmitCalamityReport = () => {
+    const { type, description, locationLabel, lat, lng, radiusKm, hazardName, magnitude, signalLevel } = calamityForm;
+
+    // Build a meaningful incident name
+    let incidentName = type;
+    if (type === 'Other' && hazardName.trim()) incidentName = hazardName.trim();
+    const fullName = locationLabel
+      ? `${incidentName} — ${locationLabel}`
+      : `${incidentName} Incident`;
+
+    // Build auto-description with extra fields
+    let extraDetails = '';
+    if (type === 'Earthquake' && magnitude.trim()) extraDetails = ` Magnitude/Intensity: ${magnitude}.`;
+    if (type === 'Typhoon' && signalLevel)         extraDetails = ` ${signalLevel}.`;
+    const desc = description
+      ? description + extraDetails
+      : `${incidentName} calamity reported by HR/Management at [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E].${extraDetails}`;
+
+    handleTriggerSimulation(fullName, lat, lng, radiusKm, desc);
+    setSimulationActive(true);
+    pushLog(`📋 CALAMITY REPORT FILED: "${fullName}" by HR/Manager. ${calamityAffectedCount} personnel in ${radiusKm} km zone.`, 'err');
+    setShowCalamityModal(false);
+    setCalamityForm(prev => ({ ...prev, locationPinned: false, description: '', locationLabel: '', hazardName: '', magnitude: '' }));
+  };
+
+  // Geocode the typed location label using Nominatim (OpenStreetMap) — no API key required
+  const handleGeocode = async () => {
+    const query = calamityForm.locationLabel.trim();
+    if (!query) {
+      setGeocodeError('Please type a location name first.');
+      return;
+    }
+    setIsGeocoding(true);
+    setGeocodeError(null);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=ph`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      const data = await res.json();
+      if (!data || data.length === 0) {
+        // Retry without country restriction in case they typed a general area
+        const url2 = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ' Philippines')}&format=json&limit=1`;
+        const res2 = await fetch(url2, { headers: { 'Accept-Language': 'en' } });
+        const data2 = await res2.json();
+        if (!data2 || data2.length === 0) {
+          setGeocodeError(`Location "${query}" not found. Try a more specific name or pin manually.`);
+          setIsGeocoding(false);
+          return;
+        }
+        const { lat, lon, display_name } = data2[0];
+        _applyGeocodedLocation(parseFloat(lat), parseFloat(lon), display_name);
+      } else {
+        const { lat, lon, display_name } = data[0];
+        _applyGeocodedLocation(parseFloat(lat), parseFloat(lon), display_name);
+      }
+    } catch {
+      setGeocodeError('Network error — check your connection and try again.');
+    }
+    setIsGeocoding(false);
+  };
+
+  const _applyGeocodedLocation = (lat: number, lng: number, displayName: string) => {
+    setCalamityForm(prev => ({ ...prev, lat, lng, locationPinned: true }));
+    setGeocodeError(null);
+    const L = (window as any).L || require('leaflet');
+    const map = calamityLeafletRef.current;
+    if (map) {
+      map.setView([lat, lng], 13, { animate: true });
+      // Update or create marker
+      if (calamityMarkerRef.current) {
+        calamityMarkerRef.current.setLatLng([lat, lng]);
+      } else {
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:20px;height:20px;background:#dc2626;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);"></div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 20],
+        });
+        calamityMarkerRef.current = L.marker([lat, lng], { icon }).addTo(map);
+      }
+      // Update or create circle
+      const radiusM = calamityFormRef.current.radiusKm * 1000;
+      if (calamityCircleRef.current) {
+        calamityCircleRef.current.setLatLng([lat, lng]).setRadius(radiusM);
+      } else {
+        calamityCircleRef.current = L.circle([lat, lng], {
+          radius: radiusM,
+          color: '#dc2626',
+          fillColor: '#dc2626',
+          fillOpacity: 0.12,
+          weight: 2,
+          dashArray: '6 4',
+        }).addTo(map);
+      }
+    }
   };
 
   const handleDispatchRescue = (employeeId: string) => {
@@ -307,7 +593,7 @@ export default function App() {
     );
   };
 
-  const handleTriggerSimulation = (name: string, x: number, y: number, radius: number, desc: string) => {
+  const handleTriggerSimulation = (name: string, lat: number, lng: number, radiusKm: number, desc: string) => {
     let disasterId: 'fire' | 'earthquake' | 'typhoon' = 'fire';
     let subName = 'Barangay Block Outbreak';
     let icon = 'fire' as any;
@@ -341,25 +627,25 @@ export default function App() {
       color,
       colorClass,
       hexColor,
-      defaultX: x,
-      defaultY: y,
-      defaultRadius: radius,
+      defaultX: lat,
+      defaultY: lng,
+      defaultRadius: radiusKm,
       locationName: name + ' Risk Outpost',
       description: desc,
       greenTemplates,
       replyTemplates
     });
 
-    setEpicenter({ x, y, radius });
+    setEpicenter({ lat, lng, radiusKm });
     setSelectedEmployee(null);
 
-     // Apply immediate impact statuses to the generated 1,107 database!
+     // Apply immediate impact statuses using accurate GPS Haversine distance
      setEmployees((prev) =>
        prev.map((emp) => {
-         const dx = emp.lng - x;
-         const dy = emp.lat - y;
-         const dist = Math.sqrt(dx * dx + dy * dy);
-         if (dist <= radius) {
+         const empLat = emp.gpsLat ?? emp.lat;
+         const empLng = emp.gpsLng ?? emp.lng;
+         const dist = haversineKm(lat, lng, empLat, empLng);
+         if (dist <= radiusKm) {
            return {
              ...emp,
              status: 'Yellow' as SafetyStatus,
@@ -381,7 +667,7 @@ export default function App() {
        })
      );
 
-    pushLog(`🚨 SIMULATION ACTIVE: "${name}"`, 'err');
+    pushLog(`🚨 SIMULATION ACTIVE: "${name}" @ [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E] — Radius: ${radiusKm} km`, 'err');
     pushLog(`Description: ${desc}`, 'warn');
   };
 
@@ -394,10 +680,10 @@ export default function App() {
   }, [employees, selectedEmployee]);
 
   // Counters
-  const affectedStaff = employees.filter(emp => getDistance(emp) <= epicenter.radius).length;
-  const safeStaffCount = employees.filter(emp => getDistance(emp) <= epicenter.radius && emp.status === 'Green').length;
-  const pendingCount = employees.filter(emp => getDistance(emp) <= epicenter.radius && emp.status === 'Yellow').length;
-  const offlineDangerCount = employees.filter(emp => getDistance(emp) <= epicenter.radius && emp.status === 'Red').length;
+  const affectedStaff = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm).length;
+  const safeStaffCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Green').length;
+  const pendingCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Yellow').length;
+  const offlineDangerCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Red').length;
 
   return (
     <div className="bg-[#f8fafc] text-slate-900 min-h-screen flex flex-col font-sans transition-colors duration-250">
@@ -420,6 +706,42 @@ export default function App() {
           </p>
         </div>
 
+        {/* Center: Role selector & team filter */}
+        <div className="flex flex-wrap items-center gap-3 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
+          <label htmlFor="viewer-role" className="text-xs font-bold text-slate-600 whitespace-nowrap">
+            Are you:
+          </label>
+          <select
+            id="viewer-role"
+            value={viewerRole}
+            onChange={(e) => {
+              const role = e.target.value as EmployeeTeam;
+              setViewerRole(role);
+              pushLog(`Viewing portal as ${role}.`, 'info');
+            }}
+            className="text-xs font-bold text-[#002060] bg-white border border-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#002060]/30"
+          >
+            <option value="HR/CSR">HR/CSR</option>
+            <option value="Manager">Manager</option>
+          </select>
+          <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={filterByTeam}
+              onChange={(e) => {
+                setFilterByTeam(e.target.checked);
+                pushLog(
+                  e.target.checked
+                    ? `Filtering to ${viewerRole} team employees only.`
+                    : 'Showing all team employees.',
+                  'info'
+                );
+              }}
+              className="rounded border-slate-300 text-[#002060] focus:ring-[#002060]/30 cursor-pointer"
+            />
+            Show my team only
+          </label>
+        </div>
 
         {/* Right Side: Co-labelled corporate logos */}
         <div className="flex items-center gap-4 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
@@ -626,88 +948,37 @@ export default function App() {
                 : 'Philippines — National Overview'}
             </span>
 
-            {/* Right: Crisis Drill inline controls */}
+            {/* Right: Calamity Report + Reset controls */}
             <div className="flex flex-wrap items-center gap-2">
-              {/* Toggle button */}
+
+              {/* ── Calamity Report Button ── */}
               <button
-                onClick={() => setSimulationActive(!simulationActive)}
-                className={`px-3 py-1.5 rounded-md text-[10px] font-extrabold transition-all duration-150 flex items-center gap-1.5 border cursor-pointer shrink-0 ${
-                  simulationActive
-                    ? 'bg-rose-600 border-rose-700 text-white shadow animate-pulse'
-                    : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-                title="Toggle localized emergency drills & mobile transmission failure simulations"
+                id="calamity-report-btn"
+                onClick={() => setShowCalamityModal(true)}
+                className="px-3 py-1.5 rounded-md text-[10px] font-extrabold transition-all duration-150 flex items-center gap-1.5 border cursor-pointer shrink-0 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 border-amber-700 text-white shadow-sm hover:shadow-orange-400/40 hover:shadow-md active:scale-95"
+                title="File a manual calamity report — pinpoint location and set geofence"
               >
-                <Flame className={`w-3 h-3 shrink-0 ${simulationActive ? 'text-white' : 'text-slate-400'}`} />
-                <span>Crisis Drill: {simulationActive ? 'ON' : 'OFF'}</span>
+                <FileWarning className="w-3 h-3 shrink-0" />
+                <span>Calamity Report</span>
               </button>
 
-              {/* Scenario presets — only visible when simulation is ON */}
-              {simulationActive && (
-                <>
-                  <button
-                    onClick={() => handleTriggerSimulation('Residential Outbreak Fire', 28, 34, 11, 'High-temperature residential block fire triggering gas shutdowns.')}
-                    className="px-2.5 py-1 bg-gradient-to-r from-orange-950 to-orange-900 hover:from-orange-900 hover:to-orange-800 border border-orange-800 rounded text-[10px] font-mono font-bold text-orange-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
-                  >
-                    🔥 Fire
-                  </button>
-                  <button
-                    onClick={() => handleTriggerSimulation('Undersea Fault Tectonic Earthquake', 45, 52, 22, 'A shallow offshore earthquake fracturing communication masts.')}
-                    className="px-2.5 py-1 bg-gradient-to-r from-rose-950 to-rose-900 hover:from-rose-900 hover:to-rose-800 border border-rose-800 rounded text-[10px] font-mono font-bold text-rose-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
-                  >
-                    🚨 Earthquake
-                  </button>
-                  <button
-                    onClick={() => handleTriggerSimulation('Super Typhoon "Odette II"', 58, 38, 35, 'Massive wind wall disrupting coastal cell towers and flooding lowlands.')}
-                    className="px-2.5 py-1 bg-gradient-to-r from-cyan-950 to-cyan-900 hover:from-cyan-900 hover:to-cyan-800 border border-cyan-800 rounded text-[10px] font-mono font-bold text-cyan-100 flex items-center gap-1 cursor-pointer transition active:scale-95"
-                  >
-                    🌀 Typhoon
-                  </button>
-                  <button
-                    onClick={() => {
-                      const rx = Math.round(20 + Math.random() * 60);
-                      const ry = Math.round(20 + Math.random() * 60);
-                      const rr = Math.round(8 + Math.random() * 12);
-                      handleTriggerSimulation('Surprise Localized Gas Leak', rx, ry, rr, 'Unpredicted hazardous gas leakage alert simulated on the grid.');
-                    }}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
-                  >
-                    🎲 Random
-                  </button>
+              {/* Reset button — always visible */}
+              <button
+                onClick={handleResetDatabase}
+                className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 border border-emerald-600 text-white rounded-md text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
+                title="Reset all employee statuses and clear active calamity report"
+              >
+                <RefreshCw className="w-3 h-3 shrink-0" />
+                <span>Reset</span>
+              </button>
 
-                  {/* Radius slider */}
-                  <div className="flex items-center gap-2 font-mono text-[10px] text-slate-600 bg-slate-100 border border-slate-200 rounded px-2.5 py-1">
-                    <Activity className="w-3 h-3 text-orange-500 shrink-0" />
-                    <span className="text-slate-500 font-bold whitespace-nowrap">Radius:</span>
-                    <input
-                      type="range"
-                      min="4"
-                      max="35"
-                      step="1"
-                      value={epicenter.radius}
-                      onChange={(e) => handleEpicenterChange({ ...epicenter, radius: Number(e.target.value) })}
-                      className="w-20 accent-orange-500 cursor-pointer h-2"
-                    />
-                    <span className="text-orange-600 font-black whitespace-nowrap">{epicenter.radius}u</span>
-                  </div>
-
-                  <button
-                    onClick={handleResetDatabase}
-                    className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 border border-emerald-600 text-white rounded text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
-                    title="Reset all employee statuses"
-                  >
-                    <RefreshCw className="w-3 h-3 shrink-0" />
-                    <span>Reset</span>
-                  </button>
-                </>
-              )}
             </div>
           </div>
 
           {/* Map Layer container */}
           <div className="flex-1 relative min-h-[400px]">
             <InteractiveMap
-              employees={employees}
+              employees={visibleEmployees}
               epicenter={epicenter}
               selectedEmployee={selectedEmployee}
               onSelectEmployee={setSelectedEmployee}
@@ -748,17 +1019,18 @@ export default function App() {
         {/* Right Column: Dynamic Insight Panel & Legend matching the layouts */}
         <section className="lg:col-span-3 flex flex-col gap-6 max-h-[750px] overflow-y-auto">
           
-          {/* Employee Roll-Call Panel */}
-          <EmployeeRollCall
-            employees={employees}
-            epicenter={epicenter}
-            onSelectEmployee={setSelectedEmployee}
-            selectedEmployee={selectedEmployee}
-            onReportStatus={handleReportStatus}
-            simulationActive={simulationActive}
-            onSendCheckIn={handleSendCheckIn}
-            onDispatchRescue={handleDispatchRescue}
-          />
+{/* Employee Roll-Call Panel */}
+           <EmployeeRollCall
+             employees={visibleEmployees}
+             epicenter={epicenter}
+             onSelectEmployee={setSelectedEmployee}
+             selectedEmployee={selectedEmployee}
+             onReportStatus={handleReportStatus}
+             simulationActive={simulationActive}
+             onSendCheckIn={handleSendCheckIn}
+             onSendEmail={handleSendEmail}
+             onDispatchRescue={handleDispatchRescue}
+           />
 
           {/* Clean Legend Graphic Panel */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-4">
@@ -802,12 +1074,12 @@ export default function App() {
             </div>
           </div>
 
-          {/* Interactive Disaster Controller mini-switch when Simulation is active */}
+          {/* Active Calamity Report telemetry panel */}
           {simulationActive && (
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-mono text-[11px] shadow-2xl flex flex-col gap-3">
-              <span className="text-orange-400 font-extrabold flex items-center gap-1.5 uppercase pb-2 border-b border-slate-800 text-[10px]">
-                <Radio className="w-3.5 h-3.5 text-orange-500 animate-pulse shrink-0" />
-                Live Crisis drill telemetry
+              <span className="text-blue-400 font-extrabold flex items-center gap-1.5 uppercase pb-2 border-b border-slate-800 text-[10px]">
+                <Radio className="w-3.5 h-3.5 text-blue-400 animate-pulse shrink-0" />
+                Live Calamity Report Telemetry
               </span>
               
               <div className="flex justify-between items-center text-[10px]">
@@ -853,10 +1125,8 @@ export default function App() {
                     : 'Consolidated Philippine Personnel Directory'}
                 </h3>
                 <p className="text-xs text-slate-500 font-medium">
-                  Showing {employees.filter(emp =>
-                    (!selectedCity || emp.address?.includes(selectedCity)) &&
-                    (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup)
-                  ).length} employees in this selection map profile.
+                  Showing {visibleEmployees.length} employees in this selection map profile
+                  {filterByTeam ? ` (${viewerRole} team)` : ''}.
                 </p>
               </div>
             </div>
@@ -869,7 +1139,12 @@ export default function App() {
                   'bg-amber-50 text-amber-700 border-amber-200'
                 }`}>{selectedIslandGroup}</span>
               )}
-              Database Sync: <strong className="text-[#002060]">{employees.filter(e => e.status === 'Green').length} Safe</strong> • <strong className="text-amber-600">{employees.filter(e => e.status === 'Yellow').length} Awaiting Reply</strong> • <span className="text-rose-600 font-bold">{employees.filter(e => e.status === 'Red').length} Telecom Muted</span>
+              {filterByTeam && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-purple-50 text-purple-700 border-purple-200">
+                  {viewerRole} Team
+                </span>
+              )}
+              Database Sync: <strong className="text-[#002060]">{visibleEmployees.filter(e => e.status === 'Green').length} Safe</strong> • <strong className="text-amber-600">{visibleEmployees.filter(e => e.status === 'Yellow').length} Awaiting Reply</strong> • <span className="text-rose-600 font-bold">{visibleEmployees.filter(e => e.status === 'Red').length} Telecom Muted</span>
             </div>
           </div>
 
@@ -877,22 +1152,21 @@ export default function App() {
             
             {/* Left side within directory: Interactive employee lists */}
             <div className="lg:col-span-8 flex flex-col gap-3">
-              <StatusTracker
-                employees={employees.filter(emp =>
-                  (!selectedCity || emp.address?.includes(selectedCity)) &&
-                  (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup)
-                )}
-                epicenter={epicenter}
-                onSelectEmployee={setSelectedEmployee}
-                selectedEmployee={selectedEmployee}
-                onSimulateReply={handleSimulateReply}
-                onSendCheckIn={handleSendCheckIn}
-                onSendCheckInAllAffected={handleSendCheckInAllAffected}
-                onAddEmployee={handleAddEmployee}
-                onResetDatabase={handleResetDatabase}
-                onDispatchRescue={handleDispatchRescue}
-                activeDisaster={activeDisaster}
-              />
+<StatusTracker
+                 employees={visibleEmployees}
+                 viewerRole={viewerRole}
+                 epicenter={epicenter}
+                 onSelectEmployee={setSelectedEmployee}
+                 selectedEmployee={selectedEmployee}
+                 onSimulateReply={handleSimulateReply}
+                 onSendCheckIn={handleSendCheckIn}
+                 onSendEmail={handleSendEmail}
+                 onSendCheckInAllAffected={handleSendCheckInAllAffected}
+                 onAddEmployee={handleAddEmployee}
+                 onResetDatabase={handleResetDatabase}
+                 onDispatchRescue={handleDispatchRescue}
+                 activeDisaster={activeDisaster}
+               />
             </div>
 
             {/* Right side within directory: Systems logs channel */}
@@ -939,6 +1213,307 @@ export default function App() {
           <span>DATABASE METRICS: OPERATIONAL</span>
         </span>
       </footer>
+
+      {/* ── Calamity Report Modal ────────────────────────────────────────── */}
+      {showCalamityModal && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,10,40,0.70)', backdropFilter: 'blur(6px)' }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl border border-blue-100 w-full max-w-4xl max-h-[92vh] overflow-y-auto flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#002060] via-[#003399] to-[#0055cc] px-6 py-4 flex items-center justify-between rounded-t-2xl shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/15 p-2 rounded-lg border border-white/20">
+                  <FileWarning className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-white font-black text-base tracking-tight">Calamity Report</h2>
+                  <p className="text-blue-200 text-xs font-medium">HR / Manager Manual Incident Filing</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowCalamityModal(false)}
+                className="text-white/60 hover:text-white hover:bg-white/15 p-2 rounded-lg transition-all cursor-pointer border border-transparent hover:border-white/20"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex flex-col lg:flex-row gap-0 flex-1 min-h-0">
+
+              {/* Left: Form Fields */}
+              <div className="lg:w-[320px] shrink-0 flex flex-col gap-5 p-6 border-r border-blue-50 bg-[#f5f8ff]">
+
+                {/* Calamity Type */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                    Calamity Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['Fire', 'Earthquake', 'Typhoon', 'Other'] as const).map(t => {
+                      const icons: Record<string, string> = { Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' };
+                      const active = calamityForm.type === t;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => setCalamityForm(prev => ({ ...prev, type: t }))}
+                          className={`flex items-center gap-2 py-2 px-3 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
+                            active
+                              ? 'border-[#003399] bg-blue-50 text-[#002060] ring-2 ring-offset-1 ring-blue-400 shadow-sm'
+                              : 'border-blue-100 bg-white text-slate-500 hover:border-blue-300 hover:bg-blue-50'
+                          }`}
+                        >
+                          <span className="text-base leading-none shrink-0">{icons[t]}</span>
+                          <span>{t}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ── Type-specific extra fields ── */}
+
+                {/* Other: Hazard Name */}
+                {calamityForm.type === 'Other' && (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                      Hazard Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Chemical Spill, Landslide, Explosion..."
+                      value={calamityForm.hazardName}
+                      onChange={e => setCalamityForm(prev => ({ ...prev, hazardName: e.target.value }))}
+                      className="w-full border border-blue-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder:text-slate-400 transition"
+                    />
+                  </div>
+                )}
+
+                {/* Earthquake: Magnitude / Intensity */}
+                {calamityForm.type === 'Earthquake' && (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                      Magnitude / Intensity
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Magnitude 6.2, Intensity V (Strong)..."
+                      value={calamityForm.magnitude}
+                      onChange={e => setCalamityForm(prev => ({ ...prev, magnitude: e.target.value }))}
+                      className="w-full border border-blue-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder:text-slate-400 transition"
+                    />
+                    <p className="text-[10px] text-slate-400 font-mono leading-snug">
+                      PHIVOLCS Intensity Scale I (Scarcely Perceptible) – X (Completely Devastating)
+                    </p>
+                  </div>
+                )}
+
+                {/* Typhoon: Signal Level */}
+                {calamityForm.type === 'Typhoon' && (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                      PAGASA Signal Level
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {['Signal No. 1', 'Signal No. 2', 'Signal No. 3', 'Signal No. 4', 'Signal No. 5'].map(sig => {
+                        const sigColors: Record<string, string> = {
+                          'Signal No. 1': 'border-yellow-400 bg-yellow-50 text-yellow-800',
+                          'Signal No. 2': 'border-orange-400 bg-orange-50 text-orange-800',
+                          'Signal No. 3': 'border-red-400 bg-red-50 text-red-800',
+                          'Signal No. 4': 'border-rose-600 bg-rose-50 text-rose-900',
+                          'Signal No. 5': 'border-purple-600 bg-purple-50 text-purple-900',
+                        };
+                        const active = calamityForm.signalLevel === sig;
+                        return (
+                          <button
+                            key={sig}
+                            onClick={() => setCalamityForm(prev => ({ ...prev, signalLevel: sig }))}
+                            className={`py-1.5 px-2 rounded-lg border-2 text-[10px] font-bold transition-all cursor-pointer text-center ${
+                              active
+                                ? sigColors[sig] + ' ring-2 ring-offset-1 ring-blue-400 shadow-sm'
+                                : 'border-blue-100 bg-white text-slate-500 hover:border-blue-200'
+                            }`}
+                          >
+                            {sig}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-mono leading-snug">
+                      No. 1 = 30–60 km/h · No. 3 = 89–117 km/h · No. 5 = &gt;220 km/h
+                    </p>
+                  </div>
+                )}
+
+                {/* Location Label + Geocode */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                    Location / Area Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Cebu IT Park, Barangay Guadalupe..."
+                    value={calamityForm.locationLabel}
+                    onChange={e => {
+                      setCalamityForm(prev => ({ ...prev, locationLabel: e.target.value }));
+                      setGeocodeError(null);
+                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleGeocode(); } }}
+                    className="w-full border border-blue-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder:text-slate-400 transition"
+                  />
+                  {/* Auto-Pin button */}
+                  <button
+                    id="geocode-auto-pin-btn"
+                    onClick={handleGeocode}
+                    disabled={isGeocoding || !calamityForm.locationLabel.trim()}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide border transition-all ${
+                      isGeocoding
+                        ? 'bg-blue-50 border-blue-200 text-blue-400 cursor-wait'
+                        : !calamityForm.locationLabel.trim()
+                        ? 'bg-slate-50 border-slate-200 text-slate-300 cursor-not-allowed'
+                        : 'bg-[#002060] hover:bg-[#003399] border-[#001848] text-white cursor-pointer shadow hover:shadow-md active:scale-95'
+                    }`}
+                  >
+                    {isGeocoding ? (
+                      <>
+                        <svg className="w-3 h-3 animate-spin shrink-0" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                        </svg>
+                        <span>Searching...</span>
+                      </>
+                    ) : (
+                      <>
+                        <MapPin className="w-3 h-3 shrink-0" />
+                        <span>Auto-Pin Location</span>
+                      </>
+                    )}
+                  </button>
+                  {/* Geocode error */}
+                  {geocodeError && (
+                    <div className="flex items-start gap-1.5 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      <span className="text-red-500 text-[10px] mt-px">⚠</span>
+                      <span className="text-red-600 text-[10px] font-semibold leading-tight">{geocodeError}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Description */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                    Incident Description
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Describe the calamity details, source, hazard scope..."
+                    value={calamityForm.description}
+                    onChange={e => setCalamityForm(prev => ({ ...prev, description: e.target.value }))}
+                    className="w-full border border-blue-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder:text-slate-400 transition resize-none"
+                  />
+                </div>
+
+                {/* Radius Slider */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                      Geofence Radius
+                    </span>
+                    <span className="text-[#003399] font-black text-xs bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+                      {calamityForm.radiusKm.toFixed(2)} km
+                    </span>
+                  </label>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1"
+                    step="0.05"
+                    value={calamityForm.radiusKm}
+                    onChange={e => setCalamityForm(prev => ({ ...prev, radiusKm: Number(e.target.value) }))}
+                    className="w-full accent-blue-600 cursor-pointer h-2"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                    <span>0.1 km</span>
+                    <span>0.5 km</span>
+                    <span>1 km</span>
+                  </div>
+                </div>
+
+                {/* Coordinates display */}
+                {calamityForm.locationPinned && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex flex-col gap-1">
+                    <span className="text-[10px] font-black text-[#002060] uppercase tracking-wider flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-blue-600" /> Pinned Location
+                    </span>
+                    <span className="font-mono text-[11px] text-[#003399] font-bold">
+                      {calamityForm.lat.toFixed(5)}°N, {calamityForm.lng.toFixed(5)}°E
+                    </span>
+                  </div>
+                )}
+
+                {/* Affected count badge */}
+                <div className={`rounded-xl border p-4 flex flex-col items-center gap-1 transition-all ${
+                  calamityForm.locationPinned
+                    ? 'bg-blue-50 border-blue-300'
+                    : 'bg-slate-100 border-slate-200'
+                }`}>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Personnel in Zone</span>
+                  <span className={`text-4xl font-black tabular-nums ${
+                    calamityAffectedCount > 0 ? 'text-[#002060]' : 'text-slate-300'
+                  }`}>{calamityAffectedCount}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {calamityForm.locationPinned ? `within ${calamityForm.radiusKm.toFixed(2)} km` : 'Pin a location to preview'}
+                  </span>
+                </div>
+
+                {/* Submit */}
+                <button
+                  id="submit-calamity-report-btn"
+                  onClick={handleSubmitCalamityReport}
+                  disabled={!calamityForm.locationPinned}
+                  className={`w-full py-3 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition-all ${
+                    calamityForm.locationPinned
+                      ? 'bg-gradient-to-r from-[#002060] to-[#0055cc] hover:from-[#001848] hover:to-[#003faa] text-white shadow-lg hover:shadow-xl cursor-pointer active:scale-95'
+                      : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                  }`}
+                >
+                  <FileWarning className="w-4 h-4 shrink-0" />
+                  {calamityForm.locationPinned ? 'File Calamity Report & Activate' : 'Pin a Location First'}
+                </button>
+              </div>
+
+              {/* Right: Leaflet Map for pinpointing */}
+              <div className="flex-1 flex flex-col min-h-[420px]">
+                <div className="bg-[#002060] px-4 py-2.5 flex items-center justify-between border-b border-[#001848]">
+                  <span className="text-white text-xs font-bold flex items-center gap-2">
+                    <Crosshair className="w-3.5 h-3.5 text-blue-300" />
+                    Click anywhere on the map to pinpoint the calamity location
+                  </span>
+                  {calamityForm.locationPinned && (
+                    <span className="text-emerald-400 text-[10px] font-black uppercase tracking-wide flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                      Location Pinned
+                    </span>
+                  )}
+                </div>
+                <div ref={calamityMapRef} className="flex-1 min-h-[400px] w-full z-0" />
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
