@@ -8,7 +8,7 @@ import { exportEmployeeReportToExcel } from './utils/exportEmployeeReport';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw, 
   AlertOctagon, Sparkles, Map, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
-  FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet
+  FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2
 } from 'lucide-react';
 
 export default function App() {
@@ -18,6 +18,19 @@ export default function App() {
   const [dirSearch, setDirSearch] = useState('');
   const [dirDept,   setDirDept]   = useState('All Departments');
   const [dirIsland, setDirIsland] = useState<'All' | 'Luzon' | 'Visayas' | 'Mindanao'>('All');
+  const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
+  const [dirActionsMenuId, setDirActionsMenuId] = useState<string | null>(null);
+  const [newEmpForm, setNewEmpForm] = useState({
+    name: '',
+    role: 'Data Analyst',
+    department: 'AI Operations',
+    phone: '',
+    email: '',
+    address: '',
+    islandGroup: 'Luzon' as 'Luzon' | 'Visayas' | 'Mindanao',
+    gpsLat: 14.5995,
+    gpsLng: 120.9842,
+  });
 
   // ── Calamity Report History ──────────────────────────────────────────────
   const [calamityReports, setCalamityReports] = useState<Array<{
@@ -392,6 +405,77 @@ export default function App() {
     pushLog(`Registered new staff residence coordinates: ${newEmp.name} in ${newEmp.address}.`, 'success');
   };
 
+  const gpsToGridCoords = (gpsLat: number, gpsLng: number) => {
+    const LAT_MIN = 4.5, LAT_MAX = 21.5;
+    const LNG_MIN = 116.0, LNG_MAX = 127.0;
+    const gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
+    const gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+    return {
+      gridX: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
+      gridY: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
+    };
+  };
+
+  const handleCreateEmployeeFromDirectory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEmpForm.name.trim()) return;
+
+    const { gridX, gridY } = gpsToGridCoords(newEmpForm.gpsLat, newEmpForm.gpsLng);
+    const nameParts = newEmpForm.name.trim().split(/\s+/);
+    const firstName = nameParts[0] ?? '';
+    const lastName = nameParts.slice(1).join(' ') || (nameParts[0] ?? '');
+    const avatar = (firstName[0] ?? '') + (lastName[0] ?? '');
+    const autoEmail = newEmpForm.email.trim() ||
+      `${firstName.toLowerCase()}.${lastName.toLowerCase().replace(/\s+/g, '')}@innodata.com`;
+
+    const newEmp: Employee = {
+      id: `emp-custom-${Date.now()}`,
+      name: newEmpForm.name.trim(),
+      role: newEmpForm.role.trim() || 'Data Analyst',
+      department: newEmpForm.department,
+      lat: gridY,
+      lng: gridX,
+      gpsLat: Number(newEmpForm.gpsLat),
+      gpsLng: Number(newEmpForm.gpsLng),
+      carrier: 'Globe',
+      normalSignalStrength: -75,
+      battery: Math.round(50 + Math.random() * 50),
+      status: 'Green',
+      phone: newEmpForm.phone.trim() || undefined,
+      email: autoEmail,
+      avatar: avatar.toUpperCase() || 'EM',
+      address: newEmpForm.address.trim() || `${newEmpForm.islandGroup}, PH`,
+      islandGroup: newEmpForm.islandGroup,
+      team: viewerRole,
+    };
+
+    handleAddEmployee(newEmp);
+    setShowAddEmployeeModal(false);
+    setNewEmpForm({
+      name: '',
+      role: 'Data Analyst',
+      department: 'AI Operations',
+      phone: '',
+      email: '',
+      address: '',
+      islandGroup: 'Luzon',
+      gpsLat: 14.5995,
+      gpsLng: 120.9842,
+    });
+  };
+
+  const handleRemoveEmployee = (employeeId: string, employeeName: string) => {
+    if (!window.confirm(`Remove ${employeeName} from the employee directory? This cannot be undone.`)) {
+      return;
+    }
+    setEmployees(prev => prev.filter(e => e.id !== employeeId));
+    if (selectedEmployee?.id === employeeId) {
+      setSelectedEmployee(null);
+    }
+    setDirActionsMenuId(null);
+    pushLog(`Removed ${employeeName} from the employee directory.`, 'warn');
+  };
+
   const handleResetDatabase = () => {
     setEmployees(generateAllIslandEmployees());
     setSelectedEmployee(null);
@@ -401,6 +485,14 @@ export default function App() {
     setSimulationActive(false);
     pushLog('Database reset. All personnel records restored and active calamity report cleared.', 'info');
   };
+
+  // Close employee directory actions menu on outside click
+  React.useEffect(() => {
+    if (!dirActionsMenuId) return;
+    const closeMenu = () => setDirActionsMenuId(null);
+    document.addEventListener('mousedown', closeMenu);
+    return () => document.removeEventListener('mousedown', closeMenu);
+  }, [dirActionsMenuId]);
 
   // Keep the calamityFormRef in sync so Leaflet click handlers always see fresh state
   React.useEffect(() => {
@@ -1383,17 +1475,13 @@ export default function App() {
                     Manage employee records and residential location data across {employees.length} personnel.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-black px-3 py-1.5 rounded-lg">
-                    {filtered.filter(e => e.status === 'Green').length} Safe
-                  </span>
-                  <span className="bg-amber-50 border border-amber-200 text-amber-700 text-xs font-black px-3 py-1.5 rounded-lg">
-                    {filtered.filter(e => e.status === 'Yellow').length} Awaiting
-                  </span>
-                  <span className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-black px-3 py-1.5 rounded-lg">
-                    {filtered.filter(e => e.status === 'Red').length} No Signal
-                  </span>
-                </div>
+                <button
+                  onClick={() => setShowAddEmployeeModal(true)}
+                  className="bg-[#002060] hover:bg-[#003399] text-white text-xs font-black px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition active:scale-95 shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Employee
+                </button>
               </div>
 
               {/* Toolbar */}
@@ -1491,7 +1579,7 @@ export default function App() {
               </div>
 
               {/* Table */}
-              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-visible">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-[#002060] text-white text-[10px] uppercase tracking-widest">
@@ -1499,7 +1587,7 @@ export default function App() {
                       <th className="text-left px-5 py-3 font-black">Contact</th>
                       <th className="text-left px-5 py-3 font-black">Residential Address</th>
                       <th className="text-left px-5 py-3 font-black">Location Status</th>
-                      <th className="text-center px-5 py-3 font-black">Status</th>
+                      <th className="text-right px-5 py-3 font-black w-16"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1510,11 +1598,6 @@ export default function App() {
                         </td>
                       </tr>
                     ) : filtered.map((emp, idx) => {
-                      const statusCfg = {
-                        Green:  { label: 'Safe',      bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
-                        Yellow: { label: 'Awaiting',  bg: 'bg-amber-100 text-amber-800 border-amber-300',       dot: 'bg-amber-400'  },
-                        Red:    { label: 'No Signal', bg: 'bg-rose-100 text-rose-800 border-rose-300',           dot: 'bg-rose-500'   },
-                      }[emp.status];
                       const empNum = String(idx + 1).padStart(4, '0');
                       return (
                         <tr
@@ -1571,12 +1654,38 @@ export default function App() {
                             )}
                           </td>
 
-                          {/* Status */}
-                          <td className="px-5 py-3.5 text-center">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black ${statusCfg.bg}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusCfg.dot}`} />
-                              {statusCfg.label}
-                            </span>
+                          {/* Actions */}
+                          <td className="px-5 py-3.5 text-right relative">
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDirActionsMenuId(prev => prev === emp.id ? null : emp.id);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                              aria-label={`Actions for ${emp.name}`}
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+                            {dirActionsMenuId === emp.id && (
+                              <div
+                                className="absolute right-5 top-full mt-1 z-20 min-w-[160px] bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-left"
+                                onMouseDown={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemoveEmployee(emp.id, emp.name);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                                  Remove Employee
+                                </button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1807,6 +1916,173 @@ export default function App() {
 
         </div>{/* end page content */}
       </div>{/* end body row */}
+
+      {/* ── Add Employee Modal ───────────────────────────────────────────── */}
+      {showAddEmployeeModal && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,10,40,0.70)', backdropFilter: 'blur(6px)' }}
+          onClick={() => setShowAddEmployeeModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl border border-blue-100 w-full max-w-lg max-h-[92vh] overflow-y-auto flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-r from-[#002060] via-[#003399] to-[#0055cc] px-6 py-4 flex items-center justify-between rounded-t-2xl shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/15 p-2 rounded-lg border border-white/20">
+                  <Plus className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-white font-black text-base tracking-tight">Add Employee</h2>
+                  <p className="text-blue-200 text-xs font-medium">Register a new personnel record</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddEmployeeModal(false)}
+                className="text-white/60 hover:text-white hover:bg-white/15 p-2 rounded-lg transition-all cursor-pointer border border-transparent hover:border-white/20"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateEmployeeFromDirectory} className="p-6 flex flex-col gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Maria Clara Lopez"
+                  value={newEmpForm.name}
+                  onChange={e => setNewEmpForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Role</label>
+                  <input
+                    type="text"
+                    placeholder="Data Analyst"
+                    value={newEmpForm.role}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, role: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Department</label>
+                  <select
+                    value={newEmpForm.department}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, department: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    {['AI Operations', 'GIS & Remote Sensing', 'Valuation Services', 'Real Estate Analytics', 'Data Engineering', 'QC & Audit', 'Solutions Group', 'Infrastructure Management', 'People Operations', 'Finance', 'Security', 'Field Services'].map(d => (
+                      <option key={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Phone</label>
+                  <input
+                    type="text"
+                    placeholder="0917 123 4567"
+                    value={newEmpForm.phone}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Email</label>
+                  <input
+                    type="email"
+                    placeholder="name@innodata.com"
+                    value={newEmpForm.email}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, email: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Residential Address</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Makati CBD, Makati City, Metro Manila"
+                  value={newEmpForm.address}
+                  onChange={e => setNewEmpForm(prev => ({ ...prev, address: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Island Group</label>
+                <div className="flex gap-2">
+                  {(['Luzon', 'Visayas', 'Mindanao'] as const).map(ig => {
+                    const defaults = { Luzon: { lat: 14.5995, lng: 120.9842 }, Visayas: { lat: 10.3157, lng: 123.8854 }, Mindanao: { lat: 7.0708, lng: 125.6087 } };
+                    return (
+                      <button
+                        key={ig}
+                        type="button"
+                        onClick={() => setNewEmpForm(prev => ({ ...prev, islandGroup: ig, gpsLat: defaults[ig].lat, gpsLng: defaults[ig].lng }))}
+                        className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                          newEmpForm.islandGroup === ig
+                            ? 'border-[#002060] bg-blue-50 text-[#002060] ring-1 ring-blue-300'
+                            : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                        }`}
+                      >
+                        {ig}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">GPS Latitude</label>
+                  <input
+                    type="number"
+                    step="0.00001"
+                    value={newEmpForm.gpsLat}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, gpsLat: parseFloat(e.target.value) || 0 }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">GPS Longitude</label>
+                  <input
+                    type="number"
+                    step="0.00001"
+                    value={newEmpForm.gpsLng}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, gpsLng: parseFloat(e.target.value) || 0 }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddEmployeeModal(false)}
+                  className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-lg text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-[#002060] hover:bg-[#003399] text-white font-bold py-2.5 rounded-lg text-xs transition cursor-pointer active:scale-95"
+                >
+                  Save Employee
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ── Calamity Report Modal ────────────────────────────────────────── */}
       {showCalamityModal && (
