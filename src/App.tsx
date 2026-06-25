@@ -4,10 +4,11 @@ import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam } from './types';
 import InteractiveMap from './components/InteractiveMap';
 import StatusTracker from './components/StatusTracker';
 import EmployeeRollCall from './components/EmployeeRollCall';
+import { exportEmployeeReportToExcel } from './utils/exportEmployeeReport';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw, 
   AlertOctagon, Sparkles, Map, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
-  FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList
+  FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet
 } from 'lucide-react';
 
 export default function App() {
@@ -685,6 +686,25 @@ export default function App() {
   const pendingCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Yellow').length;
   const offlineDangerCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Red').length;
 
+  const handleExportEmployeeReport = () => {
+    const count = exportEmployeeReportToExcel({
+      employees: visibleEmployees,
+      epicenter,
+      activeDisaster,
+      filterByTeam,
+      viewerRole,
+      selectedIslandGroup,
+      selectedCity,
+    });
+    const teamScope = filterByTeam ? `${viewerRole} team` : 'all teams';
+    pushLog(
+      count > 0
+        ? `Exported calamity report: ${count} affected employee(s) (${teamScope}).`
+        : `Export completed — no affected employees found for current filters (${teamScope}).`,
+      count > 0 ? 'success' : 'warn'
+    );
+  };
+
   return (
     <div className="bg-[#f8fafc] text-slate-900 min-h-screen flex flex-col font-sans transition-colors duration-250">
       
@@ -1132,6 +1152,14 @@ export default function App() {
             </div>
 
             <div className="text-xs font-mono text-slate-500 flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleExportEmployeeReport}
+                className="px-3 py-1.5 rounded-md text-[10px] font-extrabold transition-all duration-150 flex items-center gap-1.5 border cursor-pointer shrink-0 bg-emerald-600 hover:bg-emerald-500 border-emerald-700 text-white shadow-sm hover:shadow-emerald-400/30 active:scale-95"
+                title="Export affected employee calamity report to Excel (respects team & geographic filters)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                <span>Export to Excel</span>
+              </button>
               {selectedIslandGroup && (
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                   selectedIslandGroup === 'Luzon' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
@@ -1166,6 +1194,7 @@ export default function App() {
                  onResetDatabase={handleResetDatabase}
                  onDispatchRescue={handleDispatchRescue}
                  activeDisaster={activeDisaster}
+                 onExportReport={handleExportEmployeeReport}
                />
             </div>
 

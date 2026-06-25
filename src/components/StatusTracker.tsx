@@ -3,7 +3,7 @@ import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam } from '../types';
 import { 
   Search, Send, ShieldAlert, Plus, HelpCircle, Flame, MapPin, 
   Users, Battery, RefreshCw, Phone, Mail, Signal, CheckCircle, 
-  AlertCircle, AlertOctagon, UserCheck, HeartHandshake, Compass
+  AlertCircle, AlertOctagon, UserCheck, HeartHandshake, Compass, FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -21,6 +21,7 @@ interface StatusTrackerProps {
   onDispatchRescue: (employeeId: string) => void;
   activeDisaster: DisasterConfig;
   viewerRole?: EmployeeTeam;
+  onExportReport?: () => void;
 }
 
 export default function StatusTracker({
@@ -37,6 +38,7 @@ export default function StatusTracker({
   onDispatchRescue,
   activeDisaster,
   viewerRole = 'HR/CSR',
+  onExportReport,
 }: StatusTrackerProps) {
   const [activeTab, setActiveTab] = useState<'AFFECTED' | 'ALL_EMPLOYEES' | 'ADD_NEW'>('AFFECTED');
   const [searchQuery, setSearchQuery] = useState('');
@@ -256,7 +258,18 @@ export default function StatusTracker({
         </div>
         
         {/* Reset Database option */}
-        <button
+        <div className="flex items-center gap-2">
+          {onExportReport && (
+            <button
+              onClick={onExportReport}
+              className="text-xs uppercase font-mono font-black text-emerald-700 hover:text-emerald-800 flex items-center gap-1 cursor-pointer transition-colors px-2 py-1 hover:bg-emerald-50 rounded border border-emerald-200"
+              title="Export affected employee report to Excel"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Export Excel</span>
+            </button>
+          )}
+          <button
           onClick={onResetDatabase}
           className="text-xs uppercase font-mono font-black text-slate-400 hover:text-red-700 flex items-center gap-1 cursor-pointer transition-colors px-2 py-1 hover:bg-red-50 rounded"
           title="Reset database to initial Cebu employees list"
@@ -264,6 +277,7 @@ export default function StatusTracker({
           <RefreshCw className="w-3.5 h-3.5 animate-spin-hover" />
           <span>RESET DATABASE</span>
         </button>
+        </div>
       </div>
 
       {/* 2. LIVE CRISIS SEVERITY CONTROLLERS (AFFECTED TAB PANEL ONLY) */}
