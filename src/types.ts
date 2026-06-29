@@ -1,4 +1,22 @@
 export type Carrier = 'Globe' | 'Smart' | 'DITO';
+
+export interface AidApplication {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  incidentId: string;
+  incidentName: string;
+  aidType: 'Cash' | 'Relief Goods' | 'Both';
+  amountPhp?: number;
+  description: string;
+  status: 'Submitted' | 'Under Review' | 'Approved' | 'Disbursed' | 'Rejected';
+  priority: 'Normal' | 'Urgent';
+  filedDate: string;
+  approver?: string;
+  approvedDate?: string;
+  department: string;
+  islandGroup: string;
+}
 export type SafetyStatus = 'Green' | 'Yellow' | 'Red';
 export type TowerStatus = 'ONLINE' | 'CONGESTED' | 'OFFLINE';
 export type EmployeeTeam = 'HR/CSR' | 'Manager';

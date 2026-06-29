@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees } from './data_islands';
-import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam } from './types';
+import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam, AidApplication } from './types';
 import InteractiveMap from './components/InteractiveMap';
 import EmployeeRollCall from './components/EmployeeRollCall';
 import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
 import { 
-  ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw, 
+  ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
   AlertOctagon, Sparkles, Map, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
-  FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2
+  FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2,
+  HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap
 } from 'lucide-react';
 
 export default function App() {
   // ── Page navigation ─────────────────────────────────────────────────────
-  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'reports'>('dashboard');
+  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive'>('dashboard');
   // Employee Directory search/filter state
   const [dirSearch, setDirSearch] = useState('');
   const [dirDept,   setDirDept]   = useState('All Departments');
@@ -49,7 +50,40 @@ export default function App() {
   }>>([])
 
   // Track which report card has its employee list expanded
-  const [expandedReportId, setExpandedReportId] = useState<string | null>(null);;
+  const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
+
+  // ── Safety Status page filters ────────────────────────────────────────────
+  const [safetySearch, setSafetySearch] = useState('');
+  const [safetyIslandFilter, setSafetyIslandFilter] = useState<'All' | 'Luzon' | 'Visayas' | 'Mindanao'>('All');
+  const [safetyStatusFilter, setSafetyStatusFilter] = useState<'All' | 'Green' | 'Yellow' | 'Red' | 'Uncontacted'>('All');
+
+  // ── Active Incidents page filters ─────────────────────────────────────────
+  const [incidentStatusFilter, setIncidentStatusFilter] = useState<'All' | 'Active' | 'Resolved'>('All');
+  const [resolvedReports, setResolvedReports] = useState<Record<string, boolean>>({});
+
+  // ── Aid Management state ──────────────────────────────────────────────────
+  const [aidStatusFilter, setAidStatusFilter] = useState<'All' | 'Submitted' | 'Under Review' | 'Approved' | 'Disbursed' | 'Rejected'>('All');
+  const [showAidModal, setShowAidModal] = useState(false);
+  const [aidForm, setAidForm] = useState({
+    employeeName: '',
+    incidentName: '',
+    aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
+    amountPhp: '',
+    description: '',
+    priority: 'Normal' as 'Normal' | 'Urgent',
+    department: 'AI Operations',
+    islandGroup: 'Luzon' as 'Luzon' | 'Visayas' | 'Mindanao',
+  });
+  const [aidApplications, setAidApplications] = useState<AidApplication[]>([
+    { id: 'AID-001', employeeId: '', employeeName: 'Maria Santos', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Both', amountPhp: 15000, description: 'Roof heavily damaged, household items lost. Family of 4.', status: 'Disbursed', priority: 'Urgent', filedDate: 'Jun 25, 2026', approver: 'HR Manager', approvedDate: 'Jun 26, 2026', department: 'AI Operations', islandGroup: 'Luzon' },
+    { id: 'AID-002', employeeId: '', employeeName: 'Juan dela Cruz', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Cash', amountPhp: 10000, description: 'Floodwater reached chest level. Evacuated to barangay shelter.', status: 'Approved', priority: 'Urgent', filedDate: 'Jun 25, 2026', approver: 'HR Manager', approvedDate: 'Jun 27, 2026', department: 'Data Engineering', islandGroup: 'Luzon' },
+    { id: 'AID-003', employeeId: '', employeeName: 'Ana Reyes', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Relief Goods', description: 'No food and water for 2 days. Family still at evacuation center.', status: 'Under Review', priority: 'Normal', filedDate: 'Jun 26, 2026', department: 'QC & Audit', islandGroup: 'Luzon' },
+    { id: 'AID-004', employeeId: '', employeeName: 'Carlos Mendoza', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', amountPhp: 8000, description: 'Personal belongings destroyed by fire. Temporary shelter needed.', status: 'Submitted', priority: 'Urgent', filedDate: 'Jun 28, 2026', department: 'GIS & Remote Sensing', islandGroup: 'Visayas' },
+    { id: 'AID-005', employeeId: '', employeeName: 'Liza Bautista', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Both', amountPhp: 12000, description: 'Minor burns, lost work laptop and clothing. Single parent.', status: 'Under Review', priority: 'Urgent', filedDate: 'Jun 28, 2026', department: 'Valuation Services', islandGroup: 'Visayas' },
+    { id: 'AID-006', employeeId: '', employeeName: 'Roberto Garcia', incidentId: '', incidentName: 'Earthquake — Davao', aidType: 'Cash', amountPhp: 5000, description: 'Wall cracks. House declared structurally unsafe by DPWH.', status: 'Approved', priority: 'Normal', filedDate: 'Jun 27, 2026', approver: 'Team Manager', approvedDate: 'Jun 28, 2026', department: 'Field Services', islandGroup: 'Mindanao' },
+    { id: 'AID-007', employeeId: '', employeeName: 'Patricia Flores', incidentId: '', incidentName: 'Earthquake — Davao', aidType: 'Relief Goods', description: 'Water and power outage for 3 days. Needs basic supplies.', status: 'Disbursed', priority: 'Normal', filedDate: 'Jun 27, 2026', approver: 'HR Manager', approvedDate: 'Jun 28, 2026', department: 'Solutions Group', islandGroup: 'Mindanao' },
+    { id: 'AID-008', employeeId: '', employeeName: 'Michael Torres', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', amountPhp: 10000, description: 'Renting unit in affected building. All personal items lost.', status: 'Submitted', priority: 'Normal', filedDate: 'Jun 29, 2026', department: 'Infrastructure Management', islandGroup: 'Visayas' },
+  ]);
 
   // State for Map View mode: 'island' or 'metro'
   const [mapView, setMapView] = useState<'island' | 'metro'>('island');
@@ -924,30 +958,62 @@ export default function App() {
             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/60">Navigation</span>
           </div>
 
-          <div className="flex flex-col gap-1 px-3">
-            {([
-              { id: 'dashboard' as const, label: 'Main Dashboard',    Icon: LayoutDashboard },
-              { id: 'directory' as const, label: 'Employee Directory', Icon: BookUser },
-              { id: 'reports'   as const, label: 'Calamity Reports',  Icon: ClipboardList, badge: calamityReports.length },
-            ]).map(({ id, label, Icon, badge }) => (
-              <button
-                key={id}
-                onClick={() => setActivePage(id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all duration-150 cursor-pointer text-left group ${
-                  activePage === id
-                    ? 'bg-white/15 text-white shadow-inner border border-white/10'
-                    : 'text-blue-200/80 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <Icon className={`w-4.5 h-4.5 shrink-0 transition-colors ${ activePage === id ? 'text-white' : 'text-blue-300 group-hover:text-white' }`} />
-                <span className="flex-1 leading-tight">{label}</span>
-                {badge != null && badge > 0 && (
-                  <span className="bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
-                    {badge}
-                  </span>
-                )}
-              </button>
-            ))}
+          <div className="flex flex-col px-3 py-1 gap-0.5">
+
+            {/* ── MAIN ── */}
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mt-2 mb-0.5">Main</p>
+            <button onClick={() => setActivePage('dashboard')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'dashboard' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+              <LayoutDashboard className={`w-4 h-4 shrink-0 ${activePage === 'dashboard' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+              <span className="flex-1 leading-tight">Overview Dashboard</span>
+            </button>
+            <button onClick={() => setActivePage('executive')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'executive' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+              <TrendingUp className={`w-4 h-4 shrink-0 ${activePage === 'executive' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+              <span className="flex-1 leading-tight">Executive Dashboard</span>
+            </button>
+
+            {/* ── CRISIS MONITORING ── */}
+            <div className="mx-1 my-2.5 border-t border-white/10" />
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mb-0.5">Crisis Monitoring</p>
+            <button onClick={() => setActivePage('incidents')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'incidents' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+              <Siren className={`w-4 h-4 shrink-0 ${activePage === 'incidents' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+              <span className="flex-1 leading-tight">Active Incidents</span>
+              {calamityReports.length > 0 && (
+                <span className="bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{calamityReports.length}</span>
+              )}
+            </button>
+            <button onClick={() => setActivePage('safety')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'safety' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+              <ShieldCheck className={`w-4 h-4 shrink-0 ${activePage === 'safety' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+              <span className="flex-1 leading-tight">Employee Safety</span>
+              {employees.filter(e => e.status === 'Red').length > 0 && (
+                <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{employees.filter(e => e.status === 'Red').length}</span>
+              )}
+            </button>
+
+            {/* ── AID MANAGEMENT ── */}
+            <div className="mx-1 my-2.5 border-t border-white/10" />
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mb-0.5">Aid Management</p>
+            <button onClick={() => setActivePage('aid')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'aid' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+              <HeartHandshake className={`w-4 h-4 shrink-0 ${activePage === 'aid' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+              <span className="flex-1 leading-tight">Aid Applications</span>
+              {aidApplications.filter(a => a.status === 'Submitted').length > 0 && (
+                <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{aidApplications.filter(a => a.status === 'Submitted').length}</span>
+              )}
+            </button>
+
+            {/* ── EMPLOYEES ── */}
+            <div className="mx-1 my-2.5 border-t border-white/10" />
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mb-0.5">Employees</p>
+            <button onClick={() => setActivePage('directory')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'directory' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+              <BookUser className={`w-4 h-4 shrink-0 ${activePage === 'directory' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+              <span className="flex-1 leading-tight">Employee Directory</span>
+            </button>
+
           </div>
 
           <div className="mx-5 my-4 border-t border-white/10" />
@@ -1572,26 +1638,67 @@ export default function App() {
         );
       })()}
 
-      {/* ──────────── CALAMITY REPORTS PAGE ──────────── */}
-      {activePage === 'reports' && (
-        <div className="flex-1 p-6">
+      {/* ──────────── ACTIVE INCIDENTS PAGE ──────────── */}
+      {activePage === 'incidents' && (
+        <div className="flex-1 p-6 bg-[#f8fafc]">
           <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
 
             {/* Page header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
-                  <ClipboardList className="w-5 h-5" /> Calamity Reports
+                  <Siren className="w-5 h-5" /> Active Incidents
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  History of all manually filed incident reports by HR / Management.
+                  All filed incident reports — track status, affected personnel, and response progress.
                 </p>
               </div>
-              {calamityReports.length > 0 && (
-                <span className="bg-orange-100 text-orange-700 border border-orange-200 text-xs font-black px-3 py-1 rounded-full">
-                  {calamityReports.length} report{calamityReports.length !== 1 ? 's' : ''} filed
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {simulationActive && (
+                  <span className="flex items-center gap-1.5 bg-red-100 border border-red-300 text-red-700 text-xs font-black px-3 py-1.5 rounded-full animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-red-500" />
+                    Incident Active
+                  </span>
+                )}
+                <button
+                  onClick={() => { setActivePage('dashboard'); setShowCalamityModal(true); }}
+                  className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-black px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition active:scale-95 shadow-sm"
+                >
+                  <FileWarning className="w-3.5 h-3.5" /> File New Incident
+                </button>
+              </div>
+            </div>
+
+            {/* KPI strip */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: 'Total Incidents', value: calamityReports.length, color: 'bg-white border-slate-200', textColor: 'text-slate-800' },
+                { label: 'Currently Active', value: simulationActive ? 1 : 0, color: simulationActive ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200', textColor: simulationActive ? 'text-red-700' : 'text-slate-400' },
+                { label: 'Employees in Zone', value: simulationActive ? employees.filter(e => getDistance(e) <= epicenter.radiusKm).length : 0, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-700' },
+                { label: 'Aid Applications', value: aidApplications.length, color: 'bg-emerald-50 border-emerald-200', textColor: 'text-emerald-700' },
+              ].map(({ label, value, color, textColor }) => (
+                <div key={label} className={`${color} border rounded-xl p-4 flex flex-col gap-1`}>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                  <span className={`text-3xl font-black ${textColor}`}>{value}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Status filter */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm px-4 py-3 flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Status:</span>
+              <div className="flex gap-1.5 bg-slate-50 border border-slate-200 rounded-lg p-1">
+                {(['All', 'Active', 'Resolved'] as const).map(s => (
+                  <button key={s} onClick={() => setIncidentStatusFilter(s)}
+                    className={`px-3 py-1.5 rounded-md text-[11px] font-black border transition-all cursor-pointer ${
+                      incidentStatusFilter === s ? 'bg-[#002060] border-[#001848] text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                    }`}>{s}
+                  </button>
+                ))}
+              </div>
+              <span className="ml-auto text-[10px] text-slate-400 font-mono">
+                {calamityReports.filter(r => incidentStatusFilter === 'All' ? true : incidentStatusFilter === 'Active' ? !resolvedReports[r.id] : resolvedReports[r.id]).length} of {calamityReports.length} incidents
+              </span>
             </div>
 
             {/* Empty state */}
@@ -1799,6 +1906,528 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ──────────── EMPLOYEE SAFETY STATUS PAGE ──────────── */}
+      {activePage === 'safety' && (() => {
+        const safetyFiltered = employees.filter(emp => {
+          const q = safetySearch.toLowerCase();
+          const matchSearch = !q || emp.name.toLowerCase().includes(q) || (emp.department || '').toLowerCase().includes(q);
+          const matchIsland = safetyIslandFilter === 'All' || emp.islandGroup === safetyIslandFilter;
+          const matchStatus = safetyStatusFilter === 'All' ? true
+            : safetyStatusFilter === 'Uncontacted' ? !emp.contacted
+            : emp.status === safetyStatusFilter;
+          return matchSearch && matchIsland && matchStatus;
+        });
+        const safeCount   = employees.filter(e => e.status === 'Green').length;
+        const awaitCount  = employees.filter(e => e.status === 'Yellow').length;
+        const noSigCount  = employees.filter(e => e.status === 'Red').length;
+        const respRate    = employees.length > 0 ? Math.round(((safeCount + awaitCount) / employees.length) * 100) : 100;
+        return (
+          <div className="flex-1 p-6 bg-[#f8fafc]">
+            <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
+
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5" /> Employee Safety Status
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {simulationActive ? 'Real-time safety roll call for the active incident zone.' : 'No active incident — showing all employee safety records.'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {simulationActive && (
+                    <span className="flex items-center gap-1.5 bg-orange-100 border border-orange-300 text-orange-700 text-xs font-black px-3 py-1.5 rounded-full animate-pulse">
+                      <span className="w-2 h-2 rounded-full bg-orange-500" /> Incident Active
+                    </span>
+                  )}
+                  <button onClick={handleSendCheckInAllAffected} disabled={!simulationActive}
+                    className="bg-[#002060] hover:bg-[#003399] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-black px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition active:scale-95 shadow-sm">
+                    <Send className="w-3.5 h-3.5" /> Contact All Affected
+                  </button>
+                </div>
+              </div>
+
+              {/* KPI Strip */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                {[
+                  { label: 'Total Personnel', value: employees.length, color: 'bg-white border-slate-200', textColor: 'text-slate-800', Icon: Users },
+                  { label: 'Safe / Confirmed', value: safeCount, color: 'bg-emerald-50 border-emerald-200', textColor: 'text-emerald-700', Icon: CheckCircle },
+                  { label: 'Awaiting Reply', value: awaitCount, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-700', Icon: Clock },
+                  { label: 'No Signal / SOS', value: noSigCount, color: 'bg-rose-50 border-rose-200', textColor: 'text-rose-700', Icon: ShieldAlert },
+                  { label: 'Response Rate', value: `${respRate}%`, color: 'bg-blue-50 border-blue-200', textColor: 'text-blue-700', Icon: TrendingUp },
+                ].map(({ label, value, color, textColor, Icon }) => (
+                  <div key={label} className={`${color} border rounded-xl p-4 flex flex-col gap-1`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                      <Icon className={`w-4 h-4 ${textColor}`} />
+                    </div>
+                    <span className={`text-2xl font-black ${textColor}`}>{value}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Filters */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm px-4 py-3 flex flex-wrap items-center gap-3">
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <input type="text" placeholder="Search by name or department..."
+                    value={safetySearch} onChange={e => setSafetySearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400 transition" />
+                </div>
+                <div className="flex gap-1.5 bg-slate-50 border border-slate-200 rounded-lg p-1">
+                  {(['All', 'Luzon', 'Visayas', 'Mindanao'] as const).map(ig => (
+                    <button key={ig} onClick={() => setSafetyIslandFilter(ig)}
+                      className={`px-2.5 py-1.5 rounded-md text-[11px] font-black border transition-all cursor-pointer ${
+                        safetyIslandFilter === ig ? 'bg-[#002060] border-[#001848] text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                      }`}>{ig === 'All' ? '🇵🇭 All' : ig}</button>
+                  ))}
+                </div>
+                <div className="flex gap-1.5 bg-slate-50 border border-slate-200 rounded-lg p-1 flex-wrap">
+                  {[{k:'All',l:'All'},{k:'Green',l:'✔ Safe'},{k:'Yellow',l:'⧖ Awaiting'},{k:'Red',l:'✕ No Signal'},{k:'Uncontacted',l:'— Not Contacted'}].map(({k,l}) => (
+                    <button key={k} onClick={() => setSafetyStatusFilter(k as typeof safetyStatusFilter)}
+                      className={`px-2.5 py-1.5 rounded-md text-[11px] font-black border transition-all cursor-pointer ${
+                        safetyStatusFilter === k ? 'bg-[#002060] border-[#001848] text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                      }`}>{l}</button>
+                  ))}
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono ml-auto">{safetyFiltered.length} of {employees.length}</span>
+              </div>
+
+              {/* Table */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-[#002060] text-white text-[10px] uppercase tracking-widest">
+                      <th className="text-left px-4 py-3 font-black">#</th>
+                      <th className="text-left px-4 py-3 font-black">Employee</th>
+                      <th className="text-left px-4 py-3 font-black">Island / Dept</th>
+                      <th className="text-left px-4 py-3 font-black">Home Address</th>
+                      <th className="text-left px-4 py-3 font-black">Check-in Sent</th>
+                      <th className="text-left px-4 py-3 font-black">Last Message</th>
+                      <th className="text-center px-4 py-3 font-black">Safety Status</th>
+                      <th className="text-center px-4 py-3 font-black">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {safetyFiltered.length === 0 ? (
+                      <tr><td colSpan={8} className="text-center py-16 text-slate-400 text-sm">No employees match your filters.</td></tr>
+                    ) : safetyFiltered.map((emp, idx) => {
+                      const sc = {
+                        Green:  { label: 'Safe',      bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
+                        Yellow: { label: 'Awaiting',  bg: 'bg-amber-100 text-amber-800 border-amber-300',       dot: 'bg-amber-400'  },
+                        Red:    { label: 'No Signal', bg: 'bg-rose-100 text-rose-800 border-rose-300',           dot: 'bg-rose-500'   },
+                      }[emp.status];
+                      return (
+                        <tr key={emp.id} className={`border-t border-slate-100 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-[#f8fafc]'} hover:bg-blue-50/40`}>
+                          <td className="px-4 py-3 text-slate-400 font-mono text-[10px]">{idx + 1}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-full bg-[#002060] text-white text-[11px] font-black flex items-center justify-center shrink-0">{emp.avatar}</div>
+                              <div>
+                                <p className="font-bold text-slate-800 leading-tight">{emp.name}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">{emp.role}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-0.5">
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full inline-block w-fit ${
+                                emp.islandGroup === 'Luzon' ? 'bg-emerald-100 text-emerald-700' :
+                                emp.islandGroup === 'Visayas' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+                              }`}>{emp.islandGroup}</span>
+                              <span className="text-[10px] text-slate-500">{emp.department}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 text-[11px] max-w-[200px]">
+                            <span className="block truncate">{emp.address || '—'}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {emp.contacted
+                              ? <span className="text-emerald-600 font-bold text-[10px]">✔ Sent {emp.lastMessageSent ? `· ${emp.lastMessageSent}` : ''}</span>
+                              : <span className="text-slate-400 italic text-[10px]">Not yet contacted</span>}
+                          </td>
+                          <td className="px-4 py-3 max-w-[180px]">
+                            {emp.safetyMessage
+                              ? <span className="text-[10px] text-slate-600 italic block truncate">"{emp.safetyMessage}"</span>
+                              : emp.unresponsive
+                              ? <span className="text-rose-500 font-bold text-[10px]">Unresponsive</span>
+                              : <span className="text-slate-300 text-[10px]">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black ${sc.bg}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />{sc.label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-1">
+                              {!emp.contacted && (
+                                <button onClick={() => handleSendCheckIn(emp.id)}
+                                  className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black rounded-md transition cursor-pointer" title="Send SMS">SMS</button>
+                              )}
+                              {emp.contacted && emp.status === 'Yellow' && (<>
+                                <button onClick={() => handleSimulateReply(emp.id)}
+                                  className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black rounded-md transition cursor-pointer">Safe</button>
+                                <button onClick={() => handleSimulateReply(emp.id, 'Red')}
+                                  className="px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black rounded-md transition cursor-pointer">SOS</button>
+                              </>)}
+                              {emp.status === 'Red' && !emp.rescueDispatched && (
+                                <button onClick={() => handleDispatchRescue(emp.id)}
+                                  className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black rounded-md transition cursor-pointer">Aid</button>
+                              )}
+                              {emp.rescueDispatched && (
+                                <span className="text-[10px] text-emerald-600 font-black whitespace-nowrap">✔ Aid Sent</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ──────────── AID APPLICATIONS PAGE ──────────── */}
+      {activePage === 'aid' && (() => {
+        const statusCfgMap: Record<string, { bg: string; dot: string }> = {
+          'Submitted':    { bg: 'bg-slate-100 text-slate-700 border-slate-300', dot: 'bg-slate-400' },
+          'Under Review': { bg: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500' },
+          'Approved':     { bg: 'bg-blue-100 text-blue-800 border-blue-300', dot: 'bg-blue-500' },
+          'Disbursed':    { bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
+          'Rejected':     { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
+        };
+        const filteredAid = aidApplications.filter(a => aidStatusFilter === 'All' || a.status === aidStatusFilter);
+        const totalPhp    = aidApplications.filter(a => a.status === 'Disbursed' || a.status === 'Approved').reduce((s, a) => s + (a.amountPhp || 0), 0);
+        const pendingCnt  = aidApplications.filter(a => a.status === 'Submitted' || a.status === 'Under Review').length;
+        const approvedCnt = aidApplications.filter(a => a.status === 'Approved' || a.status === 'Disbursed').length;
+        return (
+          <div className="flex-1 p-6 bg-[#f8fafc]">
+            <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
+
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
+                    <HeartHandshake className="w-5 h-5" /> Aid Applications
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Track, review, and approve Crisis Aid applications from assessment through disbursement.</p>
+                </div>
+                <button onClick={() => setShowAidModal(true)}
+                  className="bg-[#002060] hover:bg-[#003399] text-white text-xs font-black px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition active:scale-95 shadow-sm">
+                  <Plus className="w-4 h-4" /> New Application
+                </button>
+              </div>
+
+              {/* KPI Strip */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Total Applications', value: aidApplications.length, color: 'bg-white border-slate-200', textColor: 'text-slate-800' },
+                  { label: 'Pending Review', value: pendingCnt, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-700' },
+                  { label: 'Approved / Disbursed', value: approvedCnt, color: 'bg-emerald-50 border-emerald-200', textColor: 'text-emerald-700' },
+                  { label: 'Total Aid Value (PHP)', value: `₱${totalPhp.toLocaleString()}`, color: 'bg-blue-50 border-blue-200', textColor: 'text-blue-700' },
+                ].map(({ label, value, color, textColor }) => (
+                  <div key={label} className={`${color} border rounded-xl p-4 flex flex-col gap-1`}>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                    <span className={`text-2xl font-black ${textColor}`}>{value}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Workflow stepper */}
+              <div className="bg-white border border-slate-200 rounded-xl px-5 py-3 flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-1">Workflow:</span>
+                {['Submitted', 'Under Review', 'Approved', 'Disbursed'].map((step, i) => (
+                  <React.Fragment key={step}>
+                    {i > 0 && <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />}
+                    <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${statusCfgMap[step]?.bg || ''}`}>{step}</span>
+                  </React.Fragment>
+                ))}
+                <span className="mx-2 text-slate-200">|</span>
+                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${statusCfgMap['Rejected'].bg}`}>Rejected</span>
+              </div>
+
+              {/* Status filter */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm px-4 py-3 flex items-center gap-3 flex-wrap">
+                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Filter:</span>
+                <div className="flex gap-1.5 bg-slate-50 border border-slate-200 rounded-lg p-1 flex-wrap">
+                  {(['All', 'Submitted', 'Under Review', 'Approved', 'Disbursed', 'Rejected'] as const).map(s => (
+                    <button key={s} onClick={() => setAidStatusFilter(s)}
+                      className={`px-2.5 py-1.5 rounded-md text-[11px] font-black border transition-all cursor-pointer ${
+                        aidStatusFilter === s ? 'bg-[#002060] border-[#001848] text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                      }`}>{s}</button>
+                  ))}
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono ml-auto">{filteredAid.length} of {aidApplications.length} records</span>
+              </div>
+
+              {/* Table */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-[#002060] text-white text-[10px] uppercase tracking-widest">
+                      <th className="text-left px-4 py-3 font-black">Case ID</th>
+                      <th className="text-left px-4 py-3 font-black">Employee</th>
+                      <th className="text-left px-4 py-3 font-black">Incident</th>
+                      <th className="text-left px-4 py-3 font-black">Aid Type</th>
+                      <th className="text-left px-4 py-3 font-black">Amount</th>
+                      <th className="text-left px-4 py-3 font-black">Priority</th>
+                      <th className="text-left px-4 py-3 font-black">Filed Date</th>
+                      <th className="text-center px-4 py-3 font-black">Status</th>
+                      <th className="text-left px-4 py-3 font-black">Approver</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAid.length === 0
+                      ? <tr><td colSpan={9} className="text-center py-16 text-slate-400 text-sm">No applications match your filter.</td></tr>
+                      : filteredAid.map((app, idx) => {
+                          const sc = statusCfgMap[app.status] || statusCfgMap['Submitted'];
+                          return (
+                            <tr key={app.id} className={`border-t border-slate-100 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-[#f8fafc]'} hover:bg-blue-50/40`}>
+                              <td className="px-4 py-3 font-mono font-black text-[#002060] text-[11px]">{app.id}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="font-bold text-slate-800">{app.employeeName}</span>
+                                  <span className="text-[10px] text-slate-400">{app.department} · {app.islandGroup}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 max-w-[180px]">
+                                <span className="text-slate-700 font-medium block truncate text-[11px]">{app.incidentName}</span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                  app.aidType === 'Cash' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                                  app.aidType === 'Relief Goods' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                                  'bg-purple-50 border-purple-200 text-purple-700'
+                                }`}>{app.aidType}</span>
+                              </td>
+                              <td className="px-4 py-3 font-black text-slate-800">{app.amountPhp ? `₱${app.amountPhp.toLocaleString()}` : '—'}</td>
+                              <td className="px-4 py-3">
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                  app.priority === 'Urgent' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-50 border-slate-200 text-slate-600'
+                                }`}>{app.priority}</span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-500 font-mono text-[10px]">{app.filedDate}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black ${sc.bg}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sc.dot}`} />{app.status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-500 text-[11px]">{app.approver || '—'}</td>
+                            </tr>
+                          );
+                        })
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ──────────── EXECUTIVE DASHBOARD PAGE ──────────── */}
+      {activePage === 'executive' && (() => {
+        const totalImpacted  = simulationActive ? employees.filter(e => getDistance(e) <= epicenter.radiusKm).length : 0;
+        const exSafeCount    = employees.filter(e => e.status === 'Green').length;
+        const exAwaitCount   = employees.filter(e => e.status === 'Yellow').length;
+        const exNoSigCount   = employees.filter(e => e.status === 'Red').length;
+        const exRespRate     = employees.length > 0 ? Math.round(((exSafeCount + exAwaitCount) / employees.length) * 100) : 100;
+        const exDisbursed    = aidApplications.filter(a => a.status === 'Disbursed').reduce((s, a) => s + (a.amountPhp || 0), 0);
+        const exApproved     = aidApplications.filter(a => a.status === 'Approved').reduce((s, a) => s + (a.amountPhp || 0), 0);
+        const islandBreakdown = (['Luzon', 'Visayas', 'Mindanao'] as const).map(ig => {
+          const emps  = employees.filter(e => e.islandGroup === ig);
+          const safe  = emps.filter(e => e.status === 'Green');
+          const impacted = simulationActive ? emps.filter(e => getDistance(e) <= epicenter.radiusKm).length : 0;
+          const colorKey = ig === 'Luzon' ? 'emerald' : ig === 'Visayas' ? 'blue' : 'amber';
+          return { name: ig, total: emps.length, impacted, safe: safe.length, safeRate: emps.length > 0 ? Math.round((safe.length / emps.length) * 100) : 100, colorKey };
+        });
+        const incidentAidMap: Record<string, { submitted: number; approved: number; total: number }> = {};
+        aidApplications.forEach(a => {
+          if (!incidentAidMap[a.incidentName]) incidentAidMap[a.incidentName] = { submitted: 0, approved: 0, total: 0 };
+          incidentAidMap[a.incidentName].submitted++;
+          if (a.status === 'Approved' || a.status === 'Disbursed') { incidentAidMap[a.incidentName].approved++; incidentAidMap[a.incidentName].total += (a.amountPhp || 0); }
+        });
+        // SVG donut helpers
+        const donutTotal = exSafeCount + exAwaitCount + exNoSigCount || 1;
+        const polarXY = (cx: number, cy: number, r: number, deg: number) => ({ x: cx + r * Math.cos((deg - 90) * Math.PI / 180), y: cy + r * Math.sin((deg - 90) * Math.PI / 180) });
+        const arc = (cx: number, cy: number, r: number, s: number, e: number) => { const sp = polarXY(cx,cy,r,s); const ep = polarXY(cx,cy,r,e); return `M ${sp.x} ${sp.y} A ${r} ${r} 0 ${e-s>180?1:0} 1 ${ep.x} ${ep.y}`; };
+        const seg1e = (exSafeCount / donutTotal) * 360;
+        const seg2e = seg1e + (exAwaitCount / donutTotal) * 360;
+        return (
+          <div className="flex-1 p-6 bg-[#f8fafc]">
+            <div className="max-w-[1550px] mx-auto flex flex-col gap-6">
+
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5" /> Executive Dashboard
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Real-time management overview — crisis response KPIs and aid distribution summary.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-slate-400 bg-white border border-slate-200 px-3 py-1.5 rounded-lg">Updated: {new Date().toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}</span>
+                  {simulationActive && (
+                    <span className="flex items-center gap-1.5 bg-red-100 border border-red-300 text-red-700 text-xs font-black px-3 py-1.5 rounded-full animate-pulse">
+                      <span className="w-2 h-2 rounded-full bg-red-500" /> Active Incident
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Top KPI gradient cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Active Incidents', value: calamityReports.length, sub: simulationActive ? '1 currently active' : 'No active alert', grad: 'from-[#002060] to-[#0055cc]', Icon: Siren },
+                  { label: 'Employees Impacted', value: totalImpacted, sub: `of ${employees.length} total personnel`, grad: 'from-rose-600 to-rose-500', Icon: Users },
+                  { label: 'Response Rate', value: `${exRespRate}%`, sub: `${exSafeCount} confirmed safe`, grad: 'from-emerald-700 to-emerald-500', Icon: ShieldCheck },
+                  { label: 'Aid Disbursed (PHP)', value: `₱${exDisbursed.toLocaleString()}`, sub: `₱${exApproved.toLocaleString()} pending`, grad: 'from-amber-600 to-amber-500', Icon: DollarSign },
+                ].map(({ label, value, sub, grad, Icon }) => (
+                  <div key={label} className={`bg-gradient-to-br ${grad} rounded-2xl p-5 text-white shadow-lg`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-white/70">{label}</span>
+                      <div className="bg-white/15 p-1.5 rounded-lg"><Icon className="w-4 h-4 text-white" /></div>
+                    </div>
+                    <p className="text-3xl font-black leading-none mb-1">{value}</p>
+                    <p className="text-[11px] text-white/60 font-medium">{sub}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                {/* Safety donut */}
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 flex flex-col gap-4">
+                  <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#002060]" /> Safety Distribution
+                  </h3>
+                  <div className="flex items-center gap-6">
+                    <svg width="120" height="120" viewBox="0 0 120 120" className="shrink-0">
+                      {donutTotal <= 1 ? (
+                        <circle cx="60" cy="60" r="45" fill="none" stroke="#e2e8f0" strokeWidth="18" />
+                      ) : (<>
+                        {exSafeCount > 0 && <path d={arc(60,60,45,0,seg1e)} fill="none" stroke="#10b981" strokeWidth="18" />}
+                        {exAwaitCount > 0 && <path d={arc(60,60,45,seg1e,seg2e)} fill="none" stroke="#f59e0b" strokeWidth="18" />}
+                        {exNoSigCount > 0 && <path d={arc(60,60,45,seg2e,360)} fill="none" stroke="#f43f5e" strokeWidth="18" />}
+                      </>)}
+                      <circle cx="60" cy="60" r="32" fill="white" />
+                      <text x="60" y="57" textAnchor="middle" fontSize="14" fontWeight="900" fill="#002060">{exRespRate}%</text>
+                      <text x="60" y="70" textAnchor="middle" fontSize="8" fill="#94a3b8" fontWeight="700">Response</text>
+                    </svg>
+                    <div className="flex flex-col gap-2.5 flex-1">
+                      {[{label:'Safe',count:exSafeCount,color:'bg-emerald-500'},{label:'Awaiting',count:exAwaitCount,color:'bg-amber-400'},{label:'No Signal',count:exNoSigCount,color:'bg-rose-500'},{label:'Not Contacted',count:employees.filter(e=>!e.contacted).length,color:'bg-slate-300'}].map(({label,count,color})=>(
+                        <div key={label} className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2"><span className={`w-2.5 h-2.5 rounded-full ${color} shrink-0`}/><span className="text-xs text-slate-600 font-medium">{label}</span></div>
+                          <span className="text-xs font-black text-slate-800 font-mono">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Island Breakdown */}
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 flex flex-col gap-4">
+                  <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#002060]" /> Island Group Breakdown
+                  </h3>
+                  <div className="flex flex-col gap-3">
+                    {islandBreakdown.map(({ name, total, impacted, safe, safeRate, colorKey }) => (
+                      <div key={name} className={`bg-${colorKey}-50 border border-${colorKey}-200 rounded-xl p-3.5`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className={`font-black text-${colorKey}-800 text-sm`}>{name}</span>
+                          <span className={`font-mono text-[11px] text-${colorKey}-700 bg-${colorKey}-100 px-2 py-0.5 rounded font-black`}>{total} FTE</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div><p className="text-[10px] text-slate-500 uppercase font-black">Impacted</p><p className={`font-black text-${colorKey}-700 text-base`}>{impacted}</p></div>
+                          <div><p className="text-[10px] text-slate-500 uppercase font-black">Safe</p><p className="font-black text-emerald-600 text-base">{safe}</p></div>
+                          <div><p className="text-[10px] text-slate-500 uppercase font-black">Safe %</p><p className="font-black text-slate-700 text-base">{safeRate}%</p></div>
+                        </div>
+                        <div className="mt-2 bg-white/60 rounded-full h-1.5 overflow-hidden">
+                          <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${safeRate}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live Feed */}
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col gap-3 text-white">
+                  <h3 className="text-sm font-black text-orange-400 uppercase tracking-wide flex items-center gap-2">
+                    <Activity className="w-4 h-4 animate-pulse" /> Live Activity Feed
+                  </h3>
+                  <div className="flex flex-col gap-2 overflow-y-auto max-h-[280px]">
+                    {logs.slice(0, 15).map(log => {
+                      const color = log.type==='warn' ? 'text-amber-400' : log.type==='success' ? 'text-emerald-400' : log.type==='err' ? 'text-rose-400' : 'text-slate-400';
+                      return (
+                        <div key={log.id} className="text-[10px] border-b border-slate-900 pb-1.5 flex gap-2">
+                          <span className="text-slate-600 font-mono shrink-0">[{log.time}]</span>
+                          <span className={color}>{log.msg}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Aid Summary by Incident */}
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                <div className="bg-gradient-to-r from-[#002060] to-[#0055cc] px-5 py-3.5 flex items-center justify-between">
+                  <span className="text-white font-black text-sm flex items-center gap-2"><DollarSign className="w-4 h-4" /> Aid Summary by Incident</span>
+                  <span className="text-blue-200 text-xs font-mono">{aidApplications.length} total applications</span>
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-[#f0f4ff] text-[#002060] text-[10px] uppercase tracking-widest">
+                      <th className="text-left px-5 py-2.5 font-black">Incident</th>
+                      <th className="text-center px-5 py-2.5 font-black">Applications</th>
+                      <th className="text-center px-5 py-2.5 font-black">Approved</th>
+                      <th className="text-right px-5 py-2.5 font-black">Total Aid (PHP)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(incidentAidMap).map(([name, data], idx) => (
+                      <tr key={name} className={`border-t border-slate-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                        <td className="px-5 py-3 font-semibold text-slate-700">{name}</td>
+                        <td className="px-5 py-3 text-center font-bold text-slate-700">{data.submitted}</td>
+                        <td className="px-5 py-3 text-center"><span className="text-emerald-700 font-black">{data.approved}</span></td>
+                        <td className="px-5 py-3 text-right font-black text-[#002060]">₱{data.total.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                    {Object.keys(incidentAidMap).length === 0 && (
+                      <tr><td colSpan={4} className="text-center py-10 text-slate-400">No aid applications filed yet.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* KPI targets */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  { label: '24hr Assessment Target', value: simulationActive ? `${employees.filter(e=>e.contacted).length} / ${Math.max(employees.filter(e=>getDistance(e)<=epicenter.radiusKm).length,1)} contacted` : 'No active incident', sub: simulationActive ? 'within first 24 hours' : '—', Icon: Clock, color: 'bg-blue-50 border-blue-200 text-blue-700' },
+                  { label: 'Aid Cases Tracked', value: `${aidApplications.length} / ${aidApplications.length}`, sub: '100% visibility maintained', Icon: BadgeCheck, color: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
+                  { label: 'Manual Effort Saved', value: '~62%', sub: 'vs. manual spreadsheet consolidation', Icon: Zap, color: 'bg-amber-50 border-amber-200 text-amber-700' },
+                ].map(({ label, value, sub, Icon, color }) => (
+                  <div key={label} className={`${color} border rounded-xl p-5 flex items-start gap-4`}>
+                    <div className="bg-white/80 p-2.5 rounded-xl border border-white/60 shrink-0"><Icon className="w-5 h-5" /></div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">{label}</p>
+                      <p className="text-base font-black leading-tight">{value}</p>
+                      <p className="text-[11px] opacity-60 mt-0.5">{sub}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
         </div>{/* end page content */}
       </div>{/* end body row */}
@@ -2267,6 +2896,169 @@ export default function App() {
               </div>
 
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Aid Application Modal ──────────────────────────────────────────── */}
+      {showAidModal && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,10,40,0.70)', backdropFilter: 'blur(6px)' }}
+          onClick={() => setShowAidModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl border border-blue-100 w-full max-w-lg max-h-[92vh] overflow-y-auto flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-r from-[#002060] via-[#003399] to-[#0055cc] px-6 py-4 flex items-center justify-between rounded-t-2xl shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/15 p-2 rounded-lg border border-white/20">
+                  <HeartHandshake className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-white font-black text-base tracking-tight">New Aid Application</h2>
+                  <p className="text-blue-200 text-xs font-medium">File a crisis aid request for an employee</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAidModal(false)}
+                className="text-white/60 hover:text-white hover:bg-white/15 p-2 rounded-lg transition-all cursor-pointer border border-transparent hover:border-white/20">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                if (!aidForm.employeeName.trim()) return;
+                const newApp: AidApplication = {
+                  id: `AID-${String(aidApplications.length + 1).padStart(3, '0')}`,
+                  employeeId: '',
+                  employeeName: aidForm.employeeName.trim(),
+                  incidentId: '',
+                  incidentName: aidForm.incidentName.trim() || 'General Crisis Aid',
+                  aidType: aidForm.aidType,
+                  amountPhp: aidForm.amountPhp ? parseFloat(aidForm.amountPhp) : undefined,
+                  description: aidForm.description.trim(),
+                  status: 'Submitted',
+                  priority: aidForm.priority,
+                  filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+                  department: aidForm.department,
+                  islandGroup: aidForm.islandGroup,
+                };
+                setAidApplications(prev => [newApp, ...prev]);
+                setShowAidModal(false);
+                setAidForm({ employeeName: '', incidentName: '', aidType: 'Cash', amountPhp: '', description: '', priority: 'Normal', department: 'AI Operations', islandGroup: 'Luzon' });
+                pushLog(`📋 Aid Application filed: ${newApp.id} for ${newApp.employeeName} — ${newApp.aidType} · ${newApp.incidentName}`, 'success');
+              }}
+              className="p-6 flex flex-col gap-4"
+            >
+              {/* Employee Name */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Employee Full Name *</label>
+                <input type="text" required placeholder="e.g. Maria Clara Santos"
+                  value={aidForm.employeeName} onChange={e => setAidForm(p => ({ ...p, employeeName: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+
+              {/* Incident */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Related Incident</label>
+                <input type="text" placeholder="e.g. Typhoon Carina — Bulacan (leave blank for general aid)"
+                  value={aidForm.incidentName} onChange={e => setAidForm(p => ({ ...p, incidentName: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {calamityReports.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {calamityReports.slice(0, 4).map(r => (
+                      <button key={r.id} type="button"
+                        onClick={() => setAidForm(p => ({ ...p, incidentName: r.incidentName }))}
+                        className="text-[10px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded-full font-bold hover:bg-blue-100 cursor-pointer transition">
+                        {r.incidentName}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Aid Type */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Aid Type *</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['Cash', 'Relief Goods', 'Both'] as const).map(t => (
+                    <button key={t} type="button" onClick={() => setAidForm(p => ({ ...p, aidType: t }))}
+                      className={`py-2 px-3 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
+                        aidForm.aidType === t ? 'border-[#003399] bg-blue-50 text-[#002060] ring-1 ring-blue-300' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                      }`}>{t}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Amount + Priority */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Amount (PHP)</label>
+                  <input type="number" min="0" placeholder="e.g. 10000"
+                    value={aidForm.amountPhp} onChange={e => setAidForm(p => ({ ...p, amountPhp: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Priority</label>
+                  <div className="flex gap-2">
+                    {(['Normal', 'Urgent'] as const).map(p => (
+                      <button key={p} type="button" onClick={() => setAidForm(prev => ({ ...prev, priority: p }))}
+                        className={`flex-1 py-2 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
+                          aidForm.priority === p
+                            ? p === 'Urgent' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-[#003399] bg-blue-50 text-[#002060]'
+                            : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                        }`}>{p}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Department + Island */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Department</label>
+                  <select value={aidForm.department} onChange={e => setAidForm(p => ({ ...p, department: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                    {['AI Operations', 'GIS & Remote Sensing', 'Valuation Services', 'Real Estate Analytics', 'Data Engineering', 'QC & Audit', 'Solutions Group', 'Infrastructure Management', 'People Operations', 'Finance', 'Security', 'Field Services'].map(d => (
+                      <option key={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Island Group</label>
+                  <div className="flex gap-1.5">
+                    {(['Luzon', 'Visayas', 'Mindanao'] as const).map(ig => (
+                      <button key={ig} type="button" onClick={() => setAidForm(p => ({ ...p, islandGroup: ig }))}
+                        className={`flex-1 py-2 rounded-lg border text-[11px] font-bold transition-all cursor-pointer ${
+                          aidForm.islandGroup === ig ? 'border-[#002060] bg-blue-50 text-[#002060]' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                        }`}>{ig}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Damage / Situation Description *</label>
+                <textarea required rows={3} placeholder="Describe the damage or situation requiring aid..."
+                  value={aidForm.description} onChange={e => setAidForm(p => ({ ...p, description: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setShowAidModal(false)}
+                  className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-lg text-xs transition cursor-pointer">
+                  Cancel
+                </button>
+                <button type="submit"
+                  className="flex-1 bg-[#002060] hover:bg-[#003399] text-white font-bold py-2.5 rounded-lg text-xs transition cursor-pointer active:scale-95">
+                  Submit Application
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
