@@ -142,21 +142,28 @@ export default function InteractiveMap({
       zoom: initialZoom,
       zoomControl: true,
       attributionControl: true,
+      preferCanvas: true,
     });
 
     mapInstanceRef.current = map;
     layersGroupRef.current = L.layerGroup().addTo(map);
+    const employeeLayerRef = L.layerGroup().addTo(map);
+    const currentZoomRef = useRef(initialZoom);
+
+    map.on('zoomend', () => {
+      currentZoomRef.current = map.getZoom();
+      employeeLayerRef.clearLayers();
+      renderEmployeeMarkers();
+    });
 
     // Move disaster epicenter to wherever user clicks on the map
     map.on('click', (e: any) => {
       if (!simulationActive) return;
-      setTimeout(() => {
-        onEpicenterChange({
-          ...epicenter,
-          lat: parseFloat(e.latlng.lat.toFixed(5)),
-          lng: parseFloat(e.latlng.lng.toFixed(5)),
-        });
-      }, 100);
+      onEpicenterChange({
+        ...epicenter,
+        lat: parseFloat(e.latlng.lat.toFixed(5)),
+        lng: parseFloat(e.latlng.lng.toFixed(5)),
+      });
     });
 
     setTimeout(() => {
@@ -169,6 +176,7 @@ export default function InteractiveMap({
         mapInstanceRef.current = null;
         tileLayerRef.current = null;
         layersGroupRef.current = null;
+        employeeLayerRef.clearLayers();
       }
     };
   }, [mapType]);

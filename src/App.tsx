@@ -185,7 +185,6 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Wipe old dataset if it lacks the islandGroup or team field
         if (parsed.length > 0 && (parsed[0].islandGroup === undefined || parsed[0].team === undefined)) {
           localStorage.removeItem('island_map_employees');
           return generateAllIslandEmployees();
@@ -220,6 +219,25 @@ export default function App() {
       ...prev.slice(0, 45)
     ]);
   }, []);
+
+  useEffect(() => {
+    const loadFromServer = async () => {
+      try {
+        const res = await fetch('/api/employees');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setEmployees(data);
+            localStorage.setItem('island_map_employees', JSON.stringify(data));
+            pushLog(`Loaded ${data.length} employees from database.`, 'success');
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load from server, using local data:', e);
+      }
+    };
+    loadFromServer();
+  }, [pushLog]);
 
   // Compute GPS Haversine distance (km) from epicenter to employee home
   const getDistance = useCallback((emp: Employee) => {
