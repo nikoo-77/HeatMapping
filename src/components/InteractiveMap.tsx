@@ -102,9 +102,13 @@ export default function InteractiveMap({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const layersGroupRef = useRef<L.LayerGroup | null>(null);
+  const employeeLayerRef = useRef<L.LayerGroup | null>(null);
+  const zoomLevelRef = useRef(6);
 
   const [isDraggingEpicenterOnMock, setIsDraggingEpicenterOnMock] = useState(false);
   const [hoveredEmployee, setHoveredEmployee] = useState<Employee | null>(null);
+  const [currentZoom, setCurrentZoom] = useState(6);
+  const [mapViewportVersion, setMapViewportVersion] = useState(0);
 
   // Map layers standard: 'streets' (roadmap), 'dark' (tactical), 'light' (clean) or 'mock' (SVG layout)
   const [mapType, setMapType] = useState<'streets' | 'dark' | 'light' | 'mock'>('light');
@@ -142,21 +146,30 @@ export default function InteractiveMap({
       zoom: initialZoom,
       zoomControl: true,
       attributionControl: true,
+      preferCanvas: true,
     });
 
     mapInstanceRef.current = map;
     layersGroupRef.current = L.layerGroup().addTo(map);
+    employeeLayerRef.current = L.layerGroup().addTo(map);
 
-    // Move disaster epicenter to wherever user clicks on the map
+    const refreshViewport = () => {
+      const z = map.getZoom();
+      zoomLevelRef.current = z;
+      setCurrentZoom(z);
+      setMapViewportVersion((prev) => prev + 1);
+    };
+
+    map.on('zoomend', refreshViewport);
+    map.on('moveend', refreshViewport);
+
     map.on('click', (e: any) => {
       if (!simulationActive) return;
-      setTimeout(() => {
-        onEpicenterChange({
-          ...epicenter,
-          lat: parseFloat(e.latlng.lat.toFixed(5)),
-          lng: parseFloat(e.latlng.lng.toFixed(5)),
-        });
-      }, 100);
+      onEpicenterChange({
+        ...epicenter,
+        lat: parseFloat(e.latlng.lat.toFixed(5)),
+        lng: parseFloat(e.latlng.lng.toFixed(5)),
+      });
     });
 
     setTimeout(() => {
@@ -169,6 +182,10 @@ export default function InteractiveMap({
         mapInstanceRef.current = null;
         tileLayerRef.current = null;
         layersGroupRef.current = null;
+        if (employeeLayerRef.current) {
+          employeeLayerRef.current.clearLayers();
+          employeeLayerRef.current = null;
+        }
       }
     };
   }, [mapType]);
@@ -250,22 +267,14 @@ export default function InteractiveMap({
     }).addTo(map);
   }, [mapType]);
 
-  // Dynamic layers (FTE Bubbles, concentric rings, epicenters and employees)
+  // Static layers (FTE Bubbles, concentric rings, epicenters) — separate from employees
   useEffect(() => {
     if (!mapInstanceRef.current || !layersGroupRef.current || mapType === 'mock') return;
     const layers = layersGroupRef.current;
-
-    // Determine which employees to render based on active filter
-    const visibleEmployees = employees.filter(emp => {
-      if (selectedCity) return emp.address?.includes(selectedCity);
-      if (selectedIslandGroup) return emp.islandGroup === selectedIslandGroup;
-      return true;
-    });
     layers.clearLayers();
 
     // 1. CONSTANT COMPONENT: Red/Maroon Headcount Footprint Bubbles
     if (activeLayers.showOfficeBubbles) {
-      // Only show bubbles for locations that match the current filter
       const visibleLocations = ALL_ISLAND_LOCATIONS.filter(loc => {
         if (selectedCity) return loc.city === selectedCity;
         if (selectedIslandGroup) return loc.islandGroup === selectedIslandGroup;
@@ -273,7 +282,6 @@ export default function InteractiveMap({
       });
 
       visibleLocations.forEach(loc => {
-        // Color by island group
         const strokeColor = loc.islandGroup === 'Luzon' ? '#065f46' : loc.islandGroup === 'Visayas' ? '#1e3a8a' : '#92400e';
         const fillColor   = loc.islandGroup === 'Luzon' ? '#10b981' : loc.islandGroup === 'Visayas' ? '#3b82f6' : '#f59e0b';
         const bubbleRadMeters = Math.sqrt(loc.fte) * 6000;
@@ -298,78 +306,32 @@ export default function InteractiveMap({
       });
     }
 
-    // 2. METRO CEBU CONCENTRIC RINGS (Shows the requested 5 km and 10 km gray/slate rings around IT Park Hub)
+    // 2. METRO CEBU CONCENTRIC RINGS
     if (mapView === 'metro') {
       const hubCenter = [10.3157, 123.8854];
-
-      // 5 KM concentric ring
-      L.circle(hubCenter as any, {
-        radius: 5000,
-        color: '#64748b',
-        fillColor: 'transparent',
-        weight: 1.75,
-        dashArray: '5, 8',
-        opacity: 0.75,
-        interactive: false
-      }).addTo(layers);
-
-      // Label pin for 5 KM radius
-      L.marker([10.3157 + 0.046, 123.8854], {
-        icon: L.divIcon({
-          className: '',
-          html: `<div class="bg-indigo-950 text-white font-mono font-black text-[8px] tracking-widest px-1.5 py-0.5 rounded shadow-sm border border-indigo-850 uppercase select-none">5 KM RANGE</div>`,
-          iconSize: [60, 16],
-          iconAnchor: [30, 8]
-        })
-      }).addTo(layers);
-
-      // 10 KM concentric ring
-      L.circle(hubCenter as any, {
-        radius: 10000,
-        color: '#475569',
-        fillColor: 'transparent',
-        weight: 1.75,
-        dashArray: '5, 8',
-        opacity: 0.65,
-        interactive: false
-      }).addTo(layers);
-
-      // Label pin for 10 KM radius
-      L.marker([10.3157 + 0.091, 123.8854], {
-        icon: L.divIcon({
-          className: '',
-          html: `<div class="bg-indigo-950 text-white font-mono font-black text-[8px] tracking-widest px-1.5 py-0.5 rounded shadow-sm border border-indigo-850 uppercase select-none">10 KM RANGE</div>`,
-          iconSize: [60, 16],
-          iconAnchor: [30, 8]
-        })
-      }).addTo(layers);
+      L.circle(hubCenter as any, { radius: 5000, color: '#64748b', fillColor: 'transparent', weight: 1.75, dashArray: '5, 8', opacity: 0.75, interactive: false }).addTo(layers);
+      L.marker([10.3157 + 0.046, 123.8854], { icon: L.divIcon({ className: '', html: `<div class="bg-indigo-950 text-white font-mono font-black text-[8px] tracking-widest px-1.5 py-0.5 rounded shadow-sm border border-indigo-850 uppercase select-none">5 KM RANGE</div>`, iconSize: [60, 16], iconAnchor: [30, 8] }) }).addTo(layers);
+      L.circle(hubCenter as any, { radius: 10000, color: '#475569', fillColor: 'transparent', weight: 1.75, dashArray: '5, 8', opacity: 0.65, interactive: false }).addTo(layers);
+      L.marker([10.3157 + 0.091, 123.8854], { icon: L.divIcon({ className: '', html: `<div class="bg-indigo-950 text-white font-mono font-black text-[8px] tracking-widest px-1.5 py-0.5 rounded shadow-sm border border-indigo-850 uppercase select-none">10 KM RANGE</div>`, iconSize: [60, 16], iconAnchor: [30, 8] }) }).addTo(layers);
     }
 
-    // 3. EMERGENCY INCIDENTS & CONFLAGRATIONS (Rendered exclusively when simulationActive is enabled)
+    // 3. EMERGENCY INCIDENTS
     if (simulationActive) {
       const centerGps = { lat: epicenter.lat, lng: epicenter.lng };
-
-      // Gradient danger heatmap circles
       const radialHeatRings = [
-        { radiusMult: 0.15, fillColor: activeDisaster.id === 'typhoon' ? '#0891b2' : activeDisaster.id === 'earthquake' ? '#be123c' : '#db2777', opacity: 0.40 }, 
-        { radiusMult: 0.35, fillColor: activeDisaster.id === 'typhoon' ? '#06b6d4' : activeDisaster.id === 'earthquake' ? '#e11d48' : '#ef4444', opacity: 0.30 }, 
-        { radiusMult: 0.60, fillColor: activeDisaster.id === 'typhoon' ? '#22d3ee' : activeDisaster.id === 'earthquake' ? '#f43f5e' : '#f97316', opacity: 0.20 }, 
-        { radiusMult: 0.85, fillColor: activeDisaster.id === 'typhoon' ? '#67e8f9' : activeDisaster.id === 'earthquake' ? '#fb7185' : '#eab308', opacity: 0.12 }, 
-        { radiusMult: 1.00, fillColor: activeDisaster.id === 'typhoon' ? '#a5f3fc' : activeDisaster.id === 'earthquake' ? '#fca5a5' : '#fb923c', opacity: 0.05 }, 
+        { radiusMult: 0.15, fillColor: activeDisaster.id === 'typhoon' ? '#0891b2' : activeDisaster.id === 'earthquake' ? '#be123c' : '#db2777', opacity: 0.40 },
+        { radiusMult: 0.35, fillColor: activeDisaster.id === 'typhoon' ? '#06b6d4' : activeDisaster.id === 'earthquake' ? '#e11d48' : '#ef4444', opacity: 0.30 },
+        { radiusMult: 0.60, fillColor: activeDisaster.id === 'typhoon' ? '#22d3ee' : activeDisaster.id === 'earthquake' ? '#f43f5e' : '#f97316', opacity: 0.20 },
+        { radiusMult: 0.85, fillColor: activeDisaster.id === 'typhoon' ? '#67e8f9' : activeDisaster.id === 'earthquake' ? '#fb7185' : '#eab308', opacity: 0.12 },
+        { radiusMult: 1.00, fillColor: activeDisaster.id === 'typhoon' ? '#a5f3fc' : activeDisaster.id === 'earthquake' ? '#fca5a5' : '#fb923c', opacity: 0.05 },
       ];
-
       radialHeatRings.forEach(ring => {
         L.circle([centerGps.lat, centerGps.lng], {
           radius: getRadiusInMeters(epicenter.radiusKm) * ring.radiusMult,
-          color: 'transparent',
-          fillColor: ring.fillColor,
-          fillOpacity: ring.opacity,
-          weight: 0,
-          interactive: false,
+          color: 'transparent', fillColor: ring.fillColor, fillOpacity: ring.opacity, weight: 0, interactive: false,
         }).addTo(layers);
       });
 
-      // Active site draggable hazard marker
       const epicenterMarker = L.marker([centerGps.lat, centerGps.lng], {
         draggable: true,
         icon: L.divIcon({
@@ -389,48 +351,35 @@ export default function InteractiveMap({
               </div>
             </div>
           `,
-          iconSize: [50, 50],
-          iconAnchor: [25, 25],
+          iconSize: [50, 50], iconAnchor: [25, 25],
         }),
       }).addTo(layers);
 
       epicenterMarker.on('dragend', (e: any) => {
         const position = e.target.getLatLng();
-        setTimeout(() => {
-          onEpicenterChange({
-            ...epicenter,
-            lat: parseFloat(position.lat.toFixed(5)),
-            lng: parseFloat(position.lng.toFixed(5)),
-          });
-        }, 100);
+        onEpicenterChange({
+          ...epicenter,
+          lat: parseFloat(position.lat.toFixed(5)),
+          lng: parseFloat(position.lng.toFixed(5)),
+        });
       });
 
-      // Escape bypass lines
       if (activeLayers.showLocalRoads) {
         const SAFE_ARTERY_ROADS = [
           [[10.2750, 123.8550], [10.2850, 123.8800], [10.3010, 123.9050]],
           [[10.3110, 123.8960], [10.3220, 123.8910], [10.3340, 123.8990]],
           [[10.2930, 123.9020], [10.3020, 123.8950], [10.3150, 123.8900]]
         ];
-
         SAFE_ARTERY_ROADS.forEach((roadPoints) => {
-          L.polyline(roadPoints as any, {
-            color: '#10b981',
-            weight: 2.5,
-            opacity: 0.6,
-            dashArray: '3, 4',
-            interactive: false
-          }).addTo(layers);
+          L.polyline(roadPoints as any, { color: '#10b981', weight: 2.5, opacity: 0.6, dashArray: '3, 4', interactive: false }).addTo(layers);
         });
       }
 
-      // Landmarks (Emergency centers)
       if (activeLayers.showSafetyLandmarks) {
         const EVACUATION_CENTERS = [
           { name: 'Vicente Sotto Memorial Gym (Evac)', lat: 10.3088, lng: 123.8912, emoji: '🏥' },
           { name: 'Lahug Barangay Sports Complex', lat: 10.3345, lng: 123.8988, emoji: '🏥' },
         ];
-
         EVACUATION_CENTERS.forEach((center) => {
           L.marker([center.lat, center.lng], {
             icon: L.divIcon({
@@ -440,112 +389,116 @@ export default function InteractiveMap({
                   <span class="text-[10px] select-none">${center.emoji}</span>
                 </div>
               `,
-              iconSize: [20, 20],
-              iconAnchor: [10, 10],
+              iconSize: [20, 20], iconAnchor: [10, 10],
             })
           }).addTo(layers).bindPopup(`<b>${center.name}</b><br/>Civil Protection Shelter.`);
         });
       }
     }
+  }, [mapType, activeLayers, mapView, simulationActive, epicenter, activeDisaster, selectedIslandGroup, selectedCity]);
 
-    // 4. INDIVIDUAL RESIDENT PINS – only show filtered subset
-    visibleEmployees.forEach((emp) => {
-      // Individual GPS coordinates mapping
-      const empGps = emp.gpsLat && emp.gpsLng 
-        ? { lat: emp.gpsLat, lng: emp.gpsLng } 
-        : customToLatLng(emp.lng, emp.lat);
+  // Employee markers — separate layer, gated by zoom level and current viewport
+  useEffect(() => {
+    if (!mapInstanceRef.current || !employeeLayerRef.current || mapType === 'mock') return;
 
-      const distKm = haversineKm(epicenter.lat, epicenter.lng, empGps.lat, empGps.lng);
-      const isInsideDisaster = simulationActive && distKm <= epicenter.radiusKm;
+    const map = mapInstanceRef.current;
+    const empLayer = employeeLayerRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      empLayer.clearLayers();
 
-      if (simulationActive && activeLayers.showOnlyAffected && !isInsideDisaster) {
-        return;
-      }
+      if (currentZoom < 9) return;
 
-      let pinColor = '#3b82f6'; // Safe Default (Outside danger / general)
-      if (simulationActive) {
-        if (isInsideDisaster) {
-          if (emp.status === 'Green') pinColor = '#10b981'; // Confirmed Safe (Green)
-          else if (emp.status === 'Yellow') pinColor = '#f59e0b'; // Amber Awaiting
-          else pinColor = '#ef4444'; // Red disconnected
-        } else {
-          pinColor = '#3b82f6'; // Safe Default (Outside danger)
+      const bounds = map.getBounds();
+      const sw = bounds.getSouthWest();
+      const ne = bounds.getNorthEast();
+      const maxMarkers = currentZoom >= 13 ? 320 : currentZoom >= 11 ? 180 : 90;
+      let rendered = 0;
+
+      const visibleEmployees = employees.filter((emp) => {
+        if (selectedCity && !emp.address?.includes(selectedCity)) return false;
+        if (selectedIslandGroup && emp.islandGroup !== selectedIslandGroup) return false;
+
+        const empGps = emp.gpsLat && emp.gpsLng
+          ? { lat: emp.gpsLat, lng: emp.gpsLng }
+          : customToLatLng(emp.lng, emp.lat);
+
+        if (empGps.lat < sw.lat || empGps.lat > ne.lat || empGps.lng < sw.lng || empGps.lng > ne.lng) {
+          return false;
         }
-      } else {
-        // No disaster active, color code based on actual status
-        if (emp.status === 'Green') pinColor = '#10b981';
-        else if (emp.status === 'Yellow') pinColor = '#f59e0b';
-        else pinColor = '#ef4444';
-      }
 
-      const isSelected = selectedEmployee?.id === emp.id;
+        if (simulationActive) {
+          const distKm = haversineKm(epicenter.lat, epicenter.lng, empGps.lat, empGps.lng);
+          const isInsideDisaster = distKm <= epicenter.radiusKm;
+          return !activeLayers.showOnlyAffected || isInsideDisaster;
+        }
 
-      // HQ/Office reference point for rescue route lines (Cebu IT Park)
-      const hqGps: [number, number] = [10.3311, 123.9053];
+        return true;
+      }).slice(0, maxMarkers);
 
-      // Draw individual route line if rescue dispatched and simulation is active
-      if (simulationActive && emp.rescueDispatched) {
-        const routeCoords = [
-          [hqGps[0], hqGps[1]],
-          [(hqGps[0] + empGps.lat) / 2 + 0.001, (hqGps[1] + empGps.lng) / 2 - 0.002],
-          [empGps.lat, empGps.lng]
-        ];
+      visibleEmployees.forEach((emp) => {
+        const empGps = emp.gpsLat && emp.gpsLng
+          ? { lat: emp.gpsLat, lng: emp.gpsLng }
+          : customToLatLng(emp.lng, emp.lat);
 
-        L.polyline(routeCoords as any, {
-          color: '#10b981',
-          weight: 3,
-          opacity: 0.9,
-          dashArray: '6, 6',
-        }).addTo(layers);
+        const distKm = haversineKm(epicenter.lat, epicenter.lng, empGps.lat, empGps.lng);
+        const isInsideDisaster = simulationActive && distKm <= epicenter.radiusKm;
 
-        L.marker([routeCoords[1][0], routeCoords[1][1]], {
-          icon: L.divIcon({
-            className: '',
-            html: `<div class="bg-emerald-600 text-white p-1 rounded-full text-xs animate-bounce flex items-center justify-center font-bold" style="width: 20px; height: 20px; margin-left:-10px; margin-top:-10px; line-height: 1;">🎁</div>`,
-            iconSize: [20, 20],
-            iconAnchor: [10, 10],
-          })
-        }).addTo(layers);
-      }
+        let pinColor = '#3b82f6';
+        if (simulationActive) {
+          if (isInsideDisaster) {
+            if (emp.status === 'Green') pinColor = '#10b981';
+            else if (emp.status === 'Yellow') pinColor = '#f59e0b';
+            else pinColor = '#ef4444';
+          } else {
+            pinColor = '#3b82f6';
+          }
+        } else if (emp.status === 'Green') {
+          pinColor = '#10b981';
+        } else if (emp.status === 'Yellow') {
+          pinColor = '#f59e0b';
+        } else {
+          pinColor = '#ef4444';
+        }
 
-      // Draw resident pin
-      L.marker([empGps.lat, empGps.lng], {
-        icon: L.divIcon({
-          className: '',
-          html: `
-            <div class="relative flex flex-col items-center justify-center" style="width: 32px; height: 32px; margin-left: -16px; margin-top: -16px;">
-              ${isInsideDisaster ? `
-                <div class="absolute w-7 h-7 rounded-full border-2 border-red-500 animate-ping opacity-70"></div>
-              ` : ''}
-              <div class="w-5.5 h-5.5 rounded-full bg-white border shadow flex items-center justify-center font-mono font-black text-[9px] text-slate-800 ${isSelected ? 'ring-2 ring-orange-500' : ''}"
-                style="border-color: ${pinColor}"
-              >
-                ${emp.avatar}
-              </div>
-            </div>
-          `,
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
-        }),
-      }).addTo(layers)
-      .on('click', () => {
-        setTimeout(() => {
-          onSelectEmployee(isSelected ? null : emp);
-        }, 100);
-      })
-      .on('mouseover', () => {
-        setTimeout(() => {
-          setHoveredEmployee(emp);
-        }, 100);
-      })
-      .on('mouseout', () => {
-        setTimeout(() => {
-          setHoveredEmployee(null);
-        }, 100);
+        const isSelected = selectedEmployee?.id === emp.id;
+        const hqGps: [number, number] = [10.3311, 123.9053];
+
+        if (simulationActive && emp.rescueDispatched) {
+          const routeCoords = [
+            [hqGps[0], hqGps[1]],
+            [(hqGps[0] + empGps.lat) / 2 + 0.001, (hqGps[1] + empGps.lng) / 2 - 0.002],
+            [empGps.lat, empGps.lng]
+          ];
+          L.polyline(routeCoords as any, { color: '#10b981', weight: 3, opacity: 0.9, dashArray: '6, 6' }).addTo(empLayer);
+          L.marker([routeCoords[1][0], routeCoords[1][1]], {
+            icon: L.divIcon({
+              className: '',
+              html: `<div class="bg-emerald-600 text-white p-1 rounded-full text-xs animate-bounce flex items-center justify-center font-bold" style="width: 20px; height: 20px; margin-left:-10px; margin-top:-10px; line-height: 1;">🎁</div>`,
+              iconSize: [20, 20], iconAnchor: [10, 10],
+            })
+          }).addTo(empLayer);
+        }
+
+        L.circleMarker([empGps.lat, empGps.lng], {
+          radius: isSelected ? 8 : 6,
+          fillColor: pinColor,
+          fillOpacity: isSelected ? 1 : 0.85,
+          color: isSelected ? '#f97316' : '#ffffff',
+          weight: isSelected ? 3 : 1.5,
+          opacity: 1,
+          renderer: L.canvas(),
+        }).addTo(empLayer)
+          .on('click', () => onSelectEmployee(isSelected ? null : emp))
+          .on('mouseover', () => setHoveredEmployee(emp))
+          .on('mouseout', () => setHoveredEmployee(null));
+
+        rendered += 1;
+        if (rendered >= maxMarkers) return;
       });
     });
 
-  }, [employees, epicenter, selectedEmployee, activeDisaster, mapType, activeLayers, mapView, simulationActive, selectedIslandGroup, selectedCity]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity]);
 
   // --- MOCK SVG CHOP MAP HANDLERS (As secondary fallback diagram mode) ---
   const handleMapClickOnMock = (e: React.MouseEvent<SVGSVGElement>) => {
