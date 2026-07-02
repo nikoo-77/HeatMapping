@@ -3,6 +3,7 @@ import express from 'express';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 import { resolve } from 'path';
+import { resolveEmployeeRegion } from './lib/regionResolver.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
@@ -25,6 +26,7 @@ interface Employee {
   avatar: string;
   address?: string;
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
+  region?: string;
   team?: 'HR/CSR' | 'Manager';
 }
 
@@ -250,6 +252,13 @@ async function loadEmployees(): Promise<Employee[]> {
     const gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
 
     const islandGroup = getIslandGroup(city, province);
+    const region = resolveEmployeeRegion({
+      city,
+      province,
+      facility: info?.Facility as string | undefined,
+      gpsLat,
+      gpsLng,
+    });
 
     const rawPhone = contact?.ContactNumber as string | number | undefined;
     const cleanPhone = rawPhone && !String(rawPhone).toUpperCase().includes('FOR UPDATE') ? `0${rawPhone}` : undefined;
@@ -280,6 +289,7 @@ async function loadEmployees(): Promise<Employee[]> {
       avatar: `${(personal.FirstName as string)[0]}${(personal.LastName as string)[0]}`,
       address: addressStr,
       islandGroup,
+      region,
       team: info?.IsManager ? 'Manager' : 'HR/CSR' as 'HR/CSR' | 'Manager',
     });
   }

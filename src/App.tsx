@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees, PHILIPPINE_REGIONS, ALL_ISLAND_LOCATIONS } from './data_islands';
+import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees, PHILIPPINE_REGIONS, ALL_ISLAND_LOCATIONS, REGION_BY_CODE } from './data_islands';
+import { resolveEmployeeRegion, getRegionLabel } from './utils/resolveRegion';
 import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam, AidApplication } from './types';
 import InteractiveMap from './components/InteractiveMap';
+import RiskMap from './components/RiskMap';
 import EmployeeRollCall from './components/EmployeeRollCall';
 import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
   AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
   FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2,
-  HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap
+  HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap, Layers
 } from 'lucide-react';
 
 function normalizeText(value: string): string {
@@ -37,11 +39,12 @@ function getEmployeeCity(emp: Employee): string | null {
 
 export default function App() {
   // ── Page navigation ─────────────────────────────────────────────────────
-  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive'>('dashboard');
+  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive' | 'risk-map'>('dashboard');
   // Employee Directory search/filter state
   const [dirSearch, setDirSearch] = useState('');
   const [dirDept,   setDirDept]   = useState('All Departments');
   const [dirIsland, setDirIsland] = useState<'All' | 'Luzon' | 'Visayas' | 'Mindanao'>('All');
+  const [dirRegion, setDirRegion] = useState<string>('All');
   const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
   const [dirActionsMenuId, setDirActionsMenuId] = useState<string | null>(null);
   const [newEmpForm, setNewEmpForm] = useState({
@@ -263,9 +266,18 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
-            setEmployees(data);
-            localStorage.setItem('island_map_employees', JSON.stringify(data));
-            pushLog(`Loaded ${data.length} employees from database.`, 'success');
+            const enriched = data.map((emp: Employee) => ({
+              ...emp,
+              region: emp.region ?? resolveEmployeeRegion({
+                gpsLat: emp.gpsLat,
+                gpsLng: emp.gpsLng,
+                city: emp.address?.split(',').slice(-2, -1)[0]?.trim(),
+                province: emp.address?.split(',').slice(-1)[0]?.trim(),
+              }),
+            }));
+            setEmployees(enriched);
+            localStorage.setItem('island_map_employees', JSON.stringify(enriched));
+            pushLog(`Loaded ${enriched.length} employees from database.`, 'success');
           }
         }
       } catch (e) {
@@ -1118,6 +1130,11 @@ export default function App() {
                 <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{employeeStatusCounts.red}</span>
               )}
             </button>
+            <button onClick={() => setActivePage('risk-map')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'risk-map' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+              <Layers className={`w-4 h-4 shrink-0 ${activePage === 'risk-map' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+              <span className="flex-1 leading-tight">Risk Classification Map</span>
+            </button>
 
             {/* ── AID MANAGEMENT ── */}
             <div className="mx-1 my-2.5 border-t border-white/10" />
@@ -1670,13 +1687,39 @@ export default function App() {
       {/* ──────────── EMPLOYEE DIRECTORY PAGE ──────────── */}
       {activePage === 'directory' && (() => {
         const departments = ['All Departments', ...Array.from(new Set(employees.map(e => e.department))).sort()];
+        const regionCounts = new Map<string, number>();
+        employees.forEach((e) => {
+          const code = e.region ?? resolveEmployeeRegion({
+            gpsLat: e.gpsLat,
+            gpsLng: e.gpsLng,
+            city: e.address?.split(',').slice(-2, -1)[0]?.trim(),
+            province: e.address?.split(',').slice(-1)[0]?.trim(),
+          });
+          if (code) regionCounts.set(code, (regionCounts.get(code) ?? 0) + 1);
+        });
+        const regionsByIsland = {
+          Luzon: PHILIPPINE_REGIONS.filter((r) => r.islandGroup === 'Luzon'),
+          Visayas: PHILIPPINE_REGIONS.filter((r) => r.islandGroup === 'Visayas'),
+          Mindanao: PHILIPPINE_REGIONS.filter((r) => r.islandGroup === 'Mindanao'),
+        };
+
+        const getEmpRegion = (e: Employee) =>
+          e.region ?? resolveEmployeeRegion({
+            gpsLat: e.gpsLat,
+            gpsLng: e.gpsLng,
+            city: e.address?.split(',').slice(-2, -1)[0]?.trim(),
+            province: e.address?.split(',').slice(-1)[0]?.trim(),
+          });
+
         const filtered = employees.filter(e => {
           const q = dirSearch.toLowerCase();
+          const empRegion = getEmpRegion(e);
           const matchSearch  = !q || e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q) || e.department.toLowerCase().includes(q);
           const matchDept    = dirDept === 'All Departments' || e.department === dirDept;
           const matchIsland  = dirIsland === 'All' || e.islandGroup === dirIsland;
+          const matchRegion  = dirRegion === 'All' || empRegion === dirRegion;
           const matchTeam    = !filterByTeam || e.team === viewerRole;
-          return matchSearch && matchDept && matchIsland && matchTeam;
+          return matchSearch && matchDept && matchIsland && matchRegion && matchTeam;
         });
 
         const islandColors: Record<string, string> = {
@@ -1744,7 +1787,13 @@ export default function App() {
                       return (
                         <button
                           key={ig}
-                          onClick={() => setDirIsland(ig)}
+                          onClick={() => {
+                            setDirIsland(ig);
+                            if (ig !== 'All' && dirRegion !== 'All') {
+                              const selected = REGION_BY_CODE[dirRegion];
+                              if (selected && selected.islandGroup !== ig) setDirRegion('All');
+                            }
+                          }}
                           className={`px-3 py-1.5 rounded-md text-[11px] font-black border transition-all duration-150 cursor-pointer ${
                             active ? activeStyle + ' shadow-sm' : islandInactive
                           }`}
@@ -1755,6 +1804,34 @@ export default function App() {
                     })}
                   </div>
 
+                  {/* Region dropdown */}
+                  <select
+                    value={dirRegion}
+                    onChange={(e) => {
+                      const code = e.target.value;
+                      setDirRegion(code);
+                      if (code !== 'All') {
+                        const region = REGION_BY_CODE[code];
+                        if (region) setDirIsland(region.islandGroup);
+                      }
+                    }}
+                    className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer max-w-[220px]"
+                  >
+                    <option value="All">All Regions</option>
+                    {(['Luzon', 'Visayas', 'Mindanao'] as const).map((ig) => (
+                      <optgroup key={ig} label={ig}>
+                        {regionsByIsland[ig].map((region) => {
+                          const count = regionCounts.get(region.code) ?? 0;
+                          return (
+                            <option key={region.code} value={region.code}>
+                              Region {region.code} — {region.name} ({count})
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    ))}
+                  </select>
+
                   {/* Record count */}
                   <span className="text-[10px] text-slate-400 font-mono ml-auto whitespace-nowrap">
                     {filtered.length} of {employees.length} records
@@ -1762,13 +1839,19 @@ export default function App() {
                 </div>
 
                 {/* Row 2: active filter chips */}
-                {(filterByTeam || dirIsland !== 'All' || dirDept !== 'All Departments' || dirSearch) && (
+                {(filterByTeam || dirIsland !== 'All' || dirRegion !== 'All' || dirDept !== 'All Departments' || dirSearch) && (
                   <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Active filters:</span>
                     {filterByTeam && (
                       <span className="flex items-center gap-1 bg-[#002060]/10 text-[#002060] border border-[#002060]/20 text-[10px] font-black px-2 py-0.5 rounded-full">
                         👤 {viewerRole} Team
                         <button onClick={() => setFilterByTeam(false)} className="ml-0.5 hover:text-rose-600 cursor-pointer">×</button>
+                      </span>
+                    )}
+                    {dirRegion !== 'All' && (
+                      <span className="flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-black px-2 py-0.5 rounded-full">
+                        📍 {getRegionLabel(dirRegion)}
+                        <button onClick={() => setDirRegion('All')} className="ml-0.5 hover:text-rose-600 cursor-pointer">×</button>
                       </span>
                     )}
                     {dirIsland !== 'All' && (
@@ -1794,7 +1877,7 @@ export default function App() {
                       </span>
                     )}
                     <button
-                      onClick={() => { setDirSearch(''); setDirDept('All Departments'); setDirIsland('All'); setFilterByTeam(false); }}
+                      onClick={() => { setDirSearch(''); setDirDept('All Departments'); setDirIsland('All'); setDirRegion('All'); setFilterByTeam(false); }}
                       className="text-[10px] font-black text-rose-500 hover:text-rose-700 cursor-pointer ml-1 underline"
                     >
                       Clear all
@@ -1868,15 +1951,34 @@ export default function App() {
 
                           {/* Location Status */}
                           <td className="px-5 py-3.5">
-                            {emp.gpsLat ? (
-                              <span className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black px-2.5 py-1 rounded-full">
-                                <MapPin className="w-3 h-3" /> GPS Verified
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-500 text-[10px] font-bold px-2.5 py-1 rounded-full">
-                                No GPS
-                              </span>
-                            )}
+                            <div className="flex flex-col gap-1">
+                              {(() => {
+                                const empRegion = emp.region ?? resolveEmployeeRegion({
+                                  gpsLat: emp.gpsLat,
+                                  gpsLng: emp.gpsLng,
+                                  city: emp.address?.split(',').slice(-2, -1)[0]?.trim(),
+                                  province: emp.address?.split(',').slice(-1)[0]?.trim(),
+                                });
+                                return empRegion ? (
+                                <span className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-black px-2.5 py-1 rounded-full w-fit">
+                                  <MapPin className="w-3 h-3" /> Region {empRegion}
+                                </span>
+                              ) : emp.islandGroup ? (
+                                <span className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded-full w-fit">
+                                  {emp.islandGroup}
+                                </span>
+                              ) : null;
+                              })()}
+                              {emp.gpsLat ? (
+                                <span className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black px-2.5 py-1 rounded-full w-fit">
+                                  <Crosshair className="w-3 h-3" /> GPS Verified
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-500 text-[10px] font-bold px-2.5 py-1 rounded-full w-fit">
+                                  No GPS
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           {/* Actions */}
@@ -2515,6 +2617,11 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* ──────────── RISK CLASSIFICATION MAP PAGE ──────────── */}
+      {activePage === 'risk-map' && (
+        <RiskMap employees={employees} />
+      )}
 
       {/* ──────────── EXECUTIVE DASHBOARD PAGE ──────────── */}
       {activePage === 'executive' && (() => {

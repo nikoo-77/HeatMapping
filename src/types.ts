@@ -78,6 +78,31 @@ export interface BroadcastLog {
   employeeId?: string;
 }
 
+export type HazardType = 'flood' | 'landslide' | 'storm_surge' | 'earthquake' | 'volcanic' | 'tsunami';
+export type HazardRiskLevel = 'high' | 'moderate' | 'low';
+
+export interface HazardZone {
+  id: string;
+  name: string;
+  type: HazardType;
+  riskLevel: HazardRiskLevel;
+  description: string;
+  /** Polygon ring as [lat, lng][] */
+  polygon: [number, number][];
+  region?: string;
+  province?: string;
+}
+
+export interface HazardTypeConfig {
+  type: HazardType;
+  label: string;
+  color: string;
+  fillColor: string;
+  icon: string;
+  description: string;
+}
+
+
 export type DisasterId = 'earthquake' | 'typhoon' | 'fire';
 
 export interface DisasterConfig {
