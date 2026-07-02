@@ -25,6 +25,7 @@ interface Employee {
   avatar: string;
   address?: string;
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
+  region?: string;
   team?: 'HR/CSR' | 'Manager';
 }
 
@@ -114,6 +115,44 @@ function getIslandGroup(city: string, province: string): 'Luzon' | 'Visayas' | '
   if (mindanaoProvinces.some(mp => p.includes(mp))) return 'Mindanao';
   
   return 'Visayas';
+}
+
+function getRegionCode(regionName: string, province: string): string | undefined {
+  const normalized = regionName.toLowerCase().trim();
+  const regionMap: Record<string, string> = {
+    'national capital region': 'NCR',
+    'ncr': 'NCR',
+    'region i': 'I',
+    'region ii': 'II',
+    'region iii': 'III',
+    'region iv-a': 'IV-A',
+    'region iv-b': 'IV-B',
+    'region v': 'V',
+    'region vi': 'VI',
+    'region vii': 'VII',
+    'region viii': 'VIII',
+    'region ix': 'IX',
+    'region x': 'X',
+    'region xi': 'XI',
+    'region xii': 'XII',
+    'region xiii': 'XIII',
+    'car': 'CAR',
+    'caraga': 'XIII',
+  };
+
+  if (regionMap[normalized]) return regionMap[normalized];
+
+  const provinceLower = province.toLowerCase();
+  if (provinceLower.includes('metro manila') || provinceLower.includes('ncr')) return 'NCR';
+  if (provinceLower.includes('cebu')) return 'VII';
+  if (provinceLower.includes('iloilo') || provinceLower.includes('negros')) return 'VI';
+  if (provinceLower.includes('davao')) return 'XI';
+  if (provinceLower.includes('misamis') || provinceLower.includes('lanao')) return 'X';
+  if (provinceLower.includes('zamboanga')) return 'IX';
+  if (provinceLower.includes('cotabato')) return 'XII';
+  if (provinceLower.includes('agusan') || provinceLower.includes('surigao')) return 'XIII';
+  if (provinceLower.includes('pampanga') || provinceLower.includes('laguna') || provinceLower.includes('bulacan') || provinceLower.includes('rizal') || provinceLower.includes('cavite') || provinceLower.includes('batangas')) return 'IV-A';
+  return undefined;
 }
 
 function parseColumns(raw: string): string[] {
@@ -237,6 +276,8 @@ async function loadEmployees(): Promise<Employee[]> {
     
     const city = (address?.CityMunicipality as string) || '';
     const province = (address?.Province as string) || '';
+    const regionName = (address?.Region as string) || '';
+    const region = getRegionCode(regionName, province);
     const coords = getGpsForCity(city, province);
     
     const seed = hashString(empId);
@@ -280,6 +321,7 @@ async function loadEmployees(): Promise<Employee[]> {
       avatar: `${(personal.FirstName as string)[0]}${(personal.LastName as string)[0]}`,
       address: addressStr,
       islandGroup,
+      region,
       team: info?.IsManager ? 'Manager' : 'HR/CSR' as 'HR/CSR' | 'Manager',
     });
   }

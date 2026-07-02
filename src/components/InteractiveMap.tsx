@@ -52,6 +52,26 @@ export function getDisasterEmoji(icon: string): string {
   return '🔥';
 }
 
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getEmployeeCity(emp: Employee): string | null {
+  const address = (emp.address ?? '').trim();
+  const addressText = normalizeText(address);
+
+  const knownCities = ALL_ISLAND_LOCATIONS.map((loc) => loc.city);
+  const match = knownCities.find((city) => normalizeText(city).includes(addressText) || addressText.includes(normalizeText(city)));
+  if (match) return match;
+
+  const parts = address.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return parts[parts.length - 2] || null;
+  }
+
+  return null;
+}
+
 export function hexToRgb(hex: string): string {
   const cleanHex = hex.replace('#', '');
   const r = parseInt(cleanHex.substring(0, 2), 16);
@@ -284,7 +304,13 @@ export default function InteractiveMap({
       visibleLocations.forEach(loc => {
         const strokeColor = loc.islandGroup === 'Luzon' ? '#065f46' : loc.islandGroup === 'Visayas' ? '#1e3a8a' : '#92400e';
         const fillColor   = loc.islandGroup === 'Luzon' ? '#10b981' : loc.islandGroup === 'Visayas' ? '#3b82f6' : '#f59e0b';
-        const bubbleRadMeters = Math.sqrt(loc.fte) * 6000;
+        const employeeCount = employees.filter(emp => {
+          const cityMatch = getEmployeeCity(emp)?.toLowerCase() === loc.city.toLowerCase();
+          const regionMatch = emp.region === loc.region;
+          const islandMatch = emp.islandGroup === loc.islandGroup;
+          return cityMatch || (regionMatch && islandMatch);
+        }).length;
+        const bubbleRadMeters = Math.sqrt(Math.max(employeeCount, 1)) * 6000;
         
         const circle = L.circle([loc.gpsLat, loc.gpsLng], {
           radius: bubbleRadMeters,
@@ -299,7 +325,7 @@ export default function InteractiveMap({
           <div class="font-sans p-1.5 text-xs text-slate-900 leading-snug">
             <strong class="text-indigo-950 uppercase text-[11px] block border-b border-slate-200 pb-0.5 mb-1">${loc.name}</strong>
             <span class="text-[10px] text-slate-500">${loc.islandGroup}</span>
-            <span>FTE: <strong class="text-red-700 text-base font-black">${loc.fte}</strong></span>
+            <span>FTE: <strong class="text-red-700 text-base font-black">${employeeCount}</strong></span>
             <span class="text-[9.5px] text-slate-500 font-mono block mt-0.5">[${loc.gpsLng.toFixed(4)}°E, ${loc.gpsLat.toFixed(4)}°N]</span>
           </div>
         `, { permanent: false, direction: 'top', opacity: 0.95 });
@@ -395,7 +421,7 @@ export default function InteractiveMap({
         });
       }
     }
-  }, [mapType, activeLayers, mapView, simulationActive, epicenter, activeDisaster, selectedIslandGroup, selectedCity]);
+  }, [mapType, activeLayers, mapView, simulationActive, epicenter, activeDisaster, selectedIslandGroup, selectedCity, employees]);
 
   // Employee markers — separate layer, gated by zoom level and current viewport
   useEffect(() => {
@@ -406,7 +432,16 @@ export default function InteractiveMap({
     const frame = window.requestAnimationFrame(() => {
       empLayer.clearLayers();
 
+<<<<<<< Updated upstream
       if (currentZoom < 9) return;
+=======
+      const isFocusedSelection = Boolean(selectedCity || selectedRegion || selectedIslandGroup);
+
+      // Keep the overview lightweight by only rendering employee pins once the user
+      // has narrowed the view to a specific region, island group, city, or active simulation.
+      if (!isFocusedSelection && !simulationActive) return;
+      if (currentZoom < (isFocusedSelection ? 6 : 9)) return;
+>>>>>>> Stashed changes
 
       const bounds = map.getBounds();
       const sw = bounds.getSouthWest();
@@ -415,7 +450,11 @@ export default function InteractiveMap({
       let rendered = 0;
 
       const visibleEmployees = employees.filter((emp) => {
-        if (selectedCity && !emp.address?.includes(selectedCity)) return false;
+        const normalizedSelectedCity = selectedCity?.trim().toLowerCase();
+        const cityName = getEmployeeCity(emp)?.trim().toLowerCase();
+        const addressText = emp.address?.trim().toLowerCase() ?? '';
+        if (selectedCity && !(cityName?.includes(normalizedSelectedCity!) || addressText.includes(normalizedSelectedCity!))) return false;
+        if (selectedRegion && emp.region !== selectedRegion) return false;
         if (selectedIslandGroup && emp.islandGroup !== selectedIslandGroup) return false;
 
         const empGps = emp.gpsLat && emp.gpsLng
@@ -498,7 +537,7 @@ export default function InteractiveMap({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity]);
+  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity, selectedRegion]);
 
   // --- MOCK SVG CHOP MAP HANDLERS (As secondary fallback diagram mode) ---
   const handleMapClickOnMock = (e: React.MouseEvent<SVGSVGElement>) => {

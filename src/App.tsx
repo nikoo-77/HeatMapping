@@ -4,12 +4,32 @@ import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam, AidApplication } 
 import InteractiveMap from './components/InteractiveMap';
 import EmployeeRollCall from './components/EmployeeRollCall';
 import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
-import { 
+import {
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
   AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
   FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2,
   HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap
 } from 'lucide-react';
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getEmployeeCity(emp: Employee): string | null {
+  const address = (emp.address ?? '').trim();
+  const addressText = normalizeText(address);
+
+  const knownCities = ALL_ISLAND_LOCATIONS.map((loc) => loc.city);
+  const match = knownCities.find((city) => normalizeText(city).includes(addressText) || addressText.includes(normalizeText(city)));
+  if (match) return match;
+
+  const parts = address.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return parts[parts.length - 2] || null;
+  }
+
+  return null;
+}
 
 export default function App() {
   // ── Page navigation ─────────────────────────────────────────────────────
@@ -256,9 +276,18 @@ export default function App() {
 
   const visibleEmployees = useMemo(() => {
     return employees.filter(emp => {
+      const normalizedSelectedCity = selectedCity?.trim().toLowerCase();
+      const cityName = getEmployeeCity(emp)?.trim().toLowerCase();
+      const addressText = emp.address?.trim().toLowerCase() ?? '';
       const geoMatch =
+<<<<<<< Updated upstream
         (!selectedCity || emp.address?.includes(selectedCity)) &&
         (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup);
+=======
+        (!normalizedSelectedCity || cityName?.includes(normalizedSelectedCity) || addressText.includes(normalizedSelectedCity)) &&
+        (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup) &&
+        (!selectedRegion || emp.region === selectedRegion);
+>>>>>>> Stashed changes
       const teamMatch = !filterByTeam || emp.team === viewerRole;
       return geoMatch && teamMatch;
     });
@@ -281,16 +310,13 @@ export default function App() {
 
   // Fixed values shown in Metro Cebu Image 2 for pristine alignment
   const fteInside5km = useMemo(() => {
-    // Metro central business coordinates are at Cebu IT park
-    const count = countInGpsRadius(10.3157, 123.8854, 5.0);
-    return count > 0 ? count : 835; // Fallback to 835 (75.4%) exactly
+    return countInGpsRadius(10.3157, 123.8854, 5.0);
   }, [countInGpsRadius]);
 
   const fteInside10kmAdditional = useMemo(() => {
     const totalWithin10 = countInGpsRadius(10.3157, 123.8854, 10.0);
     const totalWithin5 = countInGpsRadius(10.3157, 123.8854, 5.0);
-    const diff = totalWithin10 - totalWithin5;
-    return diff > 0 ? diff : 94; // Fallback to 94 exactly
+    return Math.max(totalWithin10 - totalWithin5, 0);
   }, [countInGpsRadius]);
 
   // Handle epicenter change from map drag or radius slider
@@ -874,11 +900,70 @@ export default function App() {
     }
   }, [employees, selectedEmployee]);
 
+<<<<<<< Updated upstream
   // Counters
   const affectedStaff = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm).length;
   const safeStaffCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Green').length;
   const pendingCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Yellow').length;
   const offlineDangerCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Red').length;
+=======
+  // ── Memoized counters — computed ONCE per employees/epicenter change, not on every render ──
+  const employeeStatusCounts = useMemo(() => {
+    let green = 0, red = 0, yellow = 0, uncontacted = 0;
+    let affectedTotal = 0, affectedGreen = 0, affectedYellow = 0, affectedRed = 0;
+    employees.forEach(emp => {
+      if (emp.status === 'Green') green++;
+      else if (emp.status === 'Yellow') yellow++;
+      else if (emp.status === 'Red') red++;
+      if (!emp.contacted) uncontacted++;
+
+      if (simulationActive) {
+        const empLat = emp.gpsLat ?? emp.lat;
+        const empLng = emp.gpsLng ?? emp.lng;
+        const dist = haversineKm(epicenter.lat, epicenter.lng, empLat, empLng);
+        if (dist <= epicenter.radiusKm) {
+          affectedTotal++;
+          if (emp.status === 'Green') affectedGreen++;
+          else if (emp.status === 'Yellow') affectedYellow++;
+          else if (emp.status === 'Red') affectedRed++;
+        }
+      }
+    });
+    return { green, red, yellow, uncontacted, affectedTotal, affectedGreen, affectedYellow, affectedRed };
+  }, [employees, epicenter, simulationActive, haversineKm]);
+
+  const affectedStaff      = employeeStatusCounts.affectedTotal;
+  const safeStaffCount     = employeeStatusCounts.affectedGreen;
+  const pendingCount       = employeeStatusCounts.affectedYellow;
+  const offlineDangerCount = employeeStatusCounts.affectedRed;
+
+  // Pre-compute island group and city FTE counts once — avoids dozens of .filter() calls inside JSX
+  const islandCounts = useMemo(() => {
+    const counts: Record<string, number> = { Luzon: 0, Visayas: 0, Mindanao: 0 };
+    employees.forEach(e => { if (e.islandGroup) counts[e.islandGroup] = (counts[e.islandGroup] ?? 0) + 1; });
+    return counts;
+  }, [employees]);
+
+  // Pre-compute region FTE counts once
+  const regionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    employees.forEach(e => {
+      if (e.region) counts.set(e.region, (counts.get(e.region) ?? 0) + 1);
+    });
+    return counts;
+  }, [employees]);
+
+  const cityCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    employees.forEach(e => {
+      const city = getEmployeeCity(e);
+      if (city) {
+        counts.set(city, (counts.get(city) ?? 0) + 1);
+      }
+    });
+    return counts;
+  }, [employees]);
+>>>>>>> Stashed changes
 
   const handleExportCalamityReport = (
     report: typeof calamityReports[number],
