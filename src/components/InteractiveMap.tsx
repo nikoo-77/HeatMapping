@@ -52,6 +52,30 @@ export function getDisasterEmoji(icon: string): string {
   return '🔥';
 }
 
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getEmployeeCity(emp: Employee): string | null {
+  const address = (emp.address ?? '').trim();
+  const addressText = normalizeText(address);
+
+  const knownCities = ALL_ISLAND_LOCATIONS.map((loc) => loc.city);
+  const match = knownCities.find((city) => {
+    const cityText = normalizeText(city);
+    return cityText.includes(addressText) || addressText.includes(cityText);
+  });
+
+  if (match) return match;
+
+  const parts = address.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return parts[parts.length - 2] || null;
+  }
+
+  return null;
+}
+
 export function hexToRgb(hex: string): string {
   const cleanHex = hex.replace('#', '');
   const r = parseInt(cleanHex.substring(0, 2), 16);
@@ -421,7 +445,7 @@ export default function InteractiveMap({
     }
   }, [mapType, activeLayers, mapView, simulationActive, epicenter, activeDisaster, selectedIslandGroup, selectedCity]);
 
-  // Employee markers — only shown when a specific city is selected OR simulation is active
+  // Employee markers — shown for focused selections and disaster simulation
   useEffect(() => {
     if (!mapInstanceRef.current || !employeeLayerRef.current || mapType === 'mock') return;
 
@@ -430,12 +454,9 @@ export default function InteractiveMap({
     const frame = window.requestAnimationFrame(() => {
       empLayer.clearLayers();
 
-      // Hide all pins if no specific city is selected AND no simulation is active.
-      // This prevents lag with 5000+ employees on overview / island-group views.
-      if (!selectedCity && !simulationActive) return;
-
-      // Also require a minimum zoom level to avoid overdrawing
-      if (currentZoom < 9) return;
+      const isFocusedSelection = Boolean(selectedCity || selectedRegion || selectedIslandGroup);
+      if (!isFocusedSelection && !simulationActive) return;
+      if (currentZoom < (isFocusedSelection ? 6 : 9)) return;
 
       const bounds = map.getBounds();
       const sw = bounds.getSouthWest();
@@ -444,7 +465,12 @@ export default function InteractiveMap({
       let rendered = 0;
 
       const visibleEmployees = employees.filter((emp) => {
-        if (selectedCity && !emp.address?.includes(selectedCity)) return false;
+        const selectedCityText = normalizeText(selectedCity ?? '');
+        const cityName = normalizeText(getEmployeeCity(emp) ?? '');
+        const addressText = normalizeText(emp.address ?? '');
+
+        if (selectedCity && !(cityName.includes(selectedCityText) || addressText.includes(selectedCityText) || selectedCityText.includes(cityName))) return false;
+        if (selectedRegion && emp.region !== selectedRegion) return false;
         if (selectedIslandGroup && emp.islandGroup !== selectedIslandGroup) return false;
 
         const empGps = emp.gpsLat && emp.gpsLng
@@ -527,7 +553,7 @@ export default function InteractiveMap({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity]);
+  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity, selectedRegion]);
 
   // --- MOCK SVG CHOP MAP HANDLERS (As secondary fallback diagram mode) ---
   const handleMapClickOnMock = (e: React.MouseEvent<SVGSVGElement>) => {

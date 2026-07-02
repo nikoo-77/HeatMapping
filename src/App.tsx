@@ -11,6 +11,30 @@ import {
   HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap
 } from 'lucide-react';
 
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getEmployeeCity(emp: Employee): string | null {
+  const address = (emp.address ?? '').trim();
+  const addressText = normalizeText(address);
+
+  const knownCities = ALL_ISLAND_LOCATIONS.map((loc) => loc.city);
+  const match = knownCities.find((city) => {
+    const cityText = normalizeText(city);
+    return cityText.includes(addressText) || addressText.includes(cityText);
+  });
+
+  if (match) return match;
+
+  const parts = address.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return parts[parts.length - 2] || null;
+  }
+
+  return null;
+}
+
 export default function App() {
   // ── Page navigation ─────────────────────────────────────────────────────
   const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive'>('dashboard');
@@ -268,8 +292,11 @@ export default function App() {
 
   const visibleEmployees = useMemo(() => {
     return employees.filter(emp => {
+      const selectedCityText = normalizeText(selectedCity ?? '');
+      const cityName = normalizeText(getEmployeeCity(emp) ?? '');
+      const addressText = normalizeText(emp.address ?? '');
       const geoMatch =
-        (!selectedCity || emp.address?.includes(selectedCity)) &&
+        (!selectedCity || cityName.includes(selectedCityText) || addressText.includes(selectedCityText) || selectedCityText.includes(cityName)) &&
         (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup) &&
         (!selectedRegion || emp.region === selectedRegion);
       const teamMatch = !filterByTeam || emp.team === viewerRole;
@@ -934,17 +961,10 @@ export default function App() {
   }, [employees]);
 
   const cityCounts = useMemo(() => {
-    // Build lookup keyed by loc.city strings (e.g. "Cebu City") — exactly how the panel uses includes(loc.city)
-    // Address format: "Cebu IT Park, Cebu City, Cebu" — city is 2nd comma-separated segment
     const counts = new Map<string, number>();
     employees.forEach(e => {
-      if (!e.address) return;
-      // Find which known city this address belongs to — check all known city names
-      const addr = e.address;
-      // Extract city from 2nd comma-separated segment ("Name, City, Province")
-      const parts = addr.split(',');
-      if (parts.length >= 2) {
-        const city = parts[1].trim();
+      const city = getEmployeeCity(e);
+      if (city) {
         counts.set(city, (counts.get(city) ?? 0) + 1);
       }
     });
