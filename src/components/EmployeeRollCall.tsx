@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Employee, SafetyStatus } from '../types';
 import { 
   Search, Users, AlertCircle, CheckCircle, HelpCircle, 
@@ -54,8 +54,8 @@ export default function EmployeeRollCall({
     }
   }, [selectedEmployee]);
 
-  // Compute GPS Haversine distance (km) from epicenter to employee home
-  const getDistance = (emp: Employee) => {
+  // Compute GPS Haversine distance (km) from epicenter to employee home — memoized to avoid recalc on every render
+  const getDistance = useCallback((emp: Employee) => {
     const R = 6371;
     const lat1 = epicenter.lat, lng1 = epicenter.lng;
     const lat2 = emp.gpsLat ?? emp.lat;
@@ -65,12 +65,12 @@ export default function EmployeeRollCall({
     const a = Math.sin(dLat / 2) ** 2 +
       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  };
+  }, [epicenter]);
 
   // Employees located in the zone
   const inZoneEmployees = useMemo(() => {
     return employees.filter((emp) => getDistance(emp) <= epicenter.radiusKm);
-  }, [employees, epicenter]);
+  }, [employees, epicenter, getDistance]);
 
   // Counts for high fidelity metrics
   const uncontactedInZoneCount = useMemo(() => {

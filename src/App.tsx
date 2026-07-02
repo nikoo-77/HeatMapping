@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees } from './data_islands';
+import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees, PHILIPPINE_REGIONS, ALL_ISLAND_LOCATIONS } from './data_islands';
 import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam, AidApplication } from './types';
 import InteractiveMap from './components/InteractiveMap';
 import EmployeeRollCall from './components/EmployeeRollCall';
@@ -104,6 +104,15 @@ export default function App() {
   // State to filter by island group (null = all)
   const [selectedIslandGroup, setSelectedIslandGroup] = useState<'Luzon' | 'Visayas' | 'Mindanao' | null>(null);
 
+  // State to filter by region (null = all) — e.g. 'NCR', 'VII', 'XI'
+  const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
+
+  // Left panel tab: 'region' or 'island'
+  const [panelTab, setPanelTab] = useState<'region' | 'island'>('region');
+
+  // Track which regions are collapsed (key = region code, true = collapsed)
+  const [collapsedRegions, setCollapsedRegions] = useState<Record<string, boolean>>({});
+
   // Viewer role & team filter
   const [viewerRole, setViewerRole] = useState<EmployeeTeam>('HR/CSR');
   const [filterByTeam, setFilterByTeam] = useState(false);
@@ -206,9 +215,12 @@ export default function App() {
     { id: '3', time: new Date().toLocaleTimeString(), msg: 'Toggle "Disaster & Incident Sim" to launch emergency SMS crisis telemetry.', type: 'warn' },
   ]);
 
-  // Save changes to local persistence
+  // Save changes to local persistence — debounced to avoid serializing 5k employees on every tiny state change
   useEffect(() => {
-    localStorage.setItem('island_map_employees', JSON.stringify(employees));
+    const timer = setTimeout(() => {
+      localStorage.setItem('island_map_employees', JSON.stringify(employees));
+    }, 2000);
+    return () => clearTimeout(timer);
   }, [employees]);
 
   // Log dispatch helper
@@ -258,11 +270,12 @@ export default function App() {
     return employees.filter(emp => {
       const geoMatch =
         (!selectedCity || emp.address?.includes(selectedCity)) &&
-        (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup);
+        (!selectedIslandGroup || emp.islandGroup === selectedIslandGroup) &&
+        (!selectedRegion || emp.region === selectedRegion);
       const teamMatch = !filterByTeam || emp.team === viewerRole;
       return geoMatch && teamMatch;
     });
-  }, [employees, selectedCity, selectedIslandGroup, filterByTeam, viewerRole]);
+  }, [employees, selectedCity, selectedIslandGroup, selectedRegion, filterByTeam, viewerRole]);
 
   const employeeLookup = useMemo(() => {
     const lookup = new Map<string, Employee>();
@@ -874,11 +887,69 @@ export default function App() {
     }
   }, [employees, selectedEmployee]);
 
-  // Counters
-  const affectedStaff = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm).length;
-  const safeStaffCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Green').length;
-  const pendingCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Yellow').length;
-  const offlineDangerCount = employees.filter(emp => getDistance(emp) <= epicenter.radiusKm && emp.status === 'Red').length;
+  // ── Memoized counters — computed ONCE per employees/epicenter change, not on every render ──
+  const employeeStatusCounts = useMemo(() => {
+    let green = 0, red = 0, yellow = 0, uncontacted = 0;
+    let affectedTotal = 0, affectedGreen = 0, affectedYellow = 0, affectedRed = 0;
+    employees.forEach(emp => {
+      if (emp.status === 'Green') green++;
+      else if (emp.status === 'Yellow') yellow++;
+      else if (emp.status === 'Red') red++;
+      if (!emp.contacted) uncontacted++;
+
+      if (simulationActive) {
+        const empLat = emp.gpsLat ?? emp.lat;
+        const empLng = emp.gpsLng ?? emp.lng;
+        const dist = haversineKm(epicenter.lat, epicenter.lng, empLat, empLng);
+        if (dist <= epicenter.radiusKm) {
+          affectedTotal++;
+          if (emp.status === 'Green') affectedGreen++;
+          else if (emp.status === 'Yellow') affectedYellow++;
+          else if (emp.status === 'Red') affectedRed++;
+        }
+      }
+    });
+    return { green, red, yellow, uncontacted, affectedTotal, affectedGreen, affectedYellow, affectedRed };
+  }, [employees, epicenter, simulationActive, haversineKm]);
+
+  const affectedStaff      = employeeStatusCounts.affectedTotal;
+  const safeStaffCount     = employeeStatusCounts.affectedGreen;
+  const pendingCount       = employeeStatusCounts.affectedYellow;
+  const offlineDangerCount = employeeStatusCounts.affectedRed;
+
+  // Pre-compute island group and city FTE counts once — avoids dozens of .filter() calls inside JSX
+  const islandCounts = useMemo(() => {
+    const counts: Record<string, number> = { Luzon: 0, Visayas: 0, Mindanao: 0 };
+    employees.forEach(e => { if (e.islandGroup) counts[e.islandGroup] = (counts[e.islandGroup] ?? 0) + 1; });
+    return counts;
+  }, [employees]);
+
+  // Pre-compute region FTE counts once
+  const regionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    employees.forEach(e => {
+      if (e.region) counts.set(e.region, (counts.get(e.region) ?? 0) + 1);
+    });
+    return counts;
+  }, [employees]);
+
+  const cityCounts = useMemo(() => {
+    // Build lookup keyed by loc.city strings (e.g. "Cebu City") — exactly how the panel uses includes(loc.city)
+    // Address format: "Cebu IT Park, Cebu City, Cebu" — city is 2nd comma-separated segment
+    const counts = new Map<string, number>();
+    employees.forEach(e => {
+      if (!e.address) return;
+      // Find which known city this address belongs to — check all known city names
+      const addr = e.address;
+      // Extract city from 2nd comma-separated segment ("Name, City, Province")
+      const parts = addr.split(',');
+      if (parts.length >= 2) {
+        const city = parts[1].trim();
+        counts.set(city, (counts.get(city) ?? 0) + 1);
+      }
+    });
+    return counts;
+  }, [employees]);
 
   const handleExportCalamityReport = (
     report: typeof calamityReports[number],
@@ -1023,8 +1094,8 @@ export default function App() {
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'safety' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
               <ShieldCheck className={`w-4 h-4 shrink-0 ${activePage === 'safety' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
               <span className="flex-1 leading-tight">Employee Safety</span>
-              {employees.filter(e => e.status === 'Red').length > 0 && (
-                <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{employees.filter(e => e.status === 'Red').length}</span>
+              {employeeStatusCounts.red > 0 && (
+                <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{employeeStatusCounts.red}</span>
               )}
             </button>
 
@@ -1070,7 +1141,7 @@ export default function App() {
               <div className="flex items-center justify-between pt-1 border-t border-white/10">
                 <span className="text-[10px] text-blue-300/50 font-mono">{employees.length} FTE</span>
                 <span className="text-[10px] text-emerald-400/70 font-mono">
-                  {employees.filter(e => e.status === 'Green').length} safe
+                  {employeeStatusCounts.green} safe
                 </span>
               </div>
             </div>
@@ -1086,160 +1157,317 @@ export default function App() {
       {/* Main Corporate Workspace */}
       <main className="flex-1 max-w-[1550px] w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
         
-        {/* Left Column: Island Group Filter Panel */}
+        {/* Left Column: Region / Island Group Filter Panel */}
         <section className="lg:col-span-3 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col max-h-[750px]">
-          <div className="bg-[#002060] px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-            <span className="text-white font-extrabold text-sm tracking-wide">Island Group</span>
-            <span className="text-white font-extrabold text-sm tracking-wide">FTE</span>
+
+          {/* Panel header */}
+          <div className="bg-[#002060] px-4 py-2.5 border-b border-[#001848] flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-white font-extrabold text-sm tracking-wide">Location Filter</span>
+              <span className="text-blue-300 font-mono text-[10px] font-bold">{employees.length} FTE</span>
+            </div>
+            {/* Tab switcher */}
+            <div className="flex bg-white/10 rounded-lg p-0.5 gap-0.5">
+              <button
+                onClick={() => { setPanelTab('region'); setSelectedRegion(null); setSelectedIslandGroup(null); setSelectedCity(null); }}
+                className={`flex-1 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all ${
+                  panelTab === 'region'
+                    ? 'bg-white text-[#002060] shadow-sm'
+                    : 'text-white/70 hover:text-white'
+                }`}
+              >
+                By Region
+              </button>
+              <button
+                onClick={() => { setPanelTab('island'); setSelectedRegion(null); setSelectedIslandGroup(null); setSelectedCity(null); }}
+                className={`flex-1 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all ${
+                  panelTab === 'island'
+                    ? 'bg-white text-[#002060] shadow-sm'
+                    : 'text-white/70 hover:text-white'
+                }`}
+              >
+                By Island
+              </button>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+          <div className="flex-1 overflow-y-auto">
 
-            {/* All Philippines Row */}
+            {/* ══ ALL PHILIPPINES ROW (always shown) ══ */}
             <button
               onClick={() => {
                 setSelectedIslandGroup(null);
+                setSelectedRegion(null);
                 setSelectedCity(null);
                 pushLog(`Viewing all Philippine island groups (${employees.length} employees).`, 'info');
               }}
-              className={`w-full text-left px-4 py-3 flex items-center justify-between transition-colors cursor-pointer border-b border-slate-200 hover:bg-[#ebf1fc]
-                ${!selectedIslandGroup ? 'bg-[#d9e1f2] border-l-4 border-l-[#002060]' : 'bg-slate-50'}`}
+              className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-colors cursor-pointer border-b border-slate-200 hover:bg-[#ebf1fc] ${
+                !selectedIslandGroup && !selectedRegion && !selectedCity
+                  ? 'bg-[#d9e1f2] border-l-4 border-l-[#002060]'
+                  : 'bg-slate-50'
+              }`}
             >
               <span className="font-extrabold text-[#002060] text-sm">🇵🇭 Philippines (All)</span>
               <strong className="font-black text-[#002060] text-base">{employees.length}</strong>
             </button>
 
-            {/* ── LUZON ─────────────────────────────── */}
-            <button
-              onClick={() => {
-                setSelectedIslandGroup('Luzon');
-                setSelectedCity(null);
-                const count = employees.filter(e => e.islandGroup === 'Luzon').length;
-                pushLog(`Filtering by Luzon island group (${count} employees).`, 'info');
-              }}
-              className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-emerald-50 cursor-pointer
-                ${selectedIslandGroup === 'Luzon' ? 'bg-emerald-50 border-l-4 border-l-emerald-600 font-bold' : ''}`}
-            >
-              <span className="font-extrabold text-emerald-800 text-sm flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
-                Luzon
-              </span>
-              <span className="font-mono font-black text-emerald-900 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded text-[11px]">
-                {employees.filter(e => e.islandGroup === 'Luzon').length} fte
-              </span>
-            </button>
-            {/* Luzon city breakdown */}
-            {LUZON_LOCATIONS.map((loc) => {
-              const cityEmp = employees.filter(e => e.address?.includes(loc.city)).length;
-              const isSelected = selectedCity === loc.city;
-              return (
-                <button
-                  key={loc.name}
-                  onClick={() => {
-                    setSelectedIslandGroup('Luzon');
-                    setSelectedCity(loc.city);
-                    pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
-                  }}
-                  className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs
-                    ${isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''}`}
-                >
-                  <span className="text-slate-600 font-medium truncate">{loc.name}</span>
-                  <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
-                    {loc.fte} fte
-                  </span>
-                </button>
-              );
-            })}
+            {/* ══ BY REGION TAB ══ */}
+            {panelTab === 'region' && (() => {
+              // Group locations by region code
+              const regionLocMap = new Map<string, typeof ALL_ISLAND_LOCATIONS>();
+              ALL_ISLAND_LOCATIONS.forEach(loc => {
+                const arr = regionLocMap.get(loc.region) ?? [];
+                arr.push(loc);
+                regionLocMap.set(loc.region, arr);
+              });
 
-            {/* ── VISAYAS ───────────────────────────── */}
-            <button
-              onClick={() => {
-                setSelectedIslandGroup('Visayas');
-                setSelectedCity(null);
-                const count = employees.filter(e => e.islandGroup === 'Visayas').length;
-                pushLog(`Filtering by Visayas island group (${count} employees).`, 'info');
-              }}
-              className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-blue-50 cursor-pointer
-                ${selectedIslandGroup === 'Visayas' ? 'bg-blue-50 border-l-4 border-l-blue-600 font-bold' : ''}`}
-            >
-              <span className="font-extrabold text-blue-800 text-sm flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
-                Visayas
-              </span>
-              <span className="font-mono font-black text-blue-900 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded text-[11px]">
-                {employees.filter(e => e.islandGroup === 'Visayas').length} fte
-              </span>
-            </button>
-            {/* Visayas city breakdown */}
-            {VISAYAS_LOCATIONS.map((loc) => {
-              const cityEmp = employees.filter(e => e.address?.includes(loc.city)).length;
-              const isSelected = selectedCity === loc.city;
-              return (
-                <button
-                  key={loc.name}
-                  onClick={() => {
-                    setSelectedIslandGroup('Visayas');
-                    setSelectedCity(loc.city);
-                    pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
-                  }}
-                  className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs
-                    ${isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''}`}
-                >
-                  <span className="text-slate-600 font-medium truncate">{loc.name}</span>
-                  <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
-                    {loc.fte} fte
-                  </span>
-                </button>
-              );
-            })}
+              // Only show regions that have locations
+              const activeRegions = PHILIPPINE_REGIONS.filter(r => regionLocMap.has(r.code));
 
-            {/* ── MINDANAO ──────────────────────────── */}
-            <button
-              onClick={() => {
-                setSelectedIslandGroup('Mindanao');
-                setSelectedCity(null);
-                const count = employees.filter(e => e.islandGroup === 'Mindanao').length;
-                pushLog(`Filtering by Mindanao island group (${count} employees).`, 'info');
-              }}
-              className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-amber-50 cursor-pointer
-                ${selectedIslandGroup === 'Mindanao' ? 'bg-amber-50 border-l-4 border-l-amber-600 font-bold' : ''}`}
-            >
-              <span className="font-extrabold text-amber-800 text-sm flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
-                Mindanao
-              </span>
-              <span className="font-mono font-black text-amber-900 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded text-[11px]">
-                {employees.filter(e => e.islandGroup === 'Mindanao').length} fte
-              </span>
-            </button>
-            {/* Mindanao city breakdown */}
-            {MINDANAO_LOCATIONS.map((loc) => {
-              const cityEmp = employees.filter(e => e.address?.includes(loc.city)).length;
-              const isSelected = selectedCity === loc.city;
-              return (
-                <button
-                  key={loc.name}
-                  onClick={() => {
-                    setSelectedIslandGroup('Mindanao');
-                    setSelectedCity(loc.city);
-                    pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
-                  }}
-                  className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs
-                    ${isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''}`}
-                >
-                  <span className="text-slate-600 font-medium truncate">{loc.name}</span>
-                  <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
-                    {loc.fte} fte
-                  </span>
-                </button>
-              );
-            })}
+              const colorMap: Record<string, { bg: string; text: string; dot: string; badge: string; border: string; hover: string }> = {
+                violet: { bg: 'bg-violet-50',  text: 'text-violet-900', dot: 'bg-violet-500', badge: 'bg-violet-100 text-violet-900 border-violet-200', border: 'border-l-violet-600', hover: 'hover:bg-violet-50' },
+                emerald:{ bg: 'bg-emerald-50', text: 'text-emerald-900',dot: 'bg-emerald-500',badge: 'bg-emerald-100 text-emerald-900 border-emerald-200',border: 'border-l-emerald-600',hover: 'hover:bg-emerald-50' },
+                sky:    { bg: 'bg-sky-50',     text: 'text-sky-900',    dot: 'bg-sky-500',    badge: 'bg-sky-100 text-sky-900 border-sky-200',           border: 'border-l-sky-600',    hover: 'hover:bg-sky-50' },
+                teal:   { bg: 'bg-teal-50',    text: 'text-teal-900',   dot: 'bg-teal-500',   badge: 'bg-teal-100 text-teal-900 border-teal-200',         border: 'border-l-teal-600',   hover: 'hover:bg-teal-50' },
+                cyan:   { bg: 'bg-cyan-50',    text: 'text-cyan-900',   dot: 'bg-cyan-500',   badge: 'bg-cyan-100 text-cyan-900 border-cyan-200',         border: 'border-l-cyan-600',   hover: 'hover:bg-cyan-50' },
+                lime:   { bg: 'bg-lime-50',    text: 'text-lime-900',   dot: 'bg-lime-500',   badge: 'bg-lime-100 text-lime-900 border-lime-200',         border: 'border-l-lime-600',   hover: 'hover:bg-lime-50' },
+                green:  { bg: 'bg-green-50',   text: 'text-green-900',  dot: 'bg-green-500',  badge: 'bg-green-100 text-green-900 border-green-200',      border: 'border-l-green-600',  hover: 'hover:bg-green-50' },
+                yellow: { bg: 'bg-yellow-50',  text: 'text-yellow-900', dot: 'bg-yellow-500', badge: 'bg-yellow-100 text-yellow-900 border-yellow-200',   border: 'border-l-yellow-600', hover: 'hover:bg-yellow-50' },
+                blue:   { bg: 'bg-blue-50',    text: 'text-blue-900',   dot: 'bg-blue-500',   badge: 'bg-blue-100 text-blue-900 border-blue-200',         border: 'border-l-blue-600',   hover: 'hover:bg-blue-50' },
+                indigo: { bg: 'bg-indigo-50',  text: 'text-indigo-900', dot: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-900 border-indigo-200',   border: 'border-l-indigo-600', hover: 'hover:bg-indigo-50' },
+                purple: { bg: 'bg-purple-50',  text: 'text-purple-900', dot: 'bg-purple-500', badge: 'bg-purple-100 text-purple-900 border-purple-200',   border: 'border-l-purple-600', hover: 'hover:bg-purple-50' },
+                orange: { bg: 'bg-orange-50',  text: 'text-orange-900', dot: 'bg-orange-500', badge: 'bg-orange-100 text-orange-900 border-orange-200',   border: 'border-l-orange-600', hover: 'hover:bg-orange-50' },
+                amber:  { bg: 'bg-amber-50',   text: 'text-amber-900',  dot: 'bg-amber-500',  badge: 'bg-amber-100 text-amber-900 border-amber-200',      border: 'border-l-amber-600',  hover: 'hover:bg-amber-50' },
+                rose:   { bg: 'bg-rose-50',    text: 'text-rose-900',   dot: 'bg-rose-500',   badge: 'bg-rose-100 text-rose-900 border-rose-200',         border: 'border-l-rose-600',   hover: 'hover:bg-rose-50' },
+                red:    { bg: 'bg-red-50',     text: 'text-red-900',    dot: 'bg-red-500',    badge: 'bg-red-100 text-red-900 border-red-200',             border: 'border-l-red-600',    hover: 'hover:bg-red-50' },
+                pink:   { bg: 'bg-pink-50',    text: 'text-pink-900',   dot: 'bg-pink-500',   badge: 'bg-pink-100 text-pink-900 border-pink-200',         border: 'border-l-pink-600',   hover: 'hover:bg-pink-50' },
+                fuchsia:{ bg: 'bg-fuchsia-50', text: 'text-fuchsia-900',dot: 'bg-fuchsia-500',badge: 'bg-fuchsia-100 text-fuchsia-900 border-fuchsia-200',border: 'border-l-fuchsia-600',hover: 'hover:bg-fuchsia-50' },
+              };
+
+              return activeRegions.map(region => {
+                const locs = regionLocMap.get(region.code) ?? [];
+                const regionFte = regionCounts.get(region.code) ?? 0;
+                const c = colorMap[region.color] ?? colorMap.blue;
+                const isRegionSelected = selectedRegion === region.code;
+                const isCollapsed = collapsedRegions[region.code] ?? false;
+
+                return (
+                  <div key={region.code} className="border-b border-slate-100">
+                    {/* Region header row */}
+                    <div className={`flex items-center gap-0 ${ isRegionSelected ? `${c.bg} border-l-4 ${c.border}` : '' }`}>
+                      <button
+                        onClick={() => {
+                          const newRegion = isRegionSelected ? null : region.code;
+                          setSelectedRegion(newRegion);
+                          setSelectedIslandGroup(newRegion ? region.islandGroup : null);
+                          setSelectedCity(null);
+                          if (newRegion) pushLog(`Filtering by ${region.name} — Region ${region.code} (${regionFte} employees).`, 'info');
+                        }}
+                        className={`flex-1 text-left px-4 py-2 flex items-center gap-2 transition-all cursor-pointer ${c.hover}`}
+                      >
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${c.dot}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className={`font-extrabold text-xs ${c.text}`}>
+                            Region {region.code}
+                          </div>
+                          <div className="text-[10px] text-slate-500 truncate leading-tight">{region.name}</div>
+                        </div>
+                        <span className={`font-mono font-black text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${c.badge}`}>
+                          {regionFte}
+                        </span>
+                      </button>
+                      {/* Collapse toggle */}
+                      <button
+                        onClick={() => setCollapsedRegions(prev => ({ ...prev, [region.code]: !isCollapsed }))}
+                        className="px-2 py-2 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer shrink-0"
+                        title={isCollapsed ? 'Expand' : 'Collapse'}
+                      >
+                        <svg className={`w-3 h-3 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {/* City rows under this region */}
+                    {!isCollapsed && locs.map(loc => {
+                      const cityEmp = cityCounts.get(loc.city) ?? loc.fte;
+                      const isCitySelected = selectedCity === loc.city;
+                      return (
+                        <button
+                          key={loc.name}
+                          onClick={() => {
+                            setSelectedRegion(region.code);
+                            setSelectedIslandGroup(region.islandGroup);
+                            setSelectedCity(loc.city);
+                            pushLog(`Focused: ${loc.name}, ${loc.city} — Region ${region.code} (${cityEmp} FTEs).`, 'info');
+                          }}
+                          className={`w-full text-left pl-8 pr-4 py-1.5 flex items-center justify-between transition-all cursor-pointer text-xs ${
+                            isCitySelected ? `${c.bg} border-l-4 ${c.border}` : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="text-slate-600 font-medium truncate">{loc.name}</span>
+                          <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shrink-0 text-[10px]">
+                            {cityEmp}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              });
+            })()}
+
+            {/* ══ BY ISLAND GROUP TAB ══ */}
+            {panelTab === 'island' && <>
+              {/* ── LUZON ── */}
+              <button
+                onClick={() => {
+                  setSelectedIslandGroup('Luzon');
+                  setSelectedRegion(null);
+                  setSelectedCity(null);
+                  pushLog(`Filtering by Luzon island group (${islandCounts.Luzon} employees).`, 'info');
+                }}
+                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-emerald-50 cursor-pointer ${
+                  selectedIslandGroup === 'Luzon' && !selectedCity ? 'bg-emerald-50 border-l-4 border-l-emerald-600 font-bold' : ''
+                }`}
+              >
+                <span className="font-extrabold text-emerald-800 text-sm flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                  Luzon
+                </span>
+                <span className="font-mono font-black text-emerald-900 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded text-[11px]">
+                  {islandCounts.Luzon} fte
+                </span>
+              </button>
+              {LUZON_LOCATIONS.map(loc => {
+                const cityEmp = cityCounts.get(loc.city) ?? loc.fte;
+                const isSelected = selectedCity === loc.city;
+                return (
+                  <button
+                    key={loc.name}
+                    onClick={() => {
+                      setSelectedIslandGroup('Luzon');
+                      setSelectedRegion(loc.region);
+                      setSelectedCity(loc.city);
+                      pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
+                    }}
+                    className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs ${
+                      isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''
+                    }`}
+                  >
+                    <span className="text-slate-600 font-medium truncate">{loc.name}</span>
+                    <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
+                      {cityEmp} fte
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* ── VISAYAS ── */}
+              <button
+                onClick={() => {
+                  setSelectedIslandGroup('Visayas');
+                  setSelectedRegion(null);
+                  setSelectedCity(null);
+                  pushLog(`Filtering by Visayas island group (${islandCounts.Visayas} employees).`, 'info');
+                }}
+                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-blue-50 cursor-pointer ${
+                  selectedIslandGroup === 'Visayas' && !selectedCity ? 'bg-blue-50 border-l-4 border-l-blue-600 font-bold' : ''
+                }`}
+              >
+                <span className="font-extrabold text-blue-800 text-sm flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
+                  Visayas
+                </span>
+                <span className="font-mono font-black text-blue-900 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded text-[11px]">
+                  {islandCounts.Visayas} fte
+                </span>
+              </button>
+              {VISAYAS_LOCATIONS.map(loc => {
+                const cityEmp = cityCounts.get(loc.city) ?? loc.fte;
+                const isSelected = selectedCity === loc.city;
+                return (
+                  <button
+                    key={loc.name}
+                    onClick={() => {
+                      setSelectedIslandGroup('Visayas');
+                      setSelectedRegion(loc.region);
+                      setSelectedCity(loc.city);
+                      pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
+                    }}
+                    className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs ${
+                      isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''
+                    }`}
+                  >
+                    <span className="text-slate-600 font-medium truncate">{loc.name}</span>
+                    <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
+                      {cityEmp} fte
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* ── MINDANAO ── */}
+              <button
+                onClick={() => {
+                  setSelectedIslandGroup('Mindanao');
+                  setSelectedRegion(null);
+                  setSelectedCity(null);
+                  pushLog(`Filtering by Mindanao island group (${islandCounts.Mindanao} employees).`, 'info');
+                }}
+                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-amber-50 cursor-pointer ${
+                  selectedIslandGroup === 'Mindanao' && !selectedCity ? 'bg-amber-50 border-l-4 border-l-amber-600 font-bold' : ''
+                }`}
+              >
+                <span className="font-extrabold text-amber-800 text-sm flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                  Mindanao
+                </span>
+                <span className="font-mono font-black text-amber-900 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded text-[11px]">
+                  {islandCounts.Mindanao} fte
+                </span>
+              </button>
+              {MINDANAO_LOCATIONS.map(loc => {
+                const cityEmp = cityCounts.get(loc.city) ?? loc.fte;
+                const isSelected = selectedCity === loc.city;
+                return (
+                  <button
+                    key={loc.name}
+                    onClick={() => {
+                      setSelectedIslandGroup('Mindanao');
+                      setSelectedRegion(loc.region);
+                      setSelectedCity(loc.city);
+                      pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
+                    }}
+                    className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs ${
+                      isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''
+                    }`}
+                  >
+                    <span className="text-slate-600 font-medium truncate">{loc.name}</span>
+                    <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
+                      {cityEmp} fte
+                    </span>
+                  </button>
+                );
+              })}
+            </>}
 
           </div>
 
+          {/* Panel footer */}
           <div className="bg-slate-50 p-3 border-t border-slate-200 text-[10px] font-mono text-slate-500 font-bold text-center flex flex-col gap-0.5">
             <span>DATABASE SYNCHRONIZED</span>
             <span>Total Headcount: {employees.length} fte</span>
+            {(selectedRegion || selectedIslandGroup) && (
+              <span className="text-[#002060] font-black">
+                {selectedCity
+                  ? `Viewing: ${selectedCity}`
+                  : selectedRegion
+                  ? `Region ${selectedRegion} · ${regionCounts.get(selectedRegion) ?? 0} fte`
+                  : `${selectedIslandGroup} · ${islandCounts[selectedIslandGroup!] ?? 0} fte`
+                }
+              </span>
+            )}
           </div>
         </section>
 
@@ -1250,10 +1478,12 @@ export default function App() {
             {/* Left: live indicator + title */}
             <span className="font-extrabold uppercase text-slate-800 text-xs flex items-center gap-1.5 font-mono shrink-0">
               <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
-              {selectedIslandGroup
-                ? `${selectedIslandGroup} — Workforce Density`
-                : selectedCity
+              {selectedCity
                 ? `${selectedCity} — Local View`
+                : selectedRegion
+                ? `Region ${selectedRegion} — ${PHILIPPINE_REGIONS.find(r => r.code === selectedRegion)?.name ?? selectedRegion}`
+                : selectedIslandGroup
+                ? `${selectedIslandGroup} — Workforce Density`
                 : 'Philippines — National Overview'}
             </span>
 
@@ -1298,6 +1528,7 @@ export default function App() {
               simulationActive={simulationActive}
               selectedCity={selectedCity}
               selectedIslandGroup={selectedIslandGroup}
+              selectedRegion={selectedRegion}
             />
 
             {/* Static Overlay Card inside Metro Cebu Map View */}

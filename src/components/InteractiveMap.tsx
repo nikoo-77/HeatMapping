@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Employee, DisasterConfig } from '../types';
-import { ALL_ISLAND_LOCATIONS } from '../data_islands';
+import { ALL_ISLAND_LOCATIONS, PHILIPPINE_REGIONS } from '../data_islands';
 import { Flame, MapPin, Search, Users, ShieldAlert, Crosshair, HelpCircle, Signal, Battery, Home, Info, Compass, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import L from 'leaflet';
@@ -82,6 +82,7 @@ interface InteractiveMapProps {
   simulationActive?: boolean;
   selectedCity?: string | null;
   selectedIslandGroup?: 'Luzon' | 'Visayas' | 'Mindanao' | null;
+  selectedRegion?: string | null;
 }
 
 export default function InteractiveMap({
@@ -96,6 +97,7 @@ export default function InteractiveMap({
   simulationActive = false,
   selectedCity = null,
   selectedIslandGroup = null,
+  selectedRegion = null,
 }: InteractiveMapProps) {
   const mockMapRef = useRef<SVGSVGElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -212,6 +214,20 @@ export default function InteractiveMap({
     setTimeout(() => { map.invalidateSize(); }, 150);
   }, [mapView, mapType, selectedIslandGroup]);
 
+  // Fly to the selected region's bounds when selectedRegion changes
+  useEffect(() => {
+    if (!mapInstanceRef.current || mapType === 'mock' || !selectedRegion) return;
+    const map = mapInstanceRef.current;
+    const region = PHILIPPINE_REGIONS.find(r => r.code === selectedRegion);
+    if (!region) return;
+    const b = region.bounds; // [swLat, swLng, neLat, neLng]
+    map.fitBounds(
+      [[b[0], b[1]], [b[2], b[3]]],
+      { animate: true, duration: 0.8, padding: [20, 20] }
+    );
+    setTimeout(() => { map.invalidateSize(); }, 150);
+  }, [selectedRegion, mapType]);
+
   // Automatically pan/center on selected employee
   useEffect(() => {
     if (!mapInstanceRef.current || mapType === 'mock' || !selectedEmployee) return;
@@ -227,17 +243,25 @@ export default function InteractiveMap({
     });
   }, [selectedEmployee, mapType]);
 
-  // Automatically pan/center on a selected city from the side-panel
+  // Automatically pan/zoom to a selected city and refresh employee markers
   useEffect(() => {
     if (!mapInstanceRef.current || mapType === 'mock' || !selectedCity) return;
     const map = mapInstanceRef.current;
     
     const matchedLoc = ALL_ISLAND_LOCATIONS.find(loc => loc.city === selectedCity);
     if (matchedLoc) {
-      map.setView([matchedLoc.gpsLat, matchedLoc.gpsLng], 12, {
+      // Zoom to city level (13) so employee pins become visible
+      map.setView([matchedLoc.gpsLat, matchedLoc.gpsLng], 13, {
         animate: true,
         duration: 1.0
       });
+      // After the fly animation, refresh the zoom state to trigger marker re-render
+      setTimeout(() => {
+        const z = map.getZoom();
+        zoomLevelRef.current = z;
+        setCurrentZoom(z);
+        setMapViewportVersion((prev) => prev + 1);
+      }, 1200);
     }
   }, [selectedCity, mapType]);
 
@@ -397,7 +421,7 @@ export default function InteractiveMap({
     }
   }, [mapType, activeLayers, mapView, simulationActive, epicenter, activeDisaster, selectedIslandGroup, selectedCity]);
 
-  // Employee markers — separate layer, gated by zoom level and current viewport
+  // Employee markers — only shown when a specific city is selected OR simulation is active
   useEffect(() => {
     if (!mapInstanceRef.current || !employeeLayerRef.current || mapType === 'mock') return;
 
@@ -406,12 +430,17 @@ export default function InteractiveMap({
     const frame = window.requestAnimationFrame(() => {
       empLayer.clearLayers();
 
+      // Hide all pins if no specific city is selected AND no simulation is active.
+      // This prevents lag with 5000+ employees on overview / island-group views.
+      if (!selectedCity && !simulationActive) return;
+
+      // Also require a minimum zoom level to avoid overdrawing
       if (currentZoom < 9) return;
 
       const bounds = map.getBounds();
       const sw = bounds.getSouthWest();
       const ne = bounds.getNorthEast();
-      const maxMarkers = currentZoom >= 13 ? 320 : currentZoom >= 11 ? 180 : 90;
+      const maxMarkers = currentZoom >= 13 ? 400 : currentZoom >= 11 ? 200 : 100;
       let rendered = 0;
 
       const visibleEmployees = employees.filter((emp) => {
@@ -599,6 +628,26 @@ export default function InteractiveMap({
 
       {/* Map Main display wrapper */}
       <div className="relative flex-1 select-none overflow-hidden h-full min-h-[400px]">
+
+        {/* Hint badge: shown when no city is selected and no simulation is active */}
+        {!selectedCity && !simulationActive && mapType !== 'mock' && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[500] pointer-events-none">
+            <div className="flex items-center gap-2 bg-[#002060]/90 text-white text-[10px] font-bold px-3.5 py-2 rounded-full shadow-xl border border-white/10 backdrop-blur-sm tracking-wide uppercase whitespace-nowrap animate-pulse">
+              <span className="text-base leading-none">📍</span>
+              <span>Select a location from the panel to view employee pins</span>
+            </div>
+          </div>
+        )}
+
+        {/* City pin count badge: shown when a city is selected */}
+        {selectedCity && !simulationActive && mapType !== 'mock' && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[500] pointer-events-none">
+            <div className="flex items-center gap-2 bg-emerald-700/90 text-white text-[10px] font-bold px-3.5 py-2 rounded-full shadow-xl border border-emerald-500/30 backdrop-blur-sm tracking-wide uppercase whitespace-nowrap">
+              <span className="text-base leading-none">🗺️</span>
+              <span>Showing employee pins for {selectedCity}</span>
+            </div>
+          </div>
+        )}
         
         {mapType !== 'mock' ? (
           <div ref={mapContainerRef} className="w-full h-full z-10 bg-slate-50" style={{ minHeight: '400px' }} />

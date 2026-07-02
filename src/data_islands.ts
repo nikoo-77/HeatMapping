@@ -41,46 +41,81 @@ const DEPARTMENTS = [
 
 const CARRIERS: ('Globe' | 'Smart' | 'DITO')[] = ['Globe', 'Smart', 'DITO'];
 
-// ─── Luzon Locations ─────────────────────────────────────────────────────────
+// ─── Philippine Administrative Regions ───────────────────────────────────────
+export interface PhilippineRegion {
+  code: string;          // e.g. 'NCR', 'III', 'IV-A'
+  name: string;          // e.g. 'National Capital Region'
+  islandGroup: 'Luzon' | 'Visayas' | 'Mindanao';
+  color: string;         // Tailwind color token for theming
+  // Geographic bounds [swLat, swLng, neLat, neLng]
+  bounds: [number, number, number, number];
+}
+
+export const PHILIPPINE_REGIONS: PhilippineRegion[] = [
+  { code: 'NCR',   name: 'National Capital Region', islandGroup: 'Luzon',    color: 'violet', bounds: [14.39, 120.91, 14.77, 121.13] },
+  { code: 'CAR',   name: 'Cordillera Admin. Region', islandGroup: 'Luzon',   color: 'emerald', bounds: [16.0, 119.5, 18.5, 122.0] },
+  { code: 'I',     name: 'Ilocos Region',            islandGroup: 'Luzon',   color: 'sky',     bounds: [15.5, 119.6, 18.6, 121.0] },
+  { code: 'II',    name: 'Cagayan Valley',            islandGroup: 'Luzon',  color: 'teal',    bounds: [16.0, 121.0, 18.7, 123.0] },
+  { code: 'III',   name: 'Central Luzon',             islandGroup: 'Luzon',  color: 'cyan',    bounds: [14.4, 119.7, 16.2, 121.6] },
+  { code: 'IV-A',  name: 'CALABARZON',                islandGroup: 'Luzon',  color: 'lime',    bounds: [13.2, 120.6, 14.6, 122.0] },
+  { code: 'IV-B',  name: 'MIMAROPA',                  islandGroup: 'Luzon',  color: 'green',   bounds: [8.0, 117.0, 14.0, 122.5] },
+  { code: 'V',     name: 'Bicol Region',              islandGroup: 'Luzon',  color: 'yellow',  bounds: [11.9, 122.0, 14.1, 124.5] },
+  { code: 'VI',    name: 'Western Visayas',           islandGroup: 'Visayas', color: 'blue',   bounds: [9.5, 121.0, 12.0, 124.0] },
+  { code: 'VII',   name: 'Central Visayas',           islandGroup: 'Visayas', color: 'indigo', bounds: [9.2, 123.0, 11.5, 126.5] },
+  { code: 'VIII',  name: 'Eastern Visayas',           islandGroup: 'Visayas', color: 'purple', bounds: [10.0, 124.0, 12.5, 126.5] },
+  { code: 'IX',    name: 'Zamboanga Peninsula',       islandGroup: 'Mindanao', color: 'orange', bounds: [5.8, 120.8, 8.9, 124.0] },
+  { code: 'X',     name: 'Northern Mindanao',         islandGroup: 'Mindanao', color: 'amber',  bounds: [7.5, 123.0, 9.5, 126.0] },
+  { code: 'XI',    name: 'Davao Region',              islandGroup: 'Mindanao', color: 'rose',   bounds: [5.8, 124.5, 8.5, 127.0] },
+  { code: 'XII',   name: 'SOCCSKSARGEN',              islandGroup: 'Mindanao', color: 'red',    bounds: [5.5, 124.0, 7.5, 126.5] },
+  { code: 'XIII',  name: 'Caraga',                    islandGroup: 'Mindanao', color: 'pink',   bounds: [7.5, 124.5, 10.0, 127.0] },
+  { code: 'BARMM', name: 'Bangsamoro (BARMM)',        islandGroup: 'Mindanao', color: 'fuchsia', bounds: [5.0, 119.5, 8.5, 125.0] },
+];
+
+// Quick lookup by code
+export const REGION_BY_CODE = Object.fromEntries(PHILIPPINE_REGIONS.map(r => [r.code, r]));
+
+// ─── Location interface ───────────────────────────────────────────────────────
 export interface IslandLocation {
   name: string;
   city: string;
   province: string;
   islandGroup: 'Luzon' | 'Visayas' | 'Mindanao';
+  region: string;    // region code, e.g. 'NCR', 'VII'
   fte: number;
   gpsLat: number;
   gpsLng: number;
 }
 
+// ─── Luzon Locations ─────────────────────────────────────────────────────────
 export const LUZON_LOCATIONS: IslandLocation[] = [
-  { name: 'Makati CBD', city: 'Makati City', province: 'Metro Manila', islandGroup: 'Luzon', fte: 8, gpsLat: 14.5547, gpsLng: 121.0244 },
-  { name: 'BGC Taguig Hub', city: 'Taguig City', province: 'Metro Manila', islandGroup: 'Luzon', fte: 6, gpsLat: 14.5176, gpsLng: 121.0509 },
-  { name: 'Quezon City North', city: 'Quezon City', province: 'Metro Manila', islandGroup: 'Luzon', fte: 5, gpsLat: 14.6760, gpsLng: 121.0437 },
-  { name: 'Alabang South', city: 'Muntinlupa City', province: 'Metro Manila', islandGroup: 'Luzon', fte: 4, gpsLat: 14.4200, gpsLng: 121.0451 },
-  { name: 'Clark Freeport', city: 'Angeles City', province: 'Pampanga', islandGroup: 'Luzon', fte: 3, gpsLat: 15.1854, gpsLng: 120.5614 },
-  { name: 'Sta. Rosa Technohub', city: 'Sta. Rosa', province: 'Laguna', islandGroup: 'Luzon', fte: 3, gpsLat: 14.2776, gpsLng: 121.1114 },
-  { name: 'Nuvali Calamba', city: 'Calamba City', province: 'Laguna', islandGroup: 'Luzon', fte: 2, gpsLat: 14.2114, gpsLng: 121.1648 },
+  { name: 'Makati CBD',        city: 'Makati City',     province: 'Metro Manila', islandGroup: 'Luzon', region: 'NCR',  fte: 8, gpsLat: 14.5547, gpsLng: 121.0244 },
+  { name: 'BGC Taguig Hub',    city: 'Taguig City',     province: 'Metro Manila', islandGroup: 'Luzon', region: 'NCR',  fte: 6, gpsLat: 14.5176, gpsLng: 121.0509 },
+  { name: 'Quezon City North', city: 'Quezon City',     province: 'Metro Manila', islandGroup: 'Luzon', region: 'NCR',  fte: 5, gpsLat: 14.6760, gpsLng: 121.0437 },
+  { name: 'Alabang South',     city: 'Muntinlupa City', province: 'Metro Manila', islandGroup: 'Luzon', region: 'NCR',  fte: 4, gpsLat: 14.4200, gpsLng: 121.0451 },
+  { name: 'Clark Freeport',    city: 'Angeles City',    province: 'Pampanga',     islandGroup: 'Luzon', region: 'III', fte: 3, gpsLat: 15.1854, gpsLng: 120.5614 },
+  { name: 'Sta. Rosa Technohub', city: 'Sta. Rosa',     province: 'Laguna',       islandGroup: 'Luzon', region: 'IV-A', fte: 3, gpsLat: 14.2776, gpsLng: 121.1114 },
+  { name: 'Nuvali Calamba',    city: 'Calamba City',    province: 'Laguna',       islandGroup: 'Luzon', region: 'IV-A', fte: 2, gpsLat: 14.2114, gpsLng: 121.1648 },
 ];
 
 // ─── Visayas Locations ────────────────────────────────────────────────────────
 export const VISAYAS_LOCATIONS: IslandLocation[] = [
-  { name: 'Cebu IT Park', city: 'Cebu City', province: 'Cebu', islandGroup: 'Visayas', fte: 7, gpsLat: 10.3311, gpsLng: 123.9053 },
-  { name: 'Lapu-Lapu MCIA', city: 'Lapu-Lapu City', province: 'Cebu', islandGroup: 'Visayas', fte: 5, gpsLat: 10.3156, gpsLng: 123.9784 },
-  { name: 'Mandaue Industrial', city: 'Mandaue City', province: 'Cebu', islandGroup: 'Visayas', fte: 4, gpsLat: 10.3446, gpsLng: 123.9392 },
-  { name: 'Iloilo Business Park', city: 'Iloilo City', province: 'Iloilo', islandGroup: 'Visayas', fte: 4, gpsLat: 10.6967, gpsLng: 122.5644 },
-  { name: 'Bacolod Northgate', city: 'Bacolod City', province: 'Negros Occidental', islandGroup: 'Visayas', fte: 3, gpsLat: 10.6768, gpsLng: 122.9509 },
-  { name: 'Tacloban Metro', city: 'Tacloban City', province: 'Leyte', islandGroup: 'Visayas', fte: 2, gpsLat: 11.2543, gpsLng: 125.0000 },
-  { name: 'Talisay SRP', city: 'Talisay City', province: 'Cebu', islandGroup: 'Visayas', fte: 2, gpsLat: 10.2592, gpsLng: 123.8393 },
+  { name: 'Cebu IT Park',       city: 'Cebu City',      province: 'Cebu',              islandGroup: 'Visayas', region: 'VII',  fte: 7, gpsLat: 10.3311, gpsLng: 123.9053 },
+  { name: 'Lapu-Lapu MCIA',     city: 'Lapu-Lapu City', province: 'Cebu',              islandGroup: 'Visayas', region: 'VII',  fte: 5, gpsLat: 10.3156, gpsLng: 123.9784 },
+  { name: 'Mandaue Industrial', city: 'Mandaue City',   province: 'Cebu',              islandGroup: 'Visayas', region: 'VII',  fte: 4, gpsLat: 10.3446, gpsLng: 123.9392 },
+  { name: 'Iloilo Business Park', city: 'Iloilo City',  province: 'Iloilo',            islandGroup: 'Visayas', region: 'VI',   fte: 4, gpsLat: 10.6967, gpsLng: 122.5644 },
+  { name: 'Bacolod Northgate',  city: 'Bacolod City',   province: 'Negros Occidental', islandGroup: 'Visayas', region: 'VI',   fte: 3, gpsLat: 10.6768, gpsLng: 122.9509 },
+  { name: 'Tacloban Metro',     city: 'Tacloban City',  province: 'Leyte',             islandGroup: 'Visayas', region: 'VIII', fte: 2, gpsLat: 11.2543, gpsLng: 125.0000 },
+  { name: 'Talisay SRP',        city: 'Talisay City',   province: 'Cebu',              islandGroup: 'Visayas', region: 'VII',  fte: 2, gpsLat: 10.2592, gpsLng: 123.8393 },
 ];
 
 // ─── Mindanao Locations ───────────────────────────────────────────────────────
 export const MINDANAO_LOCATIONS: IslandLocation[] = [
-  { name: 'Davao CBD', city: 'Davao City', province: 'Davao del Sur', islandGroup: 'Mindanao', fte: 7, gpsLat: 7.0708, gpsLng: 125.6087 },
-  { name: 'Cagayan de Oro Hub', city: 'Cagayan de Oro', province: 'Misamis Oriental', islandGroup: 'Mindanao', fte: 5, gpsLat: 8.4542, gpsLng: 124.6319 },
-  { name: 'Zamboanga City', city: 'Zamboanga City', province: 'Zamboanga del Sur', islandGroup: 'Mindanao', fte: 3, gpsLat: 6.9214, gpsLng: 122.0790 },
-  { name: 'General Santos Hub', city: 'General Santos City', province: 'South Cotabato', islandGroup: 'Mindanao', fte: 3, gpsLat: 6.1128, gpsLng: 125.1717 },
-  { name: 'Iligan Industrial', city: 'Iligan City', province: 'Lanao del Norte', islandGroup: 'Mindanao', fte: 2, gpsLat: 8.2281, gpsLng: 124.2452 },
-  { name: 'Butuan Valley', city: 'Butuan City', province: 'Agusan del Norte', islandGroup: 'Mindanao', fte: 2, gpsLat: 8.9480, gpsLng: 125.5436 },
+  { name: 'Davao CBD',          city: 'Davao City',          province: 'Davao del Sur',      islandGroup: 'Mindanao', region: 'XI',   fte: 7, gpsLat: 7.0708,  gpsLng: 125.6087 },
+  { name: 'Cagayan de Oro Hub', city: 'Cagayan de Oro',      province: 'Misamis Oriental',   islandGroup: 'Mindanao', region: 'X',    fte: 5, gpsLat: 8.4542,  gpsLng: 124.6319 },
+  { name: 'Zamboanga City',     city: 'Zamboanga City',      province: 'Zamboanga del Sur',  islandGroup: 'Mindanao', region: 'IX',   fte: 3, gpsLat: 6.9214,  gpsLng: 122.0790 },
+  { name: 'General Santos Hub', city: 'General Santos City', province: 'South Cotabato',     islandGroup: 'Mindanao', region: 'XII',  fte: 3, gpsLat: 6.1128,  gpsLng: 125.1717 },
+  { name: 'Iligan Industrial',  city: 'Iligan City',         province: 'Lanao del Norte',    islandGroup: 'Mindanao', region: 'X',    fte: 2, gpsLat: 8.2281,  gpsLng: 124.2452 },
+  { name: 'Butuan Valley',      city: 'Butuan City',         province: 'Agusan del Norte',   islandGroup: 'Mindanao', region: 'XIII', fte: 2, gpsLat: 8.9480,  gpsLng: 125.5436 },
 ];
 
 export const ALL_ISLAND_LOCATIONS: IslandLocation[] = [
@@ -176,6 +211,7 @@ export function generateAllIslandEmployees(): Employee[] {
         avatar: firstName[0] + lastName[0],
         address: `${location.name}, ${location.city}, ${location.province}`,
         islandGroup: location.islandGroup,
+        region: location.region,
         team: team as 'HR/CSR' | 'Manager',
       });
 
