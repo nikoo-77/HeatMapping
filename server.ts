@@ -5,7 +5,7 @@ import { createInterface } from 'readline';
 import { resolve } from 'path';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT || 5000);
 
 interface Employee {
   id: string;
@@ -293,10 +293,22 @@ loadEmployees()
       res.json(employees);
     });
 
-    app.listen(PORT, () => {
-      console.log(`Server listening on port ${PORT}`);
-      console.log(`Loaded ${employees.length} employees from database_setup.sql`);
-    });
+    const startServer = (port: number) => {
+      app.listen(port, () => {
+        console.log(`Server listening on port ${port}`);
+        console.log(`Loaded ${employees.length} employees from database_setup.sql`);
+      }).on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          console.warn(`Port ${port} is busy, trying ${port + 1}`);
+          startServer(port + 1);
+        } else {
+          console.error('Failed to start server:', err);
+          process.exit(1);
+        }
+      });
+    };
+
+    startServer(PORT);
   })
   .catch((err) => {
     console.error('Failed to load employees:', err);

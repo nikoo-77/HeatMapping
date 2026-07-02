@@ -6,7 +6,7 @@ import EmployeeRollCall from './components/EmployeeRollCall';
 import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
-  AlertOctagon, Sparkles, Map, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
+  AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
   FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2,
   HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap
 } from 'lucide-react';
@@ -263,6 +263,21 @@ export default function App() {
       return geoMatch && teamMatch;
     });
   }, [employees, selectedCity, selectedIslandGroup, filterByTeam, viewerRole]);
+
+  const employeeLookup = useMemo(() => {
+    const lookup = new Map<string, Employee>();
+    employees.forEach((emp) => lookup.set(emp.id, emp));
+    return lookup;
+  }, [employees]);
+
+  const reportAffectedEmployeesById = useMemo(() => {
+    return calamityReports.reduce<Record<string, Employee[]>>((acc, report) => {
+      acc[report.id] = (report.affectedEmployeeIds ?? [])
+        .map((id) => employeeLookup.get(id))
+        .filter((emp): emp is Employee => Boolean(emp));
+      return acc;
+    }, {});
+  }, [calamityReports, employeeLookup]);
 
   // Fixed values shown in Metro Cebu Image 2 for pristine alignment
   const fteInside5km = useMemo(() => {
@@ -817,7 +832,9 @@ export default function App() {
     setEpicenter({ lat, lng, radiusKm });
     setSelectedEmployee(null);
 
-     // Apply immediate impact statuses using accurate GPS Haversine distance
+     // Apply immediate impact statuses using accurate GPS Haversine distance.
+     // Employees outside the incident radius are no longer auto-marked as safe/confirmed
+     // unless the user explicitly contacts or confirms them later.
      setEmployees((prev) =>
        prev.map((emp) => {
          const empLat = emp.gpsLat ?? emp.lat;
@@ -832,16 +849,16 @@ export default function App() {
              safetyMessage: undefined,
              rescueDispatched: false,
            };
-         } else {
-           return {
-             ...emp,
-             status: 'Green' as SafetyStatus,
-             contacted: true,
-             unresponsive: false,
-             safetyMessage: 'Home residence cleared outside immediate hazard zone.',
-             rescueDispatched: false,
-           };
          }
+
+         return {
+           ...emp,
+           status: 'Yellow' as SafetyStatus,
+           contacted: false,
+           unresponsive: false,
+           safetyMessage: undefined,
+           rescueDispatched: false,
+         };
        })
      );
 
@@ -886,7 +903,7 @@ export default function App() {
         <div className="flex flex-col">
           <div className="flex items-center gap-2.5">
             <div className="bg-[#002060] text-white p-1.5 rounded flex items-center justify-center shadow-sm">
-              <Map className="w-5 h-5 shrink-0" />
+              <MapIcon className="w-5 h-5 shrink-0" />
             </div>
             <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#002060] uppercase animate-fade-in">
               CSR Crisis Intelligence Dashboard
@@ -1743,8 +1760,7 @@ export default function App() {
                     Other: 'bg-amber-50 border-amber-200 text-amber-800',
                   };
 
-                  // Live-lookup affected employees from current state
-                  const affectedEmps = employees.filter(e => r.affectedEmployeeIds.includes(e.id));
+                  const affectedEmps = reportAffectedEmployeesById[r.id] ?? [];
                   const safeCount    = affectedEmps.filter(e => e.status === 'Green').length;
                   const awaitCount   = affectedEmps.filter(e => e.status === 'Yellow').length;
                   const mutedCount   = affectedEmps.filter(e => e.status === 'Red').length;
@@ -2954,7 +2970,7 @@ export default function App() {
                   employeeId: '',
                   employeeName: aidForm.employeeName.trim(),
                   incidentId: '',
-                  incidentName: aidForm.incidentName.trim() || 'General Crisis Aid',
+                  incidentName: aidForm.incidentName || 'General Crisis Aid',
                   aidType: aidForm.aidType,
                   amountPhp: aidForm.amountPhp ? parseFloat(aidForm.amountPhp) : undefined,
                   description: aidForm.description.trim(),
@@ -2979,24 +2995,21 @@ export default function App() {
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
 
-              {/* Incident */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Related Incident</label>
-                <input type="text" placeholder="e.g. Typhoon Carina — Bulacan (leave blank for general aid)"
-                  value={aidForm.incidentName} onChange={e => setAidForm(p => ({ ...p, incidentName: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                {calamityReports.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {calamityReports.slice(0, 4).map(r => (
-                      <button key={r.id} type="button"
-                        onClick={() => setAidForm(p => ({ ...p, incidentName: r.incidentName }))}
-                        className="text-[10px] bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded-full font-bold hover:bg-blue-100 cursor-pointer transition">
-                        {r.incidentName}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+{/* Incident */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Related Incident</label>
+                  <select
+                    value={aidForm.incidentName}
+                    onChange={e => setAidForm(p => ({ ...p, incidentName: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="">Fire, Earthquake, Typhoon, or Other</option>
+                    <option value="Fire">🔥 Fire</option>
+                    <option value="Earthquake">🚨 Earthquake</option>
+                    <option value="Typhoon">🌀 Typhoon</option>
+                    <option value="Other">⚠️ Other</option>
+                  </select>
+                </div>
 
               {/* Aid Type */}
               <div className="space-y-1">
