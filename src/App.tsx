@@ -1327,7 +1327,7 @@ export default function App() {
 
                     {/* City rows under this region */}
                     {!isCollapsed && locs.map(loc => {
-                      const cityEmp = cityCounts.get(loc.city) ?? loc.fte;
+                      const cityEmp = cityCounts.get(loc.city) ?? 0;
                       const isCitySelected = selectedCity === loc.city;
                       return (
                         <button
@@ -1377,7 +1377,7 @@ export default function App() {
                 </span>
               </button>
               {LUZON_LOCATIONS.map(loc => {
-                const cityEmp = cityCounts.get(loc.city) ?? loc.fte;
+                const cityEmp = cityCounts.get(loc.city) ?? 0;
                 const isSelected = selectedCity === loc.city;
                 return (
                   <button
@@ -1421,7 +1421,7 @@ export default function App() {
                 </span>
               </button>
               {VISAYAS_LOCATIONS.map(loc => {
-                const cityEmp = cityCounts.get(loc.city) ?? loc.fte;
+                const cityEmp = cityCounts.get(loc.city) ?? 0;
                 const isSelected = selectedCity === loc.city;
                 return (
                   <button
@@ -1465,7 +1465,7 @@ export default function App() {
                 </span>
               </button>
               {MINDANAO_LOCATIONS.map(loc => {
-                const cityEmp = cityCounts.get(loc.city) ?? loc.fte;
+                const cityEmp = cityCounts.get(loc.city) ?? 0;
                 const isSelected = selectedCity === loc.city;
                 return (
                   <button
@@ -1689,12 +1689,14 @@ export default function App() {
         const departments = ['All Departments', ...Array.from(new Set(employees.map(e => e.department))).sort()];
         const regionCounts = new Map<string, number>();
         employees.forEach((e) => {
-          const code = e.region ?? resolveEmployeeRegion({
-            gpsLat: e.gpsLat,
-            gpsLng: e.gpsLng,
-            city: e.address?.split(',').slice(-2, -1)[0]?.trim(),
-            province: e.address?.split(',').slice(-1)[0]?.trim(),
-          });
+          const code = e.region === 'NEEDS_UPDATE'
+            ? 'NEEDS_UPDATE'
+            : (e.region ?? resolveEmployeeRegion({
+                gpsLat: e.gpsLat,
+                gpsLng: e.gpsLng,
+                city: e.address?.split(',').slice(-2, -1)[0]?.trim(),
+                province: e.address?.split(',').slice(-1)[0]?.trim(),
+              }));
           if (code) regionCounts.set(code, (regionCounts.get(code) ?? 0) + 1);
         });
         const regionsByIsland = {
@@ -1818,6 +1820,7 @@ export default function App() {
                     className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer max-w-[220px]"
                   >
                     <option value="All">All Regions</option>
+                    <option value="NEEDS_UPDATE">⚠ Needs Update ({regionCounts.get('NEEDS_UPDATE') ?? 0})</option>
                     {(['Luzon', 'Visayas', 'Mindanao'] as const).map((ig) => (
                       <optgroup key={ig} label={ig}>
                         {regionsByIsland[ig].map((region) => {
@@ -1937,7 +1940,11 @@ export default function App() {
 
                           {/* Residential Address */}
                           <td className="px-5 py-3.5">
-                            {emp.address ? (
+                            {emp.region === 'NEEDS_UPDATE' || emp.address === 'Needs Update' ? (
+                              <span className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-300 text-amber-700 text-[10px] font-black px-2.5 py-1 rounded-full">
+                                ⚠ Needs Update
+                              </span>
+                            ) : emp.address ? (
                               <div className="flex flex-col gap-0.5">
                                 <span className="font-semibold text-slate-700">
                                   {emp.address.split(',')[0]}
@@ -1952,7 +1959,11 @@ export default function App() {
                           {/* Location Status */}
                           <td className="px-5 py-3.5">
                             <div className="flex flex-col gap-1">
-                              {(() => {
+                              {emp.region === 'NEEDS_UPDATE' ? (
+                                <span className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-300 text-amber-700 text-[10px] font-black px-2.5 py-1 rounded-full w-fit">
+                                  ⚠ Address Needs Update
+                                </span>
+                              ) : (() => {
                                 const empRegion = emp.region ?? resolveEmployeeRegion({
                                   gpsLat: emp.gpsLat,
                                   gpsLng: emp.gpsLng,
@@ -1973,11 +1984,11 @@ export default function App() {
                                 <span className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black px-2.5 py-1 rounded-full w-fit">
                                   <Crosshair className="w-3 h-3" /> GPS Verified
                                 </span>
-                              ) : (
+                              ) : emp.region !== 'NEEDS_UPDATE' ? (
                                 <span className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-500 text-[10px] font-bold px-2.5 py-1 rounded-full w-fit">
                                   No GPS
                                 </span>
-                              )}
+                              ) : null}
                             </div>
                           </td>
 

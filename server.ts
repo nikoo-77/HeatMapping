@@ -168,6 +168,44 @@ function getIslandGroup(city: string, province: string): 'Luzon' | 'Visayas' | '
   return 'Visayas';
 }
 
+// ── Parse the "PERMANENT - REGION" text from Supabase into a region code ──────
+// Handles formats like: "Region VII", "VII", "7", "Central Visayas", "Region 7 - Central Visayas"
+function parseRegionLabel(label: string): string | null {
+  if (!label) return null;
+  const t = label.trim().toUpperCase();
+
+  // Direct code matches first (e.g. "VII", "NCR", "CAR", "IV-A", "BARMM")
+  const directCodes: Record<string, string> = {
+    'NCR': 'NCR', 'NATIONAL CAPITAL REGION': 'NCR',
+    'CAR': 'CAR', 'CORDILLERA': 'CAR',
+    'I': 'I', 'REGION I': 'I', 'REGION 1': 'I', 'ILOCOS': 'I',
+    'II': 'II', 'REGION II': 'II', 'REGION 2': 'II', 'CAGAYAN VALLEY': 'II',
+    'III': 'III', 'REGION III': 'III', 'REGION 3': 'III', 'CENTRAL LUZON': 'III',
+    'IV-A': 'IV-A', 'REGION IV-A': 'IV-A', 'REGION 4A': 'IV-A', 'CALABARZON': 'IV-A',
+    'IV-B': 'IV-B', 'REGION IV-B': 'IV-B', 'REGION 4B': 'IV-B', 'MIMAROPA': 'IV-B',
+    'V': 'V', 'REGION V': 'V', 'REGION 5': 'V', 'BICOL': 'V',
+    'VI': 'VI', 'REGION VI': 'VI', 'REGION 6': 'VI', 'WESTERN VISAYAS': 'VI',
+    'VII': 'VII', 'REGION VII': 'VII', 'REGION 7': 'VII', 'CENTRAL VISAYAS': 'VII',
+    'VIII': 'VIII', 'REGION VIII': 'VIII', 'REGION 8': 'VIII', 'EASTERN VISAYAS': 'VIII',
+    'IX': 'IX', 'REGION IX': 'IX', 'REGION 9': 'IX', 'ZAMBOANGA': 'IX',
+    'X': 'X', 'REGION X': 'X', 'REGION 10': 'X', 'NORTHERN MINDANAO': 'X',
+    'XI': 'XI', 'REGION XI': 'XI', 'REGION 11': 'XI', 'DAVAO': 'XI',
+    'XII': 'XII', 'REGION XII': 'XII', 'REGION 12': 'XII', 'SOCCSKSARGEN': 'XII',
+    'XIII': 'XIII', 'REGION XIII': 'XIII', 'REGION 13': 'XIII', 'CARAGA': 'XIII',
+    'BARMM': 'BARMM', 'BANGSAMORO': 'BARMM', 'ARMM': 'BARMM',
+  };
+
+  // Try exact match first
+  if (directCodes[t]) return directCodes[t];
+
+  // Try partial / contained match (e.g. "Region 7 - Central Visayas" → VII)
+  for (const [key, code] of Object.entries(directCodes)) {
+    if (t.includes(key)) return code;
+  }
+
+  return null;
+}
+
 // ── Main data loader from Supabase ────────────────────────────────────────────
 async function loadEmployees(): Promise<Employee[]> {
   console.log('Connecting to Supabase and fetching employee data...');
@@ -213,31 +251,57 @@ async function loadEmployees(): Promise<Employee[]> {
     const barangay = (row['PERMANENT - BARANGAY'] ?? '').trim();
     const regionLabel = (row['PERMANENT - REGION'] ?? '').trim();
 
+    // ── Detect whether this employee has any location data at all ─────────────
+    const hasLocationData = !!(city || province || regionLabel ||
+      completeAddress || houseNo || street || barangay);
+
     // Build full address string
     const addressParts = [houseNo, street, barangay, city, province].filter(Boolean);
-    const addressStr = completeAddress || addressParts.join(', ') || `${city}, ${province}`;
+    const addressStr = hasLocationData
+      ? (completeAddress || addressParts.join(', ') || `${city}, ${province}`)
+      : 'Needs Update';
 
-    // GPS coordinates
-    const coords = getGpsForCity(city, province);
-    const seed = hashString(empId);
-    const scatter = 0.015;
-    const gpsLat = coords.lat + (seededRandom(seed) - 0.5) * scatter;
-    const gpsLng = coords.lng + (seededRandom(seed + 1) - 0.5) * scatter;
+    // GPS coordinates — only derive when we have actual location data
+    // Without this guard, empty-address employees all fall to the NCR default coords
+    let gpsLat: number | undefined;
+    let gpsLng: number | undefined;
+    let gridY = 0;
+    let gridX = 0;
 
-    // Grid position (0–100 scale for the custom map overlay)
-    const LAT_MIN = 4.5, LAT_MAX = 21.5;
-    const LNG_MIN = 116.0, LNG_MAX = 127.0;
-    const gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
-    const gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+    if (hasLocationData) {
+      const coords = getGpsForCity(city, province);
+      const seed = hashString(empId);
+      const scatter = 0.015;
+      gpsLat = coords.lat + (seededRandom(seed) - 0.5) * scatter;
+      gpsLng = coords.lng + (seededRandom(seed + 1) - 0.5) * scatter;
 
-    const islandGroup = getIslandGroup(city, province || regionLabel);
-    const region = resolveEmployeeRegion({
-      city,
-      province,
-      facility: row['Facility'] ?? undefined,
-      gpsLat,
-      gpsLng,
-    });
+      const LAT_MIN = 4.5, LAT_MAX = 21.5;
+      const LNG_MIN = 116.0, LNG_MAX = 127.0;
+      gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
+      gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+    }
+
+
+    // Island group — undefined when no location data
+    const islandGroup = hasLocationData
+      ? getIslandGroup(city, province || regionLabel)
+      : undefined;
+
+    // ── Region: trust the database value first, then fall back to resolver ──
+    // When no location data exists at all, mark as NEEDS_UPDATE (not NCR)
+    let region: string | undefined;
+    if (!hasLocationData) {
+      region = 'NEEDS_UPDATE';
+    } else {
+      const regionFromDb = parseRegionLabel(regionLabel);
+      region = regionFromDb ?? resolveEmployeeRegion({
+        city,
+        province,
+        facility: row['Facility'] ?? undefined,
+        gpsLat,
+        gpsLng,
+      });
+    }
 
     // Avatar initials from name
     const nameParts = fullName.split(' ').filter(Boolean);
@@ -266,6 +330,7 @@ async function loadEmployees(): Promise<Employee[]> {
       ? row['PeopleManager/Individual Contributor']!.toLowerCase().includes('manager')
       : false;
 
+    const empSeed = hashString(empId);
     employees.push({
       id: String(empId),
       name: fullName || 'Unknown Employee',
@@ -273,12 +338,12 @@ async function loadEmployees(): Promise<Employee[]> {
       department,
       lat: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
       lng: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
-      gpsLat: parseFloat(gpsLat.toFixed(5)),
-      gpsLng: parseFloat(gpsLng.toFixed(5)),
-      carrier: (['Globe', 'Smart', 'DITO'] as const)[Math.floor(seededRandom(seed + 2) * 3)],
-      normalSignalStrength: -120 + Math.round(seededRandom(seed + 3) * 60),
-      battery: Math.round(20 + seededRandom(seed + 4) * 80),
-      status: seededRandom(seed + 5) > 0.92 ? 'Yellow' : 'Green',
+      gpsLat: gpsLat != null ? parseFloat(gpsLat.toFixed(5)) : undefined,
+      gpsLng: gpsLng != null ? parseFloat(gpsLng.toFixed(5)) : undefined,
+      carrier: (['Globe', 'Smart', 'DITO'] as const)[Math.floor(seededRandom(empSeed + 2) * 3)],
+      normalSignalStrength: -120 + Math.round(seededRandom(empSeed + 3) * 60),
+      battery: Math.round(20 + seededRandom(empSeed + 4) * 80),
+      status: seededRandom(empSeed + 5) > 0.92 ? 'Yellow' : 'Green',
       phone: cleanPhone,
       email,
       avatar,
