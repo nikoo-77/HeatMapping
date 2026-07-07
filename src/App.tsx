@@ -6,6 +6,7 @@ import InteractiveMap from './components/InteractiveMap';
 import RiskMap from './components/RiskMap';
 import EmployeeRollCall from './components/EmployeeRollCall';
 import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
+import LoginPage from './components/LoginPage';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
   AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
@@ -38,6 +39,27 @@ function getEmployeeCity(emp: Employee): string | null {
 }
 
 export default function App() {
+  // ── Authentication ─────────────────────────────────────────────────────
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ username: string; role: 'official' | 'admin' }>({ username: '', role: 'official' });
+  const [officialAccountEmails, setOfficialAccountEmails] = useState<string[]>([]);
+  const [employeeAidForm, setEmployeeAidForm] = useState({
+    aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
+    amountPhp: '',
+    description: '',
+    priority: 'Normal' as 'Normal' | 'Urgent',
+    incidentName: '',
+  });
+  const [employeeIncidentForm, setEmployeeIncidentForm] = useState({
+    type: 'Fire' as 'Fire' | 'Earthquake' | 'Typhoon' | 'Other',
+    description: '',
+    locationLabel: '',
+    incidentName: '',
+  });
+  const [employeePortalMessage, setEmployeePortalMessage] = useState('');
+
   // ── Page navigation ─────────────────────────────────────────────────────
   const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive' | 'risk-map'>('dashboard');
   // Employee Directory search/filter state
@@ -275,7 +297,13 @@ export default function App() {
                 province: emp.address?.split(',').slice(-1)[0]?.trim(),
               }),
             }));
+            const systemEmails = Array.from(new Set(
+              enriched
+                .map((emp) => emp.email?.trim().toLowerCase())
+                .filter((email): email is string => Boolean(email))
+            ));
             setEmployees(enriched);
+            setOfficialAccountEmails(systemEmails);
             localStorage.setItem('island_map_employees', JSON.stringify(enriched));
             pushLog(`Loaded ${enriched.length} employees from database.`, 'success');
           }
@@ -983,6 +1011,147 @@ export default function App() {
     return counts;
   }, [employees]);
 
+  const handleLogin = (identifier: string, password: string) => {
+    setIsSubmittingLogin(true);
+    setAuthError('');
+
+    const officialPassword = '123456';
+    const adminUsername = 'admin';
+    const adminPassword = 'admin123';
+    const normalizedIdentifier = identifier.trim().toLowerCase();
+
+    if (normalizedIdentifier === adminUsername && password === adminPassword) {
+      window.setTimeout(() => {
+        setCurrentUser({
+          username: 'admin',
+          role: 'admin',
+        });
+        setIsAuthenticated(true);
+        setIsSubmittingLogin(false);
+      }, 350);
+      return;
+    }
+
+    const isOfficialEmail = officialAccountEmails.includes(normalizedIdentifier);
+    if (isOfficialEmail && password === officialPassword) {
+      window.setTimeout(() => {
+        setCurrentUser({
+          username: normalizedIdentifier,
+          role: 'official',
+        });
+        setIsAuthenticated(true);
+        setIsSubmittingLogin(false);
+      }, 350);
+      return;
+    }
+
+    window.setTimeout(() => {
+      setAuthError('Invalid email or password. Use an official email from Supabase or the admin account shown on the screen.');
+      setIsSubmittingLogin(false);
+    }, 350);
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setAuthError('');
+    setCurrentUser({ username: '', role: 'official' });
+  };
+
+  const currentEmployee = useMemo(() => {
+    const normalizedEmail = currentUser.username.trim().toLowerCase();
+    if (!normalizedEmail) return null;
+    return employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedEmail) ?? null;
+  }, [currentUser.username, employees]);
+
+  const handleSubmitEmployeeAidApplication = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    const amount = Number(employeeAidForm.amountPhp);
+    if (!employeeAidForm.description.trim() || Number.isNaN(amount) || amount <= 0) {
+      setEmployeePortalMessage('Please enter a valid aid request amount and description.');
+      return;
+    }
+
+    const newAidApplication: AidApplication = {
+      id: `AID-EMP-${Date.now()}`,
+      employeeId: currentEmployee.id,
+      employeeName: currentEmployee.name,
+      incidentId: '',
+      incidentName: employeeAidForm.incidentName.trim() || 'Self-Reported Local Calamity',
+      aidType: employeeAidForm.aidType,
+      amountPhp: amount,
+      description: employeeAidForm.description.trim(),
+      status: 'Submitted',
+      priority: employeeAidForm.priority,
+      filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+      department: currentEmployee.department,
+      islandGroup: currentEmployee.islandGroup ?? 'Luzon',
+    };
+
+    setAidApplications((prev) => [newAidApplication, ...prev]);
+    setEmployeeAidForm({ aidType: 'Cash', amountPhp: '', description: '', priority: 'Normal', incidentName: '' });
+    setEmployeePortalMessage('Your aid request has been submitted for review.');
+    pushLog(`Employee aid request submitted by ${currentEmployee.name}.`, 'success');
+  };
+
+  const handleSubmitEmployeeIncidentReport = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    const incidentName = employeeIncidentForm.incidentName.trim() || employeeIncidentForm.locationLabel.trim() || 'Self-Reported Incident';
+    const newReport = {
+      id: `SELF-${Date.now()}`,
+      timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      type: employeeIncidentForm.type,
+      incidentName,
+      locationLabel: employeeIncidentForm.locationLabel.trim() || currentEmployee.address || 'My Location',
+      lat: currentEmployee.gpsLat ?? 14.5995,
+      lng: currentEmployee.gpsLng ?? 120.9842,
+      radiusKm: 1,
+      affectedCount: 1,
+      affectedEmployeeIds: [currentEmployee.id],
+      description: employeeIncidentForm.description.trim() || `Employee ${currentEmployee.name} reported impact from ${employeeIncidentForm.type.toLowerCase()} in their local area.`,
+    };
+
+    setCalamityReports((prev) => [newReport, ...prev]);
+    setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '' });
+    setEmployeePortalMessage('Your incident report has been filed and shared with the response team.');
+    setSimulationActive(true);
+    pushLog(`Self-reported incident filed by ${currentEmployee.name}.`, 'warn');
+  };
+
+  const handleTagMyselfAsVictim = () => {
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        emp.id === currentEmployee.id
+          ? {
+              ...emp,
+              status: 'Red' as SafetyStatus,
+              contacted: true,
+              unresponsive: false,
+              safetyMessage: 'Self-reported as affected by local calamity.',
+              lastResponseRecv: new Date().toLocaleTimeString(),
+              rescueDispatched: false,
+            }
+          : emp
+      )
+    );
+    setEmployeePortalMessage('You have been marked as affected and the response team has been notified.');
+    pushLog(`${currentEmployee.name} flagged themselves as a victim.`, 'err');
+  };
+
   const handleExportCalamityReport = (
     report: typeof calamityReports[number],
     affectedEmps: Employee[]
@@ -995,6 +1164,320 @@ export default function App() {
       count > 0 ? 'success' : 'warn'
     );
   };
+
+  if (!isAuthenticated) {
+    return (
+      <LoginPage
+        onLogin={handleLogin}
+        error={authError}
+        isSubmitting={isSubmittingLogin}
+        officialEmailHint={officialAccountEmails[0]}
+      />
+    );
+  }
+
+  if (currentUser.role === 'official') {
+    return (
+      <div className="bg-[#f8fafc] text-slate-900 min-h-screen flex flex-col font-sans transition-colors duration-250">
+        <header className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 sticky top-0 z-50 shadow-sm">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2.5">
+              <div className="bg-[#002060] text-white p-1.5 rounded flex items-center justify-center shadow-sm">
+                <MapIcon className="w-5 h-5 shrink-0" />
+              </div>
+              <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#002060] uppercase animate-fade-in">
+                Employee Self-Service Portal
+              </h1>
+            </div>
+            <p className="text-xs text-slate-500 font-medium max-w-xl mt-1">
+              Submit aid requests, report incident impact, and flag yourself as affected from one secure workspace.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0 bg-slate-50/80 px-3 py-2 rounded-lg border border-slate-200">
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left">
+              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">Signed in as</p>
+              <p className="text-sm font-semibold text-slate-900">{currentUser.username}</p>
+              <p className="text-[11px] capitalize text-slate-500">{currentUser.role}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-[#002060] hover:text-[#002060]"
+            >
+              Logout
+            </button>
+          </div>
+        </header>
+
+        <div className="flex flex-1 min-h-0">
+          <nav className="w-[220px] shrink-0 bg-[#002060] flex flex-col sticky top-0 z-40 shadow-xl" style={{ height: 'calc(100vh - 73px)', position: 'sticky', top: 73 }}>
+            <div className="px-5 pt-6 pb-3">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/60">Navigation</span>
+            </div>
+            <div className="flex flex-col px-3 py-1 gap-0.5">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mt-2 mb-0.5">Employee Actions</p>
+              <div className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold bg-white/15 text-white border border-white/10 shadow-inner">
+                <HeartHandshake className="w-4 h-4 shrink-0 text-white" />
+                <span className="flex-1 leading-tight">Aid Applications</span>
+              </div>
+              <div className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-blue-200/80">
+                <Siren className="w-4 h-4 shrink-0 text-blue-300" />
+                <span className="flex-1 leading-tight">Incident Reports</span>
+              </div>
+              <div className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-blue-200/80">
+                <ShieldCheck className="w-4 h-4 shrink-0 text-blue-300" />
+                <span className="flex-1 leading-tight">Safety Status</span>
+              </div>
+            </div>
+
+            <div className="mx-5 my-4 border-t border-white/10" />
+            <div className="px-4">
+              <div className="bg-white/8 border border-white/10 rounded-xl p-3 flex flex-col gap-2">
+                <span className="text-[9px] font-black uppercase tracking-widest text-blue-300/60">Portal Status</span>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <span className="text-[11px] text-emerald-300 font-bold">Ready for submissions</span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                  <span className="text-[10px] text-blue-300/50 font-mono">{currentEmployee?.department ?? 'Employee'}</span>
+                  <span className="text-[10px] text-emerald-400/70 font-mono">{currentEmployee?.status ?? 'Green'}</span>
+                </div>
+              </div>
+            </div>
+          </nav>
+
+          <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 md:p-6">
+            <main className="max-w-[1550px] w-full mx-auto grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6 min-h-0">
+              <div className="space-y-6">
+                <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                  <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-white font-extrabold text-sm tracking-wide">My Profile</p>
+                        <p className="text-blue-300 text-[11px] mt-1">Safety and support overview</p>
+                      </div>
+                      <div className="rounded-lg bg-white/10 px-2.5 py-1.5 text-sm font-semibold text-white">
+                        {currentEmployee?.status ?? 'Green'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-6">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Name</p>
+                        <p className="mt-1 font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Department</p>
+                        <p className="mt-1 font-semibold text-slate-900">{currentEmployee?.department ?? '—'}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Official email</p>
+                        <p className="mt-1 font-semibold text-slate-900">{currentUser.username}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Current location</p>
+                        <p className="mt-1 font-semibold text-slate-900">{currentEmployee?.address ?? 'Needs update'}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 flex flex-wrap gap-3">
+                      <button
+                        onClick={handleTagMyselfAsVictim}
+                        className="rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+                      >
+                        Tag myself as affected
+                      </button>
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700">
+                        {employeePortalMessage || 'Use the tools below to request help or file an impact report.'}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                  <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
+                    <p className="text-white font-extrabold text-sm tracking-wide">Aid Applications</p>
+                    <p className="text-blue-300 text-[11px] mt-1">Submit and track your support requests</p>
+                  </div>
+                  <div className="p-6">
+                    <form className="space-y-4" onSubmit={handleSubmitEmployeeAidApplication}>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Aid type</span>
+                          <select
+                            value={employeeAidForm.aidType}
+                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, aidType: event.target.value as 'Cash' | 'Relief Goods' | 'Both' }))}
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                          >
+                            <option value="Cash">Cash</option>
+                            <option value="Relief Goods">Relief Goods</option>
+                            <option value="Both">Both</option>
+                          </select>
+                        </label>
+                        <label className="text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Priority</span>
+                          <select
+                            value={employeeAidForm.priority}
+                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, priority: event.target.value as 'Normal' | 'Urgent' }))}
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                          >
+                            <option value="Normal">Normal</option>
+                            <option value="Urgent">Urgent</option>
+                          </select>
+                        </label>
+                      </div>
+                      <label className="block text-sm font-semibold text-slate-700">
+                        <span className="mb-2 block">Incident / event name</span>
+                        <input
+                          value={employeeAidForm.incidentName}
+                          onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
+                          placeholder="e.g. Typhoon Carina"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        />
+                      </label>
+                      <label className="block text-sm font-semibold text-slate-700">
+                        <span className="mb-2 block">Amount (PHP)</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={employeeAidForm.amountPhp}
+                          onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, amountPhp: event.target.value }))}
+                          placeholder="5000"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        />
+                      </label>
+                      <label className="block text-sm font-semibold text-slate-700">
+                        <span className="mb-2 block">Why do you need aid?</span>
+                        <textarea
+                          value={employeeAidForm.description}
+                          onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, description: event.target.value }))}
+                          rows={4}
+                          placeholder="Describe your condition or the support you need."
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        />
+                      </label>
+                      <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
+                        Submit aid request
+                      </button>
+                    </form>
+
+                    <div className="mt-6 space-y-3">
+                      {aidApplications.filter((application) => application.employeeName === currentEmployee?.name).length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                          No aid applications yet. Submit one above and it will appear here.
+                        </div>
+                      ) : (
+                        aidApplications
+                          .filter((application) => application.employeeName === currentEmployee?.name)
+                          .slice(0, 4)
+                          .map((application) => (
+                            <div key={application.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="font-semibold text-slate-900">{application.incidentName}</p>
+                                  <p className="mt-1 text-sm text-slate-600">{application.description}</p>
+                                </div>
+                                <span className="rounded-full bg-[#002060]/10 px-2.5 py-1 text-xs font-semibold text-[#002060]">
+                                  {application.status}
+                                </span>
+                              </div>
+                              <p className="mt-3 text-sm text-slate-500">PHP {application.amountPhp?.toLocaleString() ?? '0'} · {application.aidType}</p>
+                            </div>
+                          ))
+                      )}
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div className="space-y-6">
+                <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                  <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
+                    <p className="text-white font-extrabold text-sm tracking-wide">Incident Report</p>
+                    <p className="text-blue-300 text-[11px] mt-1">File a report if you are affected</p>
+                  </div>
+                  <div className="p-6">
+                    <form className="space-y-4" onSubmit={handleSubmitEmployeeIncidentReport}>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Incident type</span>
+                          <select
+                            value={employeeIncidentForm.type}
+                            onChange={(event) => setEmployeeIncidentForm((prev) => ({ ...prev, type: event.target.value as 'Fire' | 'Earthquake' | 'Typhoon' | 'Other' }))}
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                          >
+                            <option value="Fire">Fire</option>
+                            <option value="Earthquake">Earthquake</option>
+                            <option value="Typhoon">Typhoon</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </label>
+                        <label className="text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Location</span>
+                          <input
+                            value={employeeIncidentForm.locationLabel}
+                            onChange={(event) => setEmployeeIncidentForm((prev) => ({ ...prev, locationLabel: event.target.value }))}
+                            placeholder="Barangay or area"
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                          />
+                        </label>
+                      </div>
+                      <label className="block text-sm font-semibold text-slate-700">
+                        <span className="mb-2 block">Incident name</span>
+                        <input
+                          value={employeeIncidentForm.incidentName}
+                          onChange={(event) => setEmployeeIncidentForm((prev) => ({ ...prev, incidentName: event.target.value }))}
+                          placeholder="Optional short title"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        />
+                      </label>
+                      <label className="block text-sm font-semibold text-slate-700">
+                        <span className="mb-2 block">What happened?</span>
+                        <textarea
+                          value={employeeIncidentForm.description}
+                          onChange={(event) => setEmployeeIncidentForm((prev) => ({ ...prev, description: event.target.value }))}
+                          rows={5}
+                          placeholder="Share what is happening, how you are affected, and what support you need."
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        />
+                      </label>
+                      <button type="submit" className="rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700">
+                        File incident report
+                      </button>
+                    </form>
+                  </div>
+                </section>
+
+                <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                  <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
+                    <p className="text-white font-extrabold text-sm tracking-wide">Recent Updates</p>
+                    <p className="text-blue-300 text-[11px] mt-1">Your latest submissions</p>
+                  </div>
+                  <div className="p-6">
+                    <div className="space-y-3">
+                      {calamityReports.filter((report) => report.affectedEmployeeIds.includes(currentEmployee?.id ?? '')).slice(0, 4).map((report) => (
+                        <div key={report.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="font-semibold text-slate-900">{report.incidentName}</p>
+                          <p className="mt-1 text-sm text-slate-600">{report.description}</p>
+                          <p className="mt-2 text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">{report.timestamp}</p>
+                        </div>
+                      ))}
+                      {calamityReports.filter((report) => report.affectedEmployeeIds.includes(currentEmployee?.id ?? '')).length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                          No incident reports yet. Use the form to notify the team.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-[#f8fafc] text-slate-900 min-h-screen flex flex-col font-sans transition-colors duration-250">
@@ -1054,8 +1537,21 @@ export default function App() {
           </label>
         </div>
 
-        {/* Right Side: Co-labelled corporate logos */}
-        <div className="flex items-center gap-4 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
+        {/* Right Side: user session + co-labelled corporate logos */}
+        <div className="flex items-center gap-3 shrink-0 bg-slate-50/80 px-3 py-2 rounded-lg border border-slate-200">
+          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left">
+            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">Signed in as</p>
+            <p className="text-sm font-semibold text-slate-900">{currentUser.username}</p>
+            <p className="text-[11px] capitalize text-slate-500">{currentUser.role}</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-[#002060] hover:text-[#002060]"
+          >
+            Logout
+          </button>
+          </div>
+        <div className="flex items-center gap-4">
           {/* Innodata Logo Block */}
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-5 bg-[#0a4d92] flex items-center justify-center rounded-sm">
