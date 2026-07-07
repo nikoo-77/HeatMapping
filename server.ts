@@ -1,13 +1,25 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+dotenv.config(); // fallback to .env if present
 import express from 'express';
-import { createReadStream } from 'fs';
-import { createInterface } from 'readline';
-import { resolve } from 'path';
+import { createClient } from '@supabase/supabase-js';
 import { resolveEmployeeRegion } from './lib/regionResolver.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 
+// ── Supabase client (service-role key for unrestricted server-side access) ──
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY!;
+
+if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
+  console.error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY in environment.');
+  process.exit(1);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY);
+
+// ── Types ────────────────────────────────────────────────────────────────────
 interface Employee {
   id: string;
   name: string;
@@ -28,8 +40,36 @@ interface Employee {
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
   region?: string;
   team?: 'HR/CSR' | 'Manager';
+  facility?: string;
 }
 
+// Raw row shape from Supabase "Employee Details" table
+interface SupabaseEmployeeRow {
+  'Facility'?: string | null;
+  'Employee ID': string;
+  'Employee Name'?: string | null;
+  'Project Code'?: string | null;
+  'Project Name'?: string | null;
+  'Designation'?: string | null;
+  'Employment Status'?: string | null;
+  'Employee Status'?: string | null;
+  'Managers ID'?: string | null;
+  'Managers Name'?: string | null;
+  'DU'?: string | null;
+  'PeopleManager/Individual Contributor'?: string | null;
+  'COMPLETE ADDRESS'?: string | null;
+  'PERMANENT- HOUSE NUMBER'?: string | null;
+  'PERMANENT - STREET'?: string | null;
+  'PERMANENT - BARANGAY'?: string | null;
+  'PERMANENT - CITY/MUNICIPALITY'?: string | null;
+  'PERMANENT - PROVINCE'?: string | null;
+  'PERMANENT - REGION'?: string | null;
+  'OFFICIAL EMAIL'?: string | null;
+  'PERSONAL EMAIL'?: string | null;
+  'MOBILE NUMBER'?: string | null;
+}
+
+// ── Utility helpers ───────────────────────────────────────────────────────────
 function hashString(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -70,6 +110,7 @@ const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
 
 const PROVINCE_COORDS: Record<string, { lat: number; lng: number }> = {
   'Metro Manila': { lat: 14.5995, lng: 120.9842 },
+  'NCR': { lat: 14.5995, lng: 120.9842 },
   'Pampanga': { lat: 15.1854, lng: 120.5614 },
   'Laguna': { lat: 14.2114, lng: 121.1648 },
   'Bulacan': { lat: 14.9023, lng: 120.8817 },
@@ -93,210 +134,166 @@ function getGpsForCity(city: string, province: string): { lat: number; lng: numb
     }
   }
   if (PROVINCE_COORDS[province]) return PROVINCE_COORDS[province];
+  // Try partial province match
+  for (const [key, coords] of Object.entries(PROVINCE_COORDS)) {
+    if (province.toLowerCase().includes(key.toLowerCase()) || key.toLowerCase().includes(province.toLowerCase())) {
+      return coords;
+    }
+  }
   return { lat: 14.5995, lng: 120.9842 };
 }
 
 function getIslandGroup(city: string, province: string): 'Luzon' | 'Visayas' | 'Mindanao' {
   const p = province.toLowerCase();
-  
-  if (p.includes('ncr') || p.includes('national capital')) return 'Luzon';
+  const c = city.toLowerCase();
+
+  if (p.includes('ncr') || p.includes('national capital') || p.includes('metro manila')) return 'Luzon';
   if (p.includes('region i') || p.includes('region ii') || p.includes('region iii') ||
       p.includes('region iv-a') || p.includes('region iv-b') || p.includes('region v') ||
       p.includes('car') || p.includes('cordillera')) return 'Luzon';
-  
+
   const luzonProvinces = ['metro manila', 'pampanga', 'laguna', 'bulacan', 'rizal', 'cavite', 'batangas',
                           'camarines norte', 'camarines sur', 'albay', 'sorsogon', 'masbate', 'catanduanes',
-                          'tarlac', 'nueva ecija', 'pangasinan', 'la union'];
-  if (luzonProvinces.some(lp => p.includes(lp))) return 'Luzon';
-  
+                          'tarlac', 'nueva ecija', 'pangasinan', 'la union', 'ilocos', 'abra', 'benguet',
+                          'ifugao', 'kalinga', 'apayao', 'mountain province', 'quezon', 'aurora'];
+  if (luzonProvinces.some(lp => p.includes(lp) || c.includes(lp))) return 'Luzon';
+
   if (p.includes('region x') || p.includes('region xi') || p.includes('region xii') ||
       p.includes('region xiii') || p.includes('bangsamoro') || p.includes('caraga')) return 'Mindanao';
   const mindanaoProvinces = ['davao', 'misamis', 'zamboanga', 'cotabato', 'sultan kudarat', 'maguindanao',
-                             'lanao', 'agusan', 'surigao', 'camiguin', 'bukidnon'];
-  if (mindanaoProvinces.some(mp => p.includes(mp))) return 'Mindanao';
-  
+                             'lanao', 'agusan', 'surigao', 'camiguin', 'bukidnon', 'north cotabato',
+                             'sarangani', 'south cotabato', 'compostela'];
+  if (mindanaoProvinces.some(mp => p.includes(mp) || c.includes(mp))) return 'Mindanao';
+
   return 'Visayas';
 }
 
-function parseColumns(raw: string): string[] {
-  return raw.split('], [').map((c) => c.replace(/^\[|\]$/g, ''));
-}
-
-function splitSqlValues(valuesPart: string): string[] {
-  const values: string[] = [];
-  let current = '';
-  let inString = false;
-
-  for (let i = 0; i < valuesPart.length; i++) {
-    const c = valuesPart[i];
-    if (inString) {
-      if (c === "'" && valuesPart[i + 1] === "'") {
-        current += valuesPart[++i];
-        continue;
-      }
-      if (c === "'") {
-        inString = false;
-        continue;
-      }
-      current += c;
-      continue;
-    }
-    if (c === 'N' && valuesPart[i + 1] === "'") {
-      i++;
-      inString = true;
-      continue;
-    }
-    if (c === "'") {
-      inString = true;
-      continue;
-    }
-    if (c === ',') {
-      values.push(current.trim());
-      current = '';
-      continue;
-    }
-    current += c;
-  }
-  if (current.trim()) values.push(current.trim());
-  return values;
-}
-
-function parseSqlValue(raw: string): string | number | boolean | null {
-  const v = raw.trim();
-  if (v.toUpperCase() === 'NULL') return null;
-  if (/^-?\d+$/.test(v)) return parseInt(v, 10);
-  if (/^-?\d+\.\d+$/.test(v)) return parseFloat(v);
-  if (v === '0' || v === '1') return v === '1';
-  if ((v.startsWith("N'") || v.startsWith("'")) && v.endsWith("'")) {
-    return v.slice(v.startsWith("N'") ? 2 : 1, -1).replace(/''/g, "'");
-  }
-  return v;
-}
-
-function parseInsertLine(line: string): { table: string; columns: string[]; values: unknown[] } | null {
-  const match = line.match(/^INSERT \[dbo\]\.\[(\w+)\] \((.+)\) VALUES \((.+)\)$/);
-  if (!match) return null;
-  const table = match[1];
-  const columns = parseColumns(match[2]);
-  const values = splitSqlValues(match[3]).map(parseSqlValue);
-  return { table, columns, values };
-}
-
+// ── Main data loader from Supabase ────────────────────────────────────────────
 async function loadEmployees(): Promise<Employee[]> {
-  const sqlFile = resolve(process.cwd(), 'database_setup.sql');
-  
-  const departments = new Map<number, string>();
-  const empPersonalMap = new Map<string, Record<string, unknown>>();
-  const empInfoByEmpId = new Map<string, Record<string, unknown>>();
-  const contactByEmpId = new Map<string, Record<string, unknown>>();
-  const addressByEmpId = new Map<string, Record<string, unknown>>();
-  
-  const wantedTables = new Set(['Department', 'EmpPersonalDetails', 'EmployeeInfo', 'Contact', 'Address']);
-  
-  const rl = createInterface({
-    input: createReadStream(sqlFile, { encoding: 'utf16le' }),
-    crlfDelay: Infinity,
-  });
+  console.log('Connecting to Supabase and fetching employee data...');
 
-  for await (const line of rl) {
-    const trimmed = line.trim();
-    const match = trimmed.match(/^INSERT \[dbo\]\.\[(\w+)\] \((.+)\) VALUES \((.+)\)$/);
-    if (!match) continue;
-    
-    const table = match[1];
-    if (!wantedTables.has(table)) continue;
-    
-    const columns = parseColumns(match[2]);
-    const values = splitSqlValues(match[3]).map(parseSqlValue);
-    
-    const row: Record<string, unknown> = {};
-    columns.forEach((col, i) => {
-      row[col] = values[i];
-    });
-    
-    if (table === 'Department') {
-      departments.set(row.DepartmentId as number, row.DepartmentName as string);
-    } else if (table === 'EmpPersonalDetails') {
-      empPersonalMap.set(row.EmployeeId as string, row);
-    } else if (table === 'EmployeeInfo') {
-      empInfoByEmpId.set(row.EmployeeId as string, row);
-    } else if (table === 'Contact') {
-      contactByEmpId.set(row.EmployeeId as string, row);
-    } else if (table === 'Address') {
-      addressByEmpId.set(row.EmployeeId as string, row);
+  // Fetch all rows from the "Employee Details" table
+  // Using pagination to handle large datasets (Supabase default limit is 1000)
+  const allRows: SupabaseEmployeeRow[] = [];
+  let from = 0;
+  const pageSize = 1000;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('Employee Details')
+      .select('*')
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      throw new Error(`Supabase query failed: ${error.message}`);
     }
+
+    if (!data || data.length === 0) break;
+
+    allRows.push(...(data as SupabaseEmployeeRow[]));
+
+    if (data.length < pageSize) break; // Last page
+    from += pageSize;
   }
+
+  console.log(`Fetched ${allRows.length} raw rows from Supabase.`);
 
   const employees: Employee[] = [];
-  
-  for (const [empId, personal] of empPersonalMap) {
-    const info = empInfoByEmpId.get(empId);
-    const contact = contactByEmpId.get(empId);
-    const address = addressByEmpId.get(empId);
-    const deptName = info?.DepartmentId != null 
-      ? departments.get(info.DepartmentId as number) 
-      : undefined;
-    
-    const city = (address?.CityMunicipality as string) || '';
-    const province = (address?.Province as string) || '';
+
+  for (const row of allRows) {
+    const empId = row['Employee ID'];
+    if (!empId) continue;
+
+    const fullName = (row['Employee Name'] ?? '').trim();
+    const city = (row['PERMANENT - CITY/MUNICIPALITY'] ?? '').trim();
+    const province = (row['PERMANENT - PROVINCE'] ?? '').trim();
+    const completeAddress = (row['COMPLETE ADDRESS'] ?? '').trim();
+    const houseNo = (row['PERMANENT- HOUSE NUMBER'] ?? '').trim();
+    const street = (row['PERMANENT - STREET'] ?? '').trim();
+    const barangay = (row['PERMANENT - BARANGAY'] ?? '').trim();
+    const regionLabel = (row['PERMANENT - REGION'] ?? '').trim();
+
+    // Build full address string
+    const addressParts = [houseNo, street, barangay, city, province].filter(Boolean);
+    const addressStr = completeAddress || addressParts.join(', ') || `${city}, ${province}`;
+
+    // GPS coordinates
     const coords = getGpsForCity(city, province);
-    
     const seed = hashString(empId);
     const scatter = 0.015;
     const gpsLat = coords.lat + (seededRandom(seed) - 0.5) * scatter;
     const gpsLng = coords.lng + (seededRandom(seed + 1) - 0.5) * scatter;
 
+    // Grid position (0–100 scale for the custom map overlay)
     const LAT_MIN = 4.5, LAT_MAX = 21.5;
     const LNG_MIN = 116.0, LNG_MAX = 127.0;
     const gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
     const gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
 
-    const islandGroup = getIslandGroup(city, province);
+    const islandGroup = getIslandGroup(city, province || regionLabel);
     const region = resolveEmployeeRegion({
       city,
       province,
-      facility: info?.Facility as string | undefined,
+      facility: row['Facility'] ?? undefined,
       gpsLat,
       gpsLng,
     });
 
-    const rawPhone = contact?.ContactNumber as string | number | undefined;
-    const cleanPhone = rawPhone && !String(rawPhone).toUpperCase().includes('FOR UPDATE') ? `0${rawPhone}` : undefined;
-    
-    const completeAddress = address?.CompleteAddress as string | undefined;
-    const cleanAddress = completeAddress && !String(completeAddress).toUpperCase().includes('FOR UPDATE') 
-      ? completeAddress 
-      : undefined;
-    const addressStr = cleanAddress 
-      ? `${cleanAddress}, ${city}, ${province}` 
-      : `${city}, ${province}`;
+    // Avatar initials from name
+    const nameParts = fullName.split(' ').filter(Boolean);
+    const avatar = nameParts.length >= 2
+      ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+      : fullName.slice(0, 2).toUpperCase();
+
+    // Phone cleanup
+    const rawPhone = (row['MOBILE NUMBER'] ?? '').trim();
+    const cleanPhone = rawPhone && !rawPhone.toUpperCase().includes('FOR UPDATE') ? rawPhone : undefined;
+
+    // Email — prefer official, fall back to personal
+    const officialEmail = (row['OFFICIAL EMAIL'] ?? '').trim();
+    const personalEmail = (row['PERSONAL EMAIL'] ?? '').trim();
+    const email = officialEmail || personalEmail || '';
+
+    // Designation → role
+    const designation = (row['Designation'] ?? 'Employee').trim();
+
+    // DU → department
+    const department = (row['DU'] ?? 'Unknown').trim() || 'Unknown';
+
+    // Manager check
+    const managersId = (row['Managers ID'] ?? '').trim();
+    const isManager = row['PeopleManager/Individual Contributor']
+      ? row['PeopleManager/Individual Contributor']!.toLowerCase().includes('manager')
+      : false;
 
     employees.push({
       id: String(empId),
-      name: personal.EmployeeName as string,
-      role: (info?.EmployeeRole as string) || (info?.Position as string) || 'Employee',
-      department: deptName || 'Unknown',
+      name: fullName || 'Unknown Employee',
+      role: designation,
+      department,
       lat: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
       lng: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
       gpsLat: parseFloat(gpsLat.toFixed(5)),
       gpsLng: parseFloat(gpsLng.toFixed(5)),
-      carrier: ['Globe', 'Smart', 'DITO'][Math.floor(seededRandom(seed + 2) * 3)] as 'Globe' | 'Smart' | 'DITO',
+      carrier: (['Globe', 'Smart', 'DITO'] as const)[Math.floor(seededRandom(seed + 2) * 3)],
       normalSignalStrength: -120 + Math.round(seededRandom(seed + 3) * 60),
       battery: Math.round(20 + seededRandom(seed + 4) * 80),
-      status: seededRandom(seed + 5) > 0.92 ? 'Yellow' : 'Green' as 'Green' | 'Yellow',
+      status: seededRandom(seed + 5) > 0.92 ? 'Yellow' : 'Green',
       phone: cleanPhone,
-      email: personal.EmailAddress as string,
-      avatar: `${(personal.FirstName as string)[0]}${(personal.LastName as string)[0]}`,
+      email,
+      avatar,
       address: addressStr,
       islandGroup,
       region,
-      team: info?.IsManager ? 'Manager' : 'HR/CSR' as 'HR/CSR' | 'Manager',
+      team: isManager ? 'Manager' : 'HR/CSR',
+      facility: row['Facility'] ?? undefined,
     });
   }
-  
+
   return employees;
 }
 
+// ── Bootstrap server ──────────────────────────────────────────────────────────
 loadEmployees()
   .then((employees) => {
     app.get('/api/employees', (_req, res) => {
@@ -306,7 +303,7 @@ loadEmployees()
     const startServer = (port: number) => {
       app.listen(port, () => {
         console.log(`Server listening on port ${port}`);
-        console.log(`Loaded ${employees.length} employees from database_setup.sql`);
+        console.log(`Loaded ${employees.length} employees from Supabase.`);
       }).on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
           console.warn(`Port ${port} is busy, trying ${port + 1}`);
@@ -321,6 +318,6 @@ loadEmployees()
     startServer(PORT);
   })
   .catch((err) => {
-    console.error('Failed to load employees:', err);
+    console.error('Failed to load employees from Supabase:', err);
     process.exit(1);
   });
