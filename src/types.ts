@@ -16,6 +16,7 @@ export interface AidApplication {
   approvedDate?: string;
   department: string;
   islandGroup: string;
+  proofAttachmentName?: string;
 }
 export type SafetyStatus = 'Green' | 'Yellow' | 'Red';
 export type TowerStatus = 'ONLINE' | 'CONGESTED' | 'OFFLINE';

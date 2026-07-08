@@ -51,6 +51,7 @@ export default function App() {
     description: '',
     priority: 'Normal' as 'Normal' | 'Urgent',
     incidentName: '',
+    proofAttachmentName: '',
   });
   const [employeeIncidentForm, setEmployeeIncidentForm] = useState({
     type: 'Fire' as 'Fire' | 'Earthquake' | 'Typhoon' | 'Other',
@@ -67,6 +68,41 @@ export default function App() {
     requestedBy: 'Area Manager',
   });
   const [locationUpdate, setLocationUpdate] = useState('');
+  const [selectedEmployeeLocation, setSelectedEmployeeLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [lastCheckInAt, setLastCheckInAt] = useState<string | null>(null);
+  const [lastActionAt, setLastActionAt] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' | 'info' | 'error' } | null>(null);
+  const [employeeImpactForm, setEmployeeImpactForm] = useState({
+    selectedImpacts: [] as string[],
+    notes: '',
+  });
+  const [checkInLog, setCheckInLog] = useState<Array<{ id: string; timestamp: string; status: SafetyStatus; details: string }>>([]);
+  const [employeeNotifications, setEmployeeNotifications] = useState<Array<{ id: string; title: string; description: string; timestamp: string; type: 'personal' | 'broadcast'; read: boolean }>>([
+    {
+      id: 'notif-1',
+      title: 'Manager requested a status update',
+      description: 'Please confirm your current safety status before 6:00 PM.',
+      timestamp: 'Just now',
+      type: 'personal',
+      read: false,
+    },
+    {
+      id: 'notif-2',
+      title: 'Weather advisory issued for Cebu',
+      description: 'Shelter availability and route updates are posted in the broadcast feed.',
+      timestamp: '15 min ago',
+      type: 'broadcast',
+      read: false,
+    },
+    {
+      id: 'notif-3',
+      title: 'Barangay shelter is open',
+      description: 'Nearest shelter is available for evacuees and critical support requests.',
+      timestamp: '1 hr ago',
+      type: 'broadcast',
+      read: true,
+    },
+  ]);
 
   // ── Page navigation ─────────────────────────────────────────────────────
   const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive' | 'risk-map'>('dashboard');
@@ -1070,11 +1106,30 @@ export default function App() {
     return employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedEmail) ?? null;
   }, [currentUser.username, employees]);
 
+  const isInsideHazardZone = currentEmployee ? getDistance(currentEmployee) <= epicenter.radiusKm : false;
+
+  const formatPortalTimestamp = useCallback((value: Date | string = new Date()) => {
+    const parsed = value instanceof Date ? value : new Date(value);
+    return parsed.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
+  }, []);
+
   useEffect(() => {
     if (currentEmployee) {
       setLocationUpdate(currentEmployee.address ?? '');
+      if (currentEmployee.gpsLat != null && currentEmployee.gpsLng != null) {
+        setSelectedEmployeeLocation({ lat: currentEmployee.gpsLat, lng: currentEmployee.gpsLng });
+      }
+      if (currentEmployee.lastResponseRecv) {
+        setLastCheckInAt(currentEmployee.lastResponseRecv);
+      }
     }
   }, [currentEmployee]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const myAidApplications = useMemo(
     () => aidApplications.filter((application) => application.employeeId === currentEmployee?.id),
@@ -1085,6 +1140,61 @@ export default function App() {
     () => calamityReports.filter((report) => report.affectedEmployeeIds.includes(currentEmployee?.id ?? '')),
     [calamityReports, currentEmployee?.id]
   );
+
+  const handlePinnedLocationChange = (field: 'lat' | 'lng', value: string) => {
+    const parsedValue = Number(value);
+    setSelectedEmployeeLocation((prev) => ({
+      lat: field === 'lat' ? parsedValue : prev?.lat ?? currentEmployee?.gpsLat ?? 14.5995,
+      lng: field === 'lng' ? parsedValue : prev?.lng ?? currentEmployee?.gpsLng ?? 120.9842,
+    }));
+  };
+
+  const showPortalToast = useCallback((message: string, tone: 'success' | 'warning' | 'info' | 'error' = 'success') => {
+    setToast({ message, tone });
+  }, []);
+
+  const handleEmployeeStatusUpdate = useCallback((status: SafetyStatus, message: string, safetyMessage: string, details: string, tone: 'success' | 'warning' | 'error' = 'success') => {
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    const timestamp = formatPortalTimestamp(new Date());
+
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        emp.id === currentEmployee.id
+          ? {
+              ...emp,
+              status,
+              contacted: true,
+              unresponsive: false,
+              safetyMessage,
+              lastResponseRecv: timestamp,
+              rescueDispatched: false,
+            }
+          : emp
+      )
+    );
+
+    setLastCheckInAt(timestamp);
+    setLastActionAt(timestamp);
+    setCheckInLog((prev) => [{ id: `checkin-${Date.now()}`, timestamp, status, details }, ...prev].slice(0, 6));
+    setEmployeePortalMessage(message);
+    setEmployeeNotifications((prev) => [
+      {
+        id: `notification-${Date.now()}`,
+        title: 'Your check-in was shared with your manager',
+        description: `Your ${details.toLowerCase()} update was registered successfully.`,
+        timestamp: 'Just now',
+        type: 'personal' as const,
+        read: false,
+      },
+      ...prev,
+    ].slice(0, 6));
+    showPortalToast(`Your update was registered and sent to your manager. ${details}`, tone);
+    pushLog(`${currentEmployee.name} updated status to ${status}.`, tone === 'error' ? 'err' : tone === 'warning' ? 'warn' : 'success');
+  }, [currentEmployee, formatPortalTimestamp, showPortalToast]);
 
   const handleSubmitEmployeeAidApplication = (event: React.FormEvent) => {
     event.preventDefault();
@@ -1113,11 +1223,13 @@ export default function App() {
       filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
       department: currentEmployee.department,
       islandGroup: currentEmployee.islandGroup ?? 'Luzon',
+      proofAttachmentName: employeeAidForm.proofAttachmentName || undefined,
     };
 
     setAidApplications((prev) => [newAidApplication, ...prev]);
-    setEmployeeAidForm({ aidType: 'Cash', amountPhp: '', description: '', priority: 'Normal', incidentName: '' });
+    setEmployeeAidForm({ aidType: 'Cash', amountPhp: '', description: '', priority: 'Normal', incidentName: '', proofAttachmentName: '' });
     setEmployeePortalMessage('Your aid request has been submitted for review.');
+    showPortalToast('Aid request submitted and routed to the review queue.', 'info');
     pushLog(`Employee aid request submitted by ${currentEmployee.name}.`, 'success');
   };
 
@@ -1147,82 +1259,21 @@ export default function App() {
     setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '' });
     setEmployeePortalMessage('Your incident report has been filed and shared with the response team.');
     setSimulationActive(true);
+    setLastActionAt(formatPortalTimestamp(new Date()));
+    showPortalToast('Incident impact report filed and linked to the response queue.', 'warning');
     pushLog(`Self-reported incident filed by ${currentEmployee.name}.`, 'warn');
   };
 
   const handleTagMyselfAsVictim = () => {
-    if (!currentEmployee) {
-      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
-      return;
-    }
-
-    setEmployees((prev) =>
-      prev.map((emp) =>
-        emp.id === currentEmployee.id
-          ? {
-              ...emp,
-              status: 'Red' as SafetyStatus,
-              contacted: true,
-              unresponsive: false,
-              safetyMessage: 'Self-reported as affected by local calamity.',
-              lastResponseRecv: new Date().toLocaleTimeString(),
-              rescueDispatched: false,
-            }
-          : emp
-      )
-    );
-    setEmployeePortalMessage('You have been marked as affected and the response team has been notified.');
-    pushLog(`${currentEmployee.name} flagged themselves as a victim.`, 'err');
+    handleEmployeeStatusUpdate('Red', 'You have been marked as affected and the response team has been notified.', 'Self-reported as affected by local calamity.', 'Emergency response was triggered.', 'error');
   };
 
   const handleMarkMyselfSafe = () => {
-    if (!currentEmployee) {
-      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
-      return;
-    }
-
-    setEmployees((prev) =>
-      prev.map((emp) =>
-        emp.id === currentEmployee.id
-          ? {
-              ...emp,
-              status: 'Green' as SafetyStatus,
-              contacted: true,
-              unresponsive: false,
-              safetyMessage: 'Marked myself as safe.',
-              lastResponseRecv: new Date().toLocaleTimeString(),
-              rescueDispatched: false,
-            }
-          : emp
-      )
-    );
-    setEmployeePortalMessage('You have been marked safe. Update your location or submit a report only if conditions change.');
-    pushLog(`${currentEmployee.name} marked themselves safe.`, 'success');
+    handleEmployeeStatusUpdate('Green', 'You have been marked safe. Update your location or submit a report only if conditions change.', 'Marked myself as safe.', 'Status confirmed as safe.', 'success');
   };
 
   const handleMarkMyselfNeedHelp = () => {
-    if (!currentEmployee) {
-      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
-      return;
-    }
-
-    setEmployees((prev) =>
-      prev.map((emp) =>
-        emp.id === currentEmployee.id
-          ? {
-              ...emp,
-              status: 'Yellow' as SafetyStatus,
-              contacted: true,
-              unresponsive: false,
-              safetyMessage: 'Assistance requested. Awaiting response from your supervisor.',
-              lastResponseRecv: new Date().toLocaleTimeString(),
-              rescueDispatched: false,
-            }
-          : emp
-      )
-    );
-    setEmployeePortalMessage('Your request for help has been sent and the response team is reviewing it.');
-    pushLog(`${currentEmployee.name} marked themselves as needing help.`, 'warn');
+    handleEmployeeStatusUpdate('Yellow', 'Your request for help has been sent and the response team is reviewing it.', 'Assistance requested. Awaiting response from your supervisor.', 'Needs assistance and is awaiting a response.', 'warning');
   };
 
   const handleUpdateMyLocation = () => {
@@ -1231,18 +1282,95 @@ export default function App() {
       return;
     }
 
+    const coords = selectedEmployeeLocation ?? { lat: currentEmployee.gpsLat ?? 14.5995, lng: currentEmployee.gpsLng ?? 120.9842 };
+    const nextAddress = locationUpdate.trim() || currentEmployee.address || 'Pinned location';
+
     setEmployees((prev) =>
       prev.map((emp) =>
         emp.id === currentEmployee.id
           ? {
               ...emp,
-              address: locationUpdate,
+              address: nextAddress,
+              gpsLat: coords.lat,
+              gpsLng: coords.lng,
             }
           : emp
       )
     );
-    setEmployeePortalMessage('Location updated. Your profile has been refreshed with the latest address.');
+    setEmployeePortalMessage(`Location saved at ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}.`);
+    setLastActionAt(formatPortalTimestamp(new Date()));
+    showPortalToast('Your coordinates were saved and will be used for hazard-distance checks.', 'success');
     pushLog(`${currentEmployee.name} updated their location.`, 'success');
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setEmployeePortalMessage('Geolocation is not available in this browser.');
+      showPortalToast('GPS is unavailable in this browser.', 'warning');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const nextCoords = { lat: position.coords.latitude, lng: position.coords.longitude };
+        setSelectedEmployeeLocation(nextCoords);
+        setLocationUpdate('Current GPS location');
+        setEmployees((prev) =>
+          prev.map((emp) =>
+            emp.id === currentEmployee.id
+              ? { ...emp, address: 'Current GPS location', gpsLat: nextCoords.lat, gpsLng: nextCoords.lng }
+              : emp
+          )
+        );
+        setEmployeePortalMessage('Current GPS coordinates captured and saved.');
+        showPortalToast('Current location captured from GPS.', 'info');
+      },
+      () => {
+        setEmployeePortalMessage('We could not access your location. Please try again or pin the location manually.');
+        showPortalToast('GPS permission was denied or unavailable.', 'warning');
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const handleSubmitIncidentImpact = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    const impactSummary = employeeImpactForm.selectedImpacts.length > 0 ? employeeImpactForm.selectedImpacts.join(', ') : 'Impact reported';
+    const incidentName = `Impact report — ${currentEmployee.name}`;
+    const newReport = {
+      id: `IMPACT-${Date.now()}`,
+      timestamp: formatPortalTimestamp(new Date()),
+      type: 'Other' as const,
+      incidentName,
+      locationLabel: currentEmployee.address || 'My Location',
+      lat: currentEmployee.gpsLat ?? 14.5995,
+      lng: currentEmployee.gpsLng ?? 120.9842,
+      radiusKm: 1,
+      affectedCount: 1,
+      affectedEmployeeIds: [currentEmployee.id],
+      description: `${impactSummary}${employeeImpactForm.notes ? ` · ${employeeImpactForm.notes}` : ''}`,
+    };
+
+    setCalamityReports((prev) => [newReport, ...prev]);
+    setEmployeeImpactForm({ selectedImpacts: [], notes: '' });
+    setEmployeePortalMessage('Your incident impact report has been filed and is counted in Incident Reports.');
+    setLastActionAt(formatPortalTimestamp(new Date()));
+    showPortalToast('Incident impact report saved and counted.', 'warning');
+    pushLog(`Impact report filed by ${currentEmployee.name}.`, 'warn');
+  };
+
+  const handleNotificationRead = (notificationId: string) => {
+    setEmployeeNotifications((prev) => prev.map((item) => item.id === notificationId ? { ...item, read: true } : item));
   };
 
   const handleExportCalamityReport = (
@@ -1291,7 +1419,7 @@ export default function App() {
             <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left">
               <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">Signed in as</p>
               <p className="text-sm font-semibold text-slate-900">{currentUser.username}</p>
-              <p className="text-[11px] capitalize text-slate-500">{currentUser.role}</p>
+              <p className="text-[11px] capitalize text-slate-500">{currentUser.role === 'official' ? 'Employee' : currentUser.role}</p>
             </div>
             <button
               onClick={handleLogout}
@@ -1353,6 +1481,19 @@ export default function App() {
 
           <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-4 py-6 md:px-8 md:py-10">
             <main className="max-w-[1180px] w-full mx-auto space-y-8 min-h-0">
+              {toast && (
+                <div className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : toast.tone === 'warning' ? 'border-amber-200 bg-amber-50 text-amber-800' : toast.tone === 'error' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                  {toast.message}
+                </div>
+              )}
+              {isInsideHazardZone && (
+                <div className="rounded-[28px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-900 shadow-sm">
+                  <div className="flex items-center gap-2 font-black uppercase tracking-[0.28em] text-rose-700">
+                    <AlertTriangle className="h-4 w-4" /> Active hazard zone
+                  </div>
+                  <p className="mt-2">You are inside the active hazard area. Please complete a check-in and follow local guidance until the incident clears.</p>
+                </div>
+              )}
               <div className="space-y-7">
                 <section className="mx-auto rounded-[32px] border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
                   <div className="px-6 py-6 bg-white/95 border-b border-slate-200">
@@ -1370,6 +1511,10 @@ export default function App() {
                     <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
                       <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Safety status</p>
                       <p className="mt-4 text-3xl font-black text-slate-900">{currentEmployee?.status ?? 'Green'}</p>
+                      <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-600">
+                        <Clock className="h-4 w-4" />
+                        <span>Last checked in: {lastCheckInAt ?? 'Not yet'}</span>
+                      </div>
                       <p className="mt-3 text-sm text-slate-500">Current verified status from your profile.</p>
                     </div>
                     <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
@@ -1383,9 +1528,12 @@ export default function App() {
                       <p className="mt-3 text-sm text-slate-500">Reports filed from your account.</p>
                     </div>
                     <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Response note</p>
+                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Last action</p>
                       <p className="mt-4 text-sm font-semibold text-slate-900 leading-snug">
                         {employeePortalMessage || 'No recent portal actions. Use the buttons below to request support or update your situation.'}
+                      </p>
+                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+                        {lastActionAt ? `Updated ${lastActionAt}` : 'No timestamp yet'}
                       </p>
                     </div>
                   </div>
@@ -1428,6 +1576,15 @@ export default function App() {
                               Emergency
                             </button>
                           </div>
+
+                          {(simulationActive || managerCheckInRequest.active) && (
+                            <div className="rounded-[28px] border border-amber-200 bg-amber-50 p-5 text-amber-900">
+                              <div className="flex items-center gap-2 font-black uppercase tracking-[0.24em] text-amber-700">
+                                <AlertTriangle className="h-4 w-4" /> Check in now
+                              </div>
+                              <p className="mt-2 text-sm">Your manager is waiting for a safety confirmation. Please respond so your status is recorded until you acknowledge it.</p>
+                            </div>
+                          )}
 
                           <div className={`rounded-[28px] border p-5 ${currentEmployee && getDistance(currentEmployee) <= epicenter.radiusKm ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
                             <div className="flex items-center justify-between gap-4">
@@ -1513,8 +1670,10 @@ export default function App() {
                             </ul>
                             <div className="mt-5 rounded-3xl bg-slate-100 p-4">
                               <p className="text-sm font-semibold text-slate-900">Emergency hotlines</p>
-                              <p className="mt-2 text-sm text-slate-600">911 / 117 / 1337</p>
+                              <p className="mt-2 text-sm text-slate-600">National emergency hotline: 911</p>
+                              <p className="mt-1 text-sm text-slate-600">Red Cross: 143</p>
                               <p className="mt-1 text-sm text-slate-600">Barangay emergency center: 0927-000-1234</p>
+                              <p className="mt-1 text-sm text-slate-600">Disaster response team: 0998-111-2222</p>
                             </div>
                           </div>
                         </div>
@@ -1530,30 +1689,66 @@ export default function App() {
                       <p className="text-slate-300 text-sm mt-1">Update your status quickly when conditions change.</p>
                     </div>
                     <div className="p-7 space-y-5">
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <button
-                          onClick={handleMarkMyselfSafe}
-                          className="rounded-3xl bg-emerald-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600"
-                        >
-                          I’m Safe
-                        </button>
-                        <button
-                          onClick={handleMarkMyselfNeedHelp}
-                          className="rounded-3xl bg-amber-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600"
-                        >
-                          Need Help
-                        </button>
-                        <button
-                          onClick={handleTagMyselfAsVictim}
-                          className="rounded-3xl bg-rose-600 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
-                        >
-                          Emergency
-                        </button>
-                      </div>
                       <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
                         <p className="text-sm font-semibold text-slate-900">Current status</p>
                         <p className="mt-2 text-3xl font-black text-slate-900">{currentEmployee?.status ?? 'Green'}</p>
+                        <div className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+                          <Clock className="h-4 w-4" />
+                          <span>Last checked in: {lastCheckInAt ?? 'Not yet'}</span>
+                        </div>
                         <p className="mt-2 text-sm text-slate-600">{employeePortalMessage || 'Choose a status to update your manager and response team.'}</p>
+                      </div>
+                      <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+                        <p className="text-sm font-semibold text-slate-900">Recent check-ins</p>
+                        <div className="mt-4 space-y-3">
+                          {checkInLog.length === 0 ? (
+                            <p className="text-sm text-slate-600">No check-ins recorded yet.</p>
+                          ) : checkInLog.map((item) => (
+                            <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-semibold text-slate-900">{item.status}</p>
+                                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{item.timestamp}</p>
+                              </div>
+                              <p className="mt-2 text-sm text-slate-600">{item.details}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-sm font-semibold text-slate-900">Report incident impact</p>
+                        <form className="mt-4 space-y-4" onSubmit={handleSubmitIncidentImpact}>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {['Home damaged', 'Injured', 'Stranded', 'Needs evacuation'].map((impact) => {
+                              const isChecked = employeeImpactForm.selectedImpacts.includes(impact);
+                              return (
+                                <label key={impact} className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => setEmployeeImpactForm((prev) => ({
+                                      ...prev,
+                                      selectedImpacts: isChecked ? prev.selectedImpacts.filter((item) => item !== impact) : [...prev.selectedImpacts, impact],
+                                    }))}
+                                  />
+                                  <span>{impact}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <label className="block text-sm font-semibold text-slate-700">
+                            <span className="mb-2 block">Notes</span>
+                            <textarea
+                              value={employeeImpactForm.notes}
+                              onChange={(event) => setEmployeeImpactForm((prev) => ({ ...prev, notes: event.target.value }))}
+                              rows={4}
+                              placeholder="Share any immediate needs or observations."
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none"
+                            />
+                          </label>
+                          <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
+                            Submit impact report
+                          </button>
+                        </form>
                       </div>
                     </div>
                   </section>
@@ -1617,19 +1812,39 @@ export default function App() {
                         <p className="mt-2 text-sm text-slate-600">{currentEmployee?.address ?? 'No address on file.'}</p>
                       </div>
                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-sm font-semibold text-slate-900">Update my location</p>
-                        <div className="mt-3 flex flex-col gap-3">
-                          <input
-                            value={locationUpdate}
-                            onChange={(event) => setLocationUpdate(event.target.value)}
-                            placeholder="Enter updated address"
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-                          />
+                        <p className="text-sm font-semibold text-slate-900">Pin my location</p>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <label className="text-sm text-slate-700">
+                            <span className="mb-2 block">Latitude</span>
+                            <input
+                              type="number"
+                              value={selectedEmployeeLocation?.lat ?? currentEmployee?.gpsLat ?? ''}
+                              onChange={(event) => handlePinnedLocationChange('lat', event.target.value)}
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none"
+                            />
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            <span className="mb-2 block">Longitude</span>
+                            <input
+                              type="number"
+                              value={selectedEmployeeLocation?.lng ?? currentEmployee?.gpsLng ?? ''}
+                              onChange={(event) => handlePinnedLocationChange('lng', event.target.value)}
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none"
+                            />
+                          </label>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            onClick={handleUseCurrentLocation}
+                            className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-[#002060] hover:text-[#002060]"
+                          >
+                            Use my current location
+                          </button>
                           <button
                             onClick={handleUpdateMyLocation}
-                            className="rounded-2xl bg-[#002060] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#001848]"
+                            className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]"
                           >
-                            Save location
+                            Save pinned coordinates
                           </button>
                         </div>
                       </div>
@@ -1645,8 +1860,8 @@ export default function App() {
                     </div>
                     <div className="p-7 grid gap-4 sm:grid-cols-2">
                       {[
-                        { label: 'Emergency Police', value: '117' },
-                        { label: 'Medical Rescue', value: '911' },
+                        { label: 'National Emergency Hotline', value: '911' },
+                        { label: 'Philippine Red Cross', value: '143' },
                         { label: 'Barangay Hall', value: '0927-000-1234' },
                         { label: 'Disaster Response Team', value: '0998-111-2222' },
                       ].map((contact) => (
@@ -1665,20 +1880,33 @@ export default function App() {
                       <p className="text-white font-black text-lg tracking-[0.06em]">Notifications</p>
                       <p className="text-slate-300 text-sm mt-1">Recent alerts and portal messages for your action.</p>
                     </div>
-                    <div className="p-7 space-y-4">
-                      {[
-                        { title: 'Weather advisory issued for Cebu', description: 'Typhoon signal level may change in the next 6 hours.' },
-                        { title: 'Relief package distribution scheduled', description: 'Aid team will coordinate with affected barangays.' },
-                        { title: 'Shelter availability updated', description: 'Nearest barangay hall is now open for evacuees.' },
-                      ].map((item) => (
-                        <div key={item.title} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                          <p className="font-semibold text-slate-900">{item.title}</p>
-                          <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+                    <div className="p-7 space-y-6">
+                      <div>
+                        <p className="text-sm font-black uppercase tracking-[0.3em] text-slate-500">Personal messages</p>
+                        <div className="mt-3 space-y-3">
+                          {employeeNotifications.filter((item) => item.type === 'personal').map((item) => (
+                            <button key={item.id} onClick={() => handleNotificationRead(item.id)} className="w-full rounded-3xl border border-slate-200 bg-slate-50 p-5 text-left">
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="font-semibold text-slate-900">{item.title}</p>
+                                {!item.read && <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.2em] text-white">New</span>}
+                              </div>
+                              <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+                              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{item.timestamp}</p>
+                            </button>
+                          ))}
                         </div>
-                      ))}
-                      <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                        <p className="font-semibold text-slate-900">Portal messages</p>
-                        <p className="mt-2 text-sm text-slate-600">{employeePortalMessage || 'No new personal notifications.'}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-black uppercase tracking-[0.3em] text-slate-500">Broadcast updates</p>
+                        <div className="mt-3 space-y-3">
+                          {employeeNotifications.filter((item) => item.type === 'broadcast').map((item) => (
+                            <div key={item.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                              <p className="font-semibold text-slate-900">{item.title}</p>
+                              <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+                              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{item.timestamp}</p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </section>
@@ -1747,6 +1975,18 @@ export default function App() {
                             className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
                           />
                         </label>
+                        <label className="block text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Proof attachment</span>
+                          <input
+                            type="file"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              setEmployeeAidForm((prev) => ({ ...prev, proofAttachmentName: file?.name ?? '' }));
+                            }}
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                          />
+                          {employeeAidForm.proofAttachmentName && <p className="mt-2 text-xs font-semibold text-slate-500">Selected file: {employeeAidForm.proofAttachmentName}</p>}
+                        </label>
                         <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
                           Submit aid request
                         </button>
@@ -1769,7 +2009,18 @@ export default function App() {
                                   {application.status}
                                 </span>
                               </div>
-                              <p className="mt-3 text-sm text-slate-500">PHP {application.amountPhp?.toLocaleString() ?? '0'} · {application.aidType}</p>
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                {['Submitted', 'Under Review', 'Approved', 'Disbursed'].map((step, index) => {
+                                  const currentIndex = ['Submitted', 'Under Review', 'Approved', 'Disbursed'].indexOf(application.status);
+                                  const isActive = index <= currentIndex;
+                                  return (
+                                    <div key={step} className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.2em] ${isActive ? 'bg-[#002060] text-white' : 'bg-white text-slate-500 border border-slate-200'}`}>
+                                      {step}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <p className="mt-3 text-sm text-slate-500">PHP {application.amountPhp?.toLocaleString() ?? '0'} · {application.aidType}{application.proofAttachmentName ? ` · Proof: ${application.proofAttachmentName}` : ''}</p>
                             </div>
                           ))
                         )}
