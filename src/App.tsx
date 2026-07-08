@@ -1393,133 +1393,198 @@ export default function App() {
 
                 {employeePortalPage === 'dashboard' && (
                   <>
-                    <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                      <div className="px-6 py-5 bg-[#001e4a] border-b border-[#00172f]">
-                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                          <div>
-                            <p className="text-white font-black text-lg tracking-[0.06em]">My Dashboard</p>
-                            <p className="text-slate-300 text-sm mt-1">One place for your safety status, alerts, and request actions.</p>
+                    <div className="space-y-6">
+                      {/* Header */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h1 className="text-3xl font-black text-slate-900">My Dashboard</h1>
+                          <p className="text-slate-600 text-sm mt-1">Submit aid requests, report incident impact, and flag yourself as affected.</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">SIGNED IN AS</p>
+                          <p className="text-sm font-semibold text-slate-900 mt-1">{currentUser?.username || 'john.doe@example.com'}</p>
+                        </div>
+                      </div>
+
+                      {/* Safety Status Check-In Section */}
+                      <section className="bg-gradient-to-r from-[#001f4b] to-[#002a60] rounded-[24px] p-8 text-white">
+                        <div>
+                          <h2 className="text-2xl font-black tracking-wider">Safety Status Check-In</h2>
+                          <p className="text-blue-200 text-sm mt-2">Please update your current status to help us coordinate response efforts.</p>
+                        </div>
+                        
+                        {/* Status Cards Grid */}
+                        <div className="mt-8 grid gap-4 sm:grid-cols-3">
+                          {/* I'm Safe Card */}
+                          <button
+                            onClick={handleMarkMyselfSafe}
+                            className="group rounded-[20px] bg-white/10 hover:bg-white/20 border border-white/20 p-6 text-left transition-all duration-300"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/30 transition">
+                                  <CheckCircle className="w-6 h-6 text-emerald-300" />
+                                </div>
+                                <h3 className="mt-4 font-bold text-lg">I'm Safe</h3>
+                                <p className="text-blue-200 text-sm mt-2">I am not affected and do not require assistance.</p>
+                              </div>
+                            </div>
+                          </button>
+
+                          {/* Need Help Card */}
+                          <button
+                            onClick={handleMarkMyselfNeedHelp}
+                            className="group rounded-[20px] bg-white/10 hover:bg-white/20 border border-white/20 p-6 text-left transition-all duration-300"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center group-hover:bg-amber-500/30 transition">
+                                  <AlertTriangle className="w-6 h-6 text-amber-300" />
+                                </div>
+                                <h3 className="mt-4 font-bold text-lg">Need Help</h3>
+                                <p className="text-blue-200 text-sm mt-2">I am affected and may need non-urgent support.</p>
+                              </div>
+                            </div>
+                          </button>
+
+                          {/* Emergency Card */}
+                          <button
+                            onClick={handleTagMyselfAsVictim}
+                            className="group rounded-[20px] bg-white/10 hover:bg-white/20 border border-white/20 p-6 text-left transition-all duration-300"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="w-12 h-12 rounded-full bg-rose-500/20 flex items-center justify-center group-hover:bg-rose-500/30 transition">
+                                  <ShieldAlert className="w-6 h-6 text-rose-300" />
+                                </div>
+                                <h3 className="mt-4 font-bold text-lg">Emergency</h3>
+                                <p className="text-blue-200 text-sm mt-2">I am in immediate danger and need urgent rescue.</p>
+                              </div>
+                            </div>
+                          </button>
+                        </div>
+                      </section>
+
+                      {/* Action Cards */}
+                      <div className="grid gap-6 md:grid-cols-2">
+                        {/* File Incident Report Card */}
+                        <div className="rounded-[20px] border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                                <FileWarning className="w-6 h-6 text-blue-600" />
+                              </div>
+                              <h3 className="mt-4 text-lg font-bold text-slate-900">File Incident Report</h3>
+                              <p className="text-slate-600 text-sm mt-2">Report a local calamity, tag yourself as a victim, and provide location details.</p>
+                              <button
+                                onClick={() => setEmployeePortalPage('checkin')}
+                                className="mt-4 text-blue-600 font-semibold text-sm hover:text-blue-700 flex items-center gap-2"
+                              >
+                                Start Report <ChevronRight className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
-                          <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/10">
-                            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-sm" />
-                            Live status: {currentEmployee?.status ?? 'Green'}
+                        </div>
+
+                        {/* Request Aid Assistance Card */}
+                        <div className="rounded-[20px] border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center">
+                                <HeartHandshake className="w-6 h-6 text-rose-600" />
+                              </div>
+                              <h3 className="mt-4 text-lg font-bold text-slate-900">Request Aid Assistance</h3>
+                              <p className="text-slate-600 text-sm mt-2">Apply for financial support, medical, or logistical support from the company.</p>
+                              <button
+                                onClick={() => setEmployeePortalPage('aid')}
+                                className="mt-4 text-rose-600 font-semibold text-sm hover:text-rose-700 flex items-center gap-2"
+                              >
+                                Apply for Aid <ChevronRight className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
-                      <div className="p-7 grid gap-4 xl:grid-cols-[1.4fr_0.9fr]">
-                        <div className="space-y-5">
-                          <div className="grid gap-3 sm:grid-cols-3">
-                            <button
-                              onClick={handleMarkMyselfSafe}
-                              className="rounded-3xl bg-emerald-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600"
-                            >
-                              I’m Safe
-                            </button>
-                            <button
-                              onClick={handleMarkMyselfNeedHelp}
-                              className="rounded-3xl bg-amber-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600"
-                            >
-                              Need Help
-                            </button>
-                            <button
-                              onClick={handleTagMyselfAsVictim}
-                              className="rounded-3xl bg-rose-600 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
-                            >
-                              Emergency
-                            </button>
+
+                      {/* Active Alerts and Recent Activity */}
+                      <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+                        {/* Active Alerts Section */}
+                        <section className="rounded-[20px] border border-slate-200 bg-white p-6 shadow-sm">
+                          <div className="flex items-center justify-between mb-5">
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                <MapPin className="w-5 h-5 text-slate-600" />
+                                Active Alerts Near You
+                              </h3>
+                            </div>
+                            <span className="text-xs font-semibold bg-slate-100 text-slate-700 px-3 py-1 rounded-full">Within 50km</span>
                           </div>
 
-                          <div className={`rounded-[28px] border p-5 ${currentEmployee && getDistance(currentEmployee) <= epicenter.radiusKm ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
-                            <div className="flex items-center justify-between gap-4">
-                              <div>
-                                <p className="text-sm font-black uppercase tracking-[0.4em] text-slate-500">Am I affected?</p>
-                                <p className="mt-3 text-lg font-semibold text-slate-900">
-                                  {currentEmployee ? (
-                                    getDistance(currentEmployee) <= epicenter.radiusKm ? 'Yes — you are within the active hazard radius.' : 'No — your current location is outside the active hazard radius.'
-                                  ) : 'Employee location unavailable.'}
-                                </p>
-                              </div>
-                              <div className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                                {currentEmployee ? `${getDistance(currentEmployee).toFixed(1)} km from ${activeDisaster.locationName}` : 'No location'}
-                              </div>
-                            </div>
-                            <p className="mt-3 text-sm text-slate-600">
-                              {currentEmployee
-                                ? getDistance(currentEmployee) <= epicenter.radiusKm
-                                  ? 'Follow local evacuation guidance and update your status if conditions change.'
-                                  : 'Stay alert and keep your contact line open for any changes in the hazard zone.'
-                                : 'Your employee profile is not available. Please sign in with your official email.'}
-                            </p>
-                          </div>
-
-                          {managerCheckInRequest.active ? (
-                            <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                  <p className="text-sm font-bold text-slate-900">Pending manager check-in request</p>
-                                  <p className="mt-1 text-sm text-slate-600">{managerCheckInRequest.title}</p>
-                                  <p className="mt-2 text-xs uppercase tracking-[0.24em] text-slate-400">Due {managerCheckInRequest.due}</p>
-                                </div>
-                                <div className="grid gap-3 sm:grid-cols-3">
-                                  <button
-                                    onClick={handleMarkMyselfSafe}
-                                    className="rounded-full bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600"
-                                  >
-                                    I’m Safe
-                                  </button>
-                                  <button
-                                    onClick={handleMarkMyselfNeedHelp}
-                                    className="rounded-full bg-amber-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-600"
-                                  >
-                                    Need Help
-                                  </button>
-                                  <button
-                                    onClick={handleTagMyselfAsVictim}
-                                    className="rounded-full bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700"
-                                  >
-                                    Emergency
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="space-y-5">
-                          <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                            <p className="text-sm font-black uppercase tracking-[0.35em] text-slate-500">My Aid Status</p>
-                            <div className="mt-4 space-y-3">
-                              {myAidApplications.slice(0, 3).map((application) => (
-                                <div key={application.id} className="rounded-3xl border border-slate-200 bg-white p-4">
-                                  <div className="flex items-center justify-between gap-3">
-                                    <p className="text-sm font-semibold text-slate-900">{application.incidentName}</p>
-                                    <span className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{application.status}</span>
+                          <div className="space-y-4">
+                            {calamityReports.length > 0 ? (
+                              calamityReports.map((report) => {
+                                const distance = currentEmployee && currentEmployee.gpsLat !== undefined && currentEmployee.gpsLng !== undefined 
+                                  ? haversineKm(currentEmployee.gpsLat, currentEmployee.gpsLng, report.lat, report.lng) 
+                                  : null;
+                                return (
+                                  <div key={report.id} className="rounded-[16px] border-2 border-rose-200 bg-rose-50 p-4">
+                                    <div className="flex items-start gap-3">
+                                      <div className="w-8 h-8 rounded-full bg-rose-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                        <AlertTriangle className="w-5 h-5 text-white" />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <h4 className="font-bold text-slate-900 text-sm">{report.incidentName}</h4>
+                                          <span className="text-xs font-bold uppercase tracking-wide text-rose-700 bg-rose-200 px-2 py-0.5 rounded-full">ACTIVE</span>
+                                        </div>
+                                        <p className="text-slate-600 text-xs mt-1">{report.description}</p>
+                                        <p className="text-slate-500 text-xs mt-2">
+                                          Updated {Math.floor(Math.random() * 30)} mins ago
+                                        </p>
+                                      </div>
+                                    </div>
                                   </div>
-                                  <p className="mt-2 text-sm text-slate-600">{application.amountPhp?.toLocaleString() ? `PHP ${application.amountPhp?.toLocaleString()}` : ''} {application.aidType}</p>
-                                </div>
-                              ))}
-                              {myAidApplications.length === 0 && (
-                                <p className="text-sm text-slate-600">No aid applications yet. Use the Aid Assistance page to submit a request.</p>
-                              )}
-                            </div>
+                                );
+                              })
+                            ) : (
+                              <div className="rounded-[16px] border border-slate-200 bg-slate-50 p-4">
+                                <p className="text-slate-600 text-sm">No active alerts at this time. Stay vigilant.</p>
+                              </div>
+                            )}
                           </div>
+                        </section>
 
-                          <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                            <p className="text-sm font-black uppercase tracking-[0.35em] text-slate-500">Preparedness resources</p>
-                            <ul className="mt-4 space-y-3 text-sm text-slate-600">
-                              <li>• Keep your emergency kit within reach and charged.</li>
-                              <li>• Follow official evacuation guidance when the hazard radius expands.</li>
-                              <li>• Share your location with your supervisor if conditions worsen.</li>
-                            </ul>
-                            <div className="mt-5 rounded-3xl bg-slate-100 p-4">
-                              <p className="text-sm font-semibold text-slate-900">Emergency hotlines</p>
-                              <p className="mt-2 text-sm text-slate-600">911 / 117 / 1337</p>
-                              <p className="mt-1 text-sm text-slate-600">Barangay emergency center: 0927-000-1234</p>
-                            </div>
+                        {/* My Recent Activity Section */}
+                        <section className="rounded-[20px] border border-slate-200 bg-white p-6 shadow-sm">
+                          <h3 className="text-lg font-bold text-slate-900 mb-5">My Recent Activity</h3>
+                          <div className="space-y-4">
+                            {[
+                              { icon: CheckCircle, text: 'Status updated to SAFE', time: 'Today, 09:41 AM', color: 'emerald' },
+                              { icon: HeartHandshake, text: 'Aid Request #1042 Approved', time: 'Oct 12, 2023', color: 'blue' },
+                              { icon: FileWarning, text: 'Incident Report Filed', time: 'Oct 10, 2023', color: 'orange' },
+                            ].map((activity, idx) => {
+                              const Icon = activity.icon;
+                              const colorMap: Record<string, string> = {
+                                emerald: 'bg-emerald-100 text-emerald-600',
+                                blue: 'bg-blue-100 text-blue-600',
+                                orange: 'bg-orange-100 text-orange-600',
+                              };
+                              return (
+                                <div key={idx} className="flex items-start gap-3">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${colorMap[activity.color]}`}>
+                                    <Icon className="w-4 h-4" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-slate-700 text-sm font-medium">{activity.text}</p>
+                                    <p className="text-slate-500 text-xs">{activity.time}</p>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        </div>
+                        </section>
                       </div>
-                    </section>
+                    </div>
                   </>
                 )}
 
