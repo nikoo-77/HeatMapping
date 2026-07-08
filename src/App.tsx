@@ -1355,40 +1355,7 @@ export default function App() {
             <main className="max-w-[1180px] w-full mx-auto space-y-8 min-h-0">
               <div className="space-y-7">
                 <section className="mx-auto rounded-[32px] border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                  <div className="px-6 py-6 bg-white/95 border-b border-slate-200">
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="text-slate-900 font-extrabold text-lg tracking-tight">Welcome back</p>
-                        <p className="text-slate-500 text-sm mt-1">Your personal safety dashboard and support tools are below.</p>
-                      </div>
-                      <div className="rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm">
-                        {currentEmployee?.status ?? 'Green'} status
-                      </div>
-                    </div>
-                  </div>
-                  <div className="p-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Safety status</p>
-                      <p className="mt-4 text-3xl font-black text-slate-900">{currentEmployee?.status ?? 'Green'}</p>
-                      <p className="mt-3 text-sm text-slate-500">Current verified status from your profile.</p>
-                    </div>
-                    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Aid requests</p>
-                      <p className="mt-4 text-3xl font-black text-slate-900">{myAidApplications.length}</p>
-                      <p className="mt-3 text-sm text-slate-500">Requests you have submitted so far.</p>
-                    </div>
-                    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Incident reports</p>
-                      <p className="mt-4 text-3xl font-black text-slate-900">{myIncidentReports.length}</p>
-                      <p className="mt-3 text-sm text-slate-500">Reports filed from your account.</p>
-                    </div>
-                    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Response note</p>
-                      <p className="mt-4 text-sm font-semibold text-slate-900 leading-snug">
-                        {employeePortalMessage || 'No recent portal actions. Use the buttons below to request support or update your situation.'}
-                      </p>
-                    </div>
-                  </div>
+                  
                 </section>
 
                 {employeePortalPage === 'dashboard' && (
@@ -1400,10 +1367,7 @@ export default function App() {
                           <h1 className="text-3xl font-black text-slate-900">My Dashboard</h1>
                           <p className="text-slate-600 text-sm mt-1">Submit aid requests, report incident impact, and flag yourself as affected.</p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">SIGNED IN AS</p>
-                          <p className="text-sm font-semibold text-slate-900 mt-1">{currentUser?.username || 'john.doe@example.com'}</p>
-                        </div>
+                       
                       </div>
 
                       {/* Safety Status Check-In Section */}
