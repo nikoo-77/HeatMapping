@@ -59,6 +59,14 @@ export default function App() {
     incidentName: '',
   });
   const [employeePortalMessage, setEmployeePortalMessage] = useState('');
+  const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'alerts' | 'aid' | 'profile' | 'contacts' | 'notifications'>('dashboard');
+  const [managerCheckInRequest, setManagerCheckInRequest] = useState({
+    active: true,
+    title: 'Your manager requested a quick safety check-in for your area.',
+    due: 'Today, 5:00 PM',
+    requestedBy: 'Area Manager',
+  });
+  const [locationUpdate, setLocationUpdate] = useState('');
 
   // ── Page navigation ─────────────────────────────────────────────────────
   const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive' | 'risk-map'>('dashboard');
@@ -733,11 +741,10 @@ export default function App() {
     const { type, description, locationLabel, lat, lng, radiusKm, hazardName, magnitude, signalLevel } = calamityForm;
 
     // Build a meaningful incident name
-    let incidentName = type;
-    if (type === 'Other' && hazardName.trim()) incidentName = hazardName.trim();
+    const incidentLabel = type === 'Other' && hazardName.trim() ? hazardName.trim() : type;
     const fullName = locationLabel
-      ? `${incidentName} — ${locationLabel}`
-      : `${incidentName} Incident`;
+      ? `${incidentLabel} — ${locationLabel}`
+      : `${incidentLabel} Incident`;
 
     // Build auto-description with extra fields
     let extraDetails = '';
@@ -745,7 +752,7 @@ export default function App() {
     if (type === 'Typhoon' && signalLevel)         extraDetails = ` ${signalLevel}.`;
     const desc = description
       ? description + extraDetails
-      : `${incidentName} calamity reported by HR/Management at [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E].${extraDetails}`;
+      : `${incidentLabel} calamity reported by HR/Management at [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E].${extraDetails}`;
 
     // Capture which employees are in zone at filing time
     const affectedEmployeeIds = employees
@@ -1063,6 +1070,22 @@ export default function App() {
     return employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedEmail) ?? null;
   }, [currentUser.username, employees]);
 
+  useEffect(() => {
+    if (currentEmployee) {
+      setLocationUpdate(currentEmployee.address ?? '');
+    }
+  }, [currentEmployee]);
+
+  const myAidApplications = useMemo(
+    () => aidApplications.filter((application) => application.employeeId === currentEmployee?.id),
+    [aidApplications, currentEmployee?.id]
+  );
+
+  const myIncidentReports = useMemo(
+    () => calamityReports.filter((report) => report.affectedEmployeeIds.includes(currentEmployee?.id ?? '')),
+    [calamityReports, currentEmployee?.id]
+  );
+
   const handleSubmitEmployeeAidApplication = (event: React.FormEvent) => {
     event.preventDefault();
     if (!currentEmployee) {
@@ -1152,6 +1175,76 @@ export default function App() {
     pushLog(`${currentEmployee.name} flagged themselves as a victim.`, 'err');
   };
 
+  const handleMarkMyselfSafe = () => {
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        emp.id === currentEmployee.id
+          ? {
+              ...emp,
+              status: 'Green' as SafetyStatus,
+              contacted: true,
+              unresponsive: false,
+              safetyMessage: 'Marked myself as safe.',
+              lastResponseRecv: new Date().toLocaleTimeString(),
+              rescueDispatched: false,
+            }
+          : emp
+      )
+    );
+    setEmployeePortalMessage('You have been marked safe. Update your location or submit a report only if conditions change.');
+    pushLog(`${currentEmployee.name} marked themselves safe.`, 'success');
+  };
+
+  const handleMarkMyselfNeedHelp = () => {
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        emp.id === currentEmployee.id
+          ? {
+              ...emp,
+              status: 'Yellow' as SafetyStatus,
+              contacted: true,
+              unresponsive: false,
+              safetyMessage: 'Assistance requested. Awaiting response from your supervisor.',
+              lastResponseRecv: new Date().toLocaleTimeString(),
+              rescueDispatched: false,
+            }
+          : emp
+      )
+    );
+    setEmployeePortalMessage('Your request for help has been sent and the response team is reviewing it.');
+    pushLog(`${currentEmployee.name} marked themselves as needing help.`, 'warn');
+  };
+
+  const handleUpdateMyLocation = () => {
+    if (!currentEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
+      return;
+    }
+
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        emp.id === currentEmployee.id
+          ? {
+              ...emp,
+              address: locationUpdate,
+            }
+          : emp
+      )
+    );
+    setEmployeePortalMessage('Location updated. Your profile has been refreshed with the latest address.');
+    pushLog(`${currentEmployee.name} updated their location.`, 'success');
+  };
+
   const handleExportCalamityReport = (
     report: typeof calamityReports[number],
     affectedEmps: Employee[]
@@ -1216,18 +1309,30 @@ export default function App() {
             </div>
             <div className="flex flex-col px-3 py-1 gap-0.5">
               <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mt-2 mb-0.5">Employee Actions</p>
-              <div className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold bg-white/15 text-white border border-white/10 shadow-inner">
-                <HeartHandshake className="w-4 h-4 shrink-0 text-white" />
-                <span className="flex-1 leading-tight">Aid Applications</span>
-              </div>
-              <div className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-blue-200/80">
-                <Siren className="w-4 h-4 shrink-0 text-blue-300" />
-                <span className="flex-1 leading-tight">Incident Reports</span>
-              </div>
-              <div className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-blue-200/80">
-                <ShieldCheck className="w-4 h-4 shrink-0 text-blue-300" />
-                <span className="flex-1 leading-tight">Safety Status</span>
-              </div>
+              {[
+                { key: 'dashboard', label: 'My Dashboard', icon: LayoutDashboard },
+                { key: 'checkin', label: 'Safety Check-In', icon: ShieldCheck },
+                { key: 'alerts', label: 'Alerts Near Me', icon: AlertTriangle },
+                { key: 'aid', label: 'Aid Assistance', icon: HeartHandshake },
+                { key: 'profile', label: 'My Profile', icon: BookUser },
+                { key: 'contacts', label: 'Emergency Contacts', icon: HelpCircle },
+                { key: 'notifications', label: 'Notifications', icon: Clock },
+              ].map((tab) => {
+                const isActive = employeePortalPage === tab.key;
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setEmployeePortalPage(tab.key as any)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-left transition ${
+                      isActive ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-blue-300'}`} />
+                    <span className="flex-1 leading-tight">{tab.label}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="mx-5 my-4 border-t border-white/10" />
@@ -1246,132 +1351,414 @@ export default function App() {
             </div>
           </nav>
 
-          <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 md:p-6">
-            <main className="max-w-[1550px] w-full mx-auto grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6 min-h-0">
-              <div className="space-y-6">
-                <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
-                    <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-4 py-6 md:px-8 md:py-10">
+            <main className="max-w-[1180px] w-full mx-auto space-y-8 min-h-0">
+              <div className="space-y-7">
+                <section className="mx-auto rounded-[32px] border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                  <div className="px-6 py-6 bg-white/95 border-b border-slate-200">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <p className="text-white font-extrabold text-sm tracking-wide">My Profile</p>
-                        <p className="text-blue-300 text-[11px] mt-1">Safety and support overview</p>
+                        <p className="text-slate-900 font-extrabold text-lg tracking-tight">Welcome back</p>
+                        <p className="text-slate-500 text-sm mt-1">Your personal safety dashboard and support tools are below.</p>
                       </div>
-                      <div className="rounded-lg bg-white/10 px-2.5 py-1.5 text-sm font-semibold text-white">
-                        {currentEmployee?.status ?? 'Green'}
+                      <div className="rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm">
+                        {currentEmployee?.status ?? 'Green'} status
                       </div>
                     </div>
                   </div>
-                  <div className="p-6">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Name</p>
-                        <p className="mt-1 font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Department</p>
-                        <p className="mt-1 font-semibold text-slate-900">{currentEmployee?.department ?? '—'}</p>
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Official email</p>
-                        <p className="mt-1 font-semibold text-slate-900">{currentUser.username}</p>
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Current location</p>
-                        <p className="mt-1 font-semibold text-slate-900">{currentEmployee?.address ?? 'Needs update'}</p>
-                      </div>
+                  <div className="p-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Safety status</p>
+                      <p className="mt-4 text-3xl font-black text-slate-900">{currentEmployee?.status ?? 'Green'}</p>
+                      <p className="mt-3 text-sm text-slate-500">Current verified status from your profile.</p>
                     </div>
-
-                    <div className="mt-6 flex flex-wrap gap-3">
-                      <button
-                        onClick={handleTagMyselfAsVictim}
-                        className="rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
-                      >
-                        Tag myself as affected
-                      </button>
-                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700">
-                        {employeePortalMessage || 'Use the tools below to request help or file an impact report.'}
-                      </div>
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Aid requests</p>
+                      <p className="mt-4 text-3xl font-black text-slate-900">{myAidApplications.length}</p>
+                      <p className="mt-3 text-sm text-slate-500">Requests you have submitted so far.</p>
+                    </div>
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Incident reports</p>
+                      <p className="mt-4 text-3xl font-black text-slate-900">{myIncidentReports.length}</p>
+                      <p className="mt-3 text-sm text-slate-500">Reports filed from your account.</p>
+                    </div>
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-[10px] tracking-[0.4em] uppercase text-slate-400">Response note</p>
+                      <p className="mt-4 text-sm font-semibold text-slate-900 leading-snug">
+                        {employeePortalMessage || 'No recent portal actions. Use the buttons below to request support or update your situation.'}
+                      </p>
                     </div>
                   </div>
                 </section>
 
-                <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
-                    <p className="text-white font-extrabold text-sm tracking-wide">Aid Applications</p>
-                    <p className="text-blue-300 text-[11px] mt-1">Submit and track your support requests</p>
-                  </div>
-                  <div className="p-6">
-                    <form className="space-y-4" onSubmit={handleSubmitEmployeeAidApplication}>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <label className="text-sm font-semibold text-slate-700">
-                          <span className="mb-2 block">Aid type</span>
-                          <select
-                            value={employeeAidForm.aidType}
-                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, aidType: event.target.value as 'Cash' | 'Relief Goods' | 'Both' }))}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                          >
-                            <option value="Cash">Cash</option>
-                            <option value="Relief Goods">Relief Goods</option>
-                            <option value="Both">Both</option>
-                          </select>
-                        </label>
-                        <label className="text-sm font-semibold text-slate-700">
-                          <span className="mb-2 block">Priority</span>
-                          <select
-                            value={employeeAidForm.priority}
-                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, priority: event.target.value as 'Normal' | 'Urgent' }))}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                          >
-                            <option value="Normal">Normal</option>
-                            <option value="Urgent">Urgent</option>
-                          </select>
-                        </label>
-                      </div>
-                      <label className="block text-sm font-semibold text-slate-700">
-                        <span className="mb-2 block">Incident / event name</span>
-                        <input
-                          value={employeeAidForm.incidentName}
-                          onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
-                          placeholder="e.g. Typhoon Carina"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                        />
-                      </label>
-                      <label className="block text-sm font-semibold text-slate-700">
-                        <span className="mb-2 block">Amount (PHP)</span>
-                        <input
-                          type="number"
-                          min="1"
-                          value={employeeAidForm.amountPhp}
-                          onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, amountPhp: event.target.value }))}
-                          placeholder="5000"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                        />
-                      </label>
-                      <label className="block text-sm font-semibold text-slate-700">
-                        <span className="mb-2 block">Why do you need aid?</span>
-                        <textarea
-                          value={employeeAidForm.description}
-                          onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, description: event.target.value }))}
-                          rows={4}
-                          placeholder="Describe your condition or the support you need."
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                        />
-                      </label>
-                      <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
-                        Submit aid request
-                      </button>
-                    </form>
-
-                    <div className="mt-6 space-y-3">
-                      {aidApplications.filter((application) => application.employeeName === currentEmployee?.name).length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                          No aid applications yet. Submit one above and it will appear here.
+                {employeePortalPage === 'dashboard' && (
+                  <>
+                    <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                      <div className="px-6 py-5 bg-[#001e4a] border-b border-[#00172f]">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="text-white font-black text-lg tracking-[0.06em]">My Dashboard</p>
+                            <p className="text-slate-300 text-sm mt-1">One place for your safety status, alerts, and request actions.</p>
+                          </div>
+                          <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/10">
+                            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-sm" />
+                            Live status: {currentEmployee?.status ?? 'Green'}
+                          </div>
                         </div>
-                      ) : (
-                        aidApplications
-                          .filter((application) => application.employeeName === currentEmployee?.name)
-                          .slice(0, 4)
-                          .map((application) => (
+                      </div>
+                      <div className="p-7 grid gap-4 xl:grid-cols-[1.4fr_0.9fr]">
+                        <div className="space-y-5">
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <button
+                              onClick={handleMarkMyselfSafe}
+                              className="rounded-3xl bg-emerald-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600"
+                            >
+                              I’m Safe
+                            </button>
+                            <button
+                              onClick={handleMarkMyselfNeedHelp}
+                              className="rounded-3xl bg-amber-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600"
+                            >
+                              Need Help
+                            </button>
+                            <button
+                              onClick={handleTagMyselfAsVictim}
+                              className="rounded-3xl bg-rose-600 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
+                            >
+                              Emergency
+                            </button>
+                          </div>
+
+                          <div className={`rounded-[28px] border p-5 ${currentEmployee && getDistance(currentEmployee) <= epicenter.radiusKm ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                            <div className="flex items-center justify-between gap-4">
+                              <div>
+                                <p className="text-sm font-black uppercase tracking-[0.4em] text-slate-500">Am I affected?</p>
+                                <p className="mt-3 text-lg font-semibold text-slate-900">
+                                  {currentEmployee ? (
+                                    getDistance(currentEmployee) <= epicenter.radiusKm ? 'Yes — you are within the active hazard radius.' : 'No — your current location is outside the active hazard radius.'
+                                  ) : 'Employee location unavailable.'}
+                                </p>
+                              </div>
+                              <div className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                                {currentEmployee ? `${getDistance(currentEmployee).toFixed(1)} km from ${activeDisaster.locationName}` : 'No location'}
+                              </div>
+                            </div>
+                            <p className="mt-3 text-sm text-slate-600">
+                              {currentEmployee
+                                ? getDistance(currentEmployee) <= epicenter.radiusKm
+                                  ? 'Follow local evacuation guidance and update your status if conditions change.'
+                                  : 'Stay alert and keep your contact line open for any changes in the hazard zone.'
+                                : 'Your employee profile is not available. Please sign in with your official email.'}
+                            </p>
+                          </div>
+
+                          {managerCheckInRequest.active ? (
+                            <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <p className="text-sm font-bold text-slate-900">Pending manager check-in request</p>
+                                  <p className="mt-1 text-sm text-slate-600">{managerCheckInRequest.title}</p>
+                                  <p className="mt-2 text-xs uppercase tracking-[0.24em] text-slate-400">Due {managerCheckInRequest.due}</p>
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                  <button
+                                    onClick={handleMarkMyselfSafe}
+                                    className="rounded-full bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600"
+                                  >
+                                    I’m Safe
+                                  </button>
+                                  <button
+                                    onClick={handleMarkMyselfNeedHelp}
+                                    className="rounded-full bg-amber-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-600"
+                                  >
+                                    Need Help
+                                  </button>
+                                  <button
+                                    onClick={handleTagMyselfAsVictim}
+                                    className="rounded-full bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700"
+                                  >
+                                    Emergency
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="space-y-5">
+                          <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                            <p className="text-sm font-black uppercase tracking-[0.35em] text-slate-500">My Aid Status</p>
+                            <div className="mt-4 space-y-3">
+                              {myAidApplications.slice(0, 3).map((application) => (
+                                <div key={application.id} className="rounded-3xl border border-slate-200 bg-white p-4">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-sm font-semibold text-slate-900">{application.incidentName}</p>
+                                    <span className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{application.status}</span>
+                                  </div>
+                                  <p className="mt-2 text-sm text-slate-600">{application.amountPhp?.toLocaleString() ? `PHP ${application.amountPhp?.toLocaleString()}` : ''} {application.aidType}</p>
+                                </div>
+                              ))}
+                              {myAidApplications.length === 0 && (
+                                <p className="text-sm text-slate-600">No aid applications yet. Use the Aid Assistance page to submit a request.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                            <p className="text-sm font-black uppercase tracking-[0.35em] text-slate-500">Preparedness resources</p>
+                            <ul className="mt-4 space-y-3 text-sm text-slate-600">
+                              <li>• Keep your emergency kit within reach and charged.</li>
+                              <li>• Follow official evacuation guidance when the hazard radius expands.</li>
+                              <li>• Share your location with your supervisor if conditions worsen.</li>
+                            </ul>
+                            <div className="mt-5 rounded-3xl bg-slate-100 p-4">
+                              <p className="text-sm font-semibold text-slate-900">Emergency hotlines</p>
+                              <p className="mt-2 text-sm text-slate-600">911 / 117 / 1337</p>
+                              <p className="mt-1 text-sm text-slate-600">Barangay emergency center: 0927-000-1234</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                {employeePortalPage === 'checkin' && (
+                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                    <div className="px-6 py-5 bg-[#001f4b] border-b border-[#00172f]">
+                      <p className="text-white font-black text-lg tracking-[0.06em]">Safety Check-In</p>
+                      <p className="text-slate-300 text-sm mt-1">Update your status quickly when conditions change.</p>
+                    </div>
+                    <div className="p-7 space-y-5">
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <button
+                          onClick={handleMarkMyselfSafe}
+                          className="rounded-3xl bg-emerald-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600"
+                        >
+                          I’m Safe
+                        </button>
+                        <button
+                          onClick={handleMarkMyselfNeedHelp}
+                          className="rounded-3xl bg-amber-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600"
+                        >
+                          Need Help
+                        </button>
+                        <button
+                          onClick={handleTagMyselfAsVictim}
+                          className="rounded-3xl bg-rose-600 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
+                        >
+                          Emergency
+                        </button>
+                      </div>
+                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-sm font-semibold text-slate-900">Current status</p>
+                        <p className="mt-2 text-3xl font-black text-slate-900">{currentEmployee?.status ?? 'Green'}</p>
+                        <p className="mt-2 text-sm text-slate-600">{employeePortalMessage || 'Choose a status to update your manager and response team.'}</p>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {employeePortalPage === 'alerts' && (
+                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                    <div className="px-6 py-5 bg-[#001f4b] border-b border-[#00172f]">
+                      <p className="text-white font-black text-lg tracking-[0.06em]">Alerts Near Me</p>
+                      <p className="text-slate-300 text-sm mt-1">Live risk information for your current location.</p>
+                    </div>
+                    <div className="p-7 grid gap-4 md:grid-cols-2">
+                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-sm font-black uppercase tracking-[0.35em] text-slate-500">Active hazard</p>
+                        <p className="mt-4 text-lg font-semibold text-slate-900">{activeDisaster.name}</p>
+                        <p className="mt-2 text-sm text-slate-600">{activeDisaster.subName}</p>
+                        <p className="mt-3 text-sm text-slate-600">Located in {activeDisaster.locationName}. Radius: {epicenter.radiusKm} km.</p>
+                      </div>
+                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-sm font-black uppercase tracking-[0.35em] text-slate-500">Your distance</p>
+                        <p className="mt-4 text-3xl font-black text-slate-900">{currentEmployee ? `${getDistance(currentEmployee).toFixed(1)} km` : 'Unknown'}</p>
+                        <p className="mt-2 text-sm text-slate-600">
+                          {currentEmployee
+                            ? getDistance(currentEmployee) <= epicenter.radiusKm
+                              ? 'You are inside the active hazard zone. Follow local guidance immediately.'
+                              : 'You are outside the active hazard zone. Monitor updates closely.'
+                            : 'Employee location not available.'}
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {employeePortalPage === 'profile' && (
+                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                    <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f]">
+                      <p className="text-white font-black text-lg tracking-[0.06em]">My Profile</p>
+                      <p className="text-slate-300 text-sm mt-1">Review your contact details and keep your location current.</p>
+                    </div>
+                    <div className="p-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Name</p>
+                        <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
+                      </div>
+                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Department</p>
+                        <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.department ?? '—'}</p>
+                      </div>
+                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Carrier</p>
+                        <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.carrier ?? 'N/A'}</p>
+                      </div>
+                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Contact</p>
+                        <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.phone ?? 'Not provided'}</p>
+                      </div>
+                    </div>
+                    <div className="mt-6 grid gap-4 md:grid-cols-2">
+                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-sm font-semibold text-slate-900">Home address</p>
+                        <p className="mt-2 text-sm text-slate-600">{currentEmployee?.address ?? 'No address on file.'}</p>
+                      </div>
+                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-sm font-semibold text-slate-900">Update my location</p>
+                        <div className="mt-3 flex flex-col gap-3">
+                          <input
+                            value={locationUpdate}
+                            onChange={(event) => setLocationUpdate(event.target.value)}
+                            placeholder="Enter updated address"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+                          />
+                          <button
+                            onClick={handleUpdateMyLocation}
+                            className="rounded-2xl bg-[#002060] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#001848]"
+                          >
+                            Save location
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {employeePortalPage === 'contacts' && (
+                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                    <div className="px-6 py-5 bg-[#001f4b] border-b border-[#00172f]">
+                      <p className="text-white font-black text-lg tracking-[0.06em]">Emergency Contacts</p>
+                      <p className="text-slate-300 text-sm mt-1">Quick access to your local emergency and response numbers.</p>
+                    </div>
+                    <div className="p-7 grid gap-4 sm:grid-cols-2">
+                      {[
+                        { label: 'Emergency Police', value: '117' },
+                        { label: 'Medical Rescue', value: '911' },
+                        { label: 'Barangay Hall', value: '0927-000-1234' },
+                        { label: 'Disaster Response Team', value: '0998-111-2222' },
+                      ].map((contact) => (
+                        <div key={contact.label} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-sm font-semibold text-slate-900">{contact.label}</p>
+                          <p className="mt-2 text-lg font-black text-slate-900">{contact.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {employeePortalPage === 'notifications' && (
+                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                    <div className="px-6 py-5 bg-[#001f4b] border-b border-[#00172f]">
+                      <p className="text-white font-black text-lg tracking-[0.06em]">Notifications</p>
+                      <p className="text-slate-300 text-sm mt-1">Recent alerts and portal messages for your action.</p>
+                    </div>
+                    <div className="p-7 space-y-4">
+                      {[
+                        { title: 'Weather advisory issued for Cebu', description: 'Typhoon signal level may change in the next 6 hours.' },
+                        { title: 'Relief package distribution scheduled', description: 'Aid team will coordinate with affected barangays.' },
+                        { title: 'Shelter availability updated', description: 'Nearest barangay hall is now open for evacuees.' },
+                      ].map((item) => (
+                        <div key={item.title} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                          <p className="font-semibold text-slate-900">{item.title}</p>
+                          <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+                        </div>
+                      ))}
+                      <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                        <p className="font-semibold text-slate-900">Portal messages</p>
+                        <p className="mt-2 text-sm text-slate-600">{employeePortalMessage || 'No new personal notifications.'}</p>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {employeePortalPage === 'aid' && (
+                  <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                    <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
+                      <p className="text-white font-extrabold text-sm tracking-wide">Aid Applications</p>
+                      <p className="text-blue-300 text-[11px] mt-1">Submit and track your support requests</p>
+                    </div>
+                    <div className="p-6">
+                      <form className="space-y-4" onSubmit={handleSubmitEmployeeAidApplication}>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <label className="text-sm font-semibold text-slate-700">
+                            <span className="mb-2 block">Aid type</span>
+                            <select
+                              value={employeeAidForm.aidType}
+                              onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, aidType: event.target.value as 'Cash' | 'Relief Goods' | 'Both' }))}
+                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                            >
+                              <option value="Cash">Cash</option>
+                              <option value="Relief Goods">Relief Goods</option>
+                              <option value="Both">Both</option>
+                            </select>
+                          </label>
+                          <label className="text-sm font-semibold text-slate-700">
+                            <span className="mb-2 block">Priority</span>
+                            <select
+                              value={employeeAidForm.priority}
+                              onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, priority: event.target.value as 'Normal' | 'Urgent' }))}
+                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                            >
+                              <option value="Normal">Normal</option>
+                              <option value="Urgent">Urgent</option>
+                            </select>
+                          </label>
+                        </div>
+                        <label className="block text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Incident / event name</span>
+                          <input
+                            value={employeeAidForm.incidentName}
+                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
+                            placeholder="e.g. Typhoon Carina"
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                          />
+                        </label>
+                        <label className="block text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Amount (PHP)</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={employeeAidForm.amountPhp}
+                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, amountPhp: event.target.value }))}
+                            placeholder="5000"
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                          />
+                        </label>
+                        <label className="block text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Why do you need aid?</span>
+                          <textarea
+                            value={employeeAidForm.description}
+                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, description: event.target.value }))}
+                            rows={4}
+                            placeholder="Describe your condition or the support you need."
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                          />
+                        </label>
+                        <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
+                          Submit aid request
+                        </button>
+                      </form>
+
+                      <div className="mt-6 space-y-3">
+                        {myAidApplications.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                            No aid applications yet. Submit one above and it will appear here.
+                          </div>
+                        ) : (
+                          myAidApplications.slice(0, 4).map((application) => (
                             <div key={application.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                               <div className="flex items-start justify-between gap-3">
                                 <div>
@@ -1385,92 +1772,11 @@ export default function App() {
                               <p className="mt-3 text-sm text-slate-500">PHP {application.amountPhp?.toLocaleString() ?? '0'} · {application.aidType}</p>
                             </div>
                           ))
-                      )}
-                    </div>
-                  </div>
-                </section>
-              </div>
-
-              <div className="space-y-6">
-                <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
-                    <p className="text-white font-extrabold text-sm tracking-wide">Incident Report</p>
-                    <p className="text-blue-300 text-[11px] mt-1">File a report if you are affected</p>
-                  </div>
-                  <div className="p-6">
-                    <form className="space-y-4" onSubmit={handleSubmitEmployeeIncidentReport}>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <label className="text-sm font-semibold text-slate-700">
-                          <span className="mb-2 block">Incident type</span>
-                          <select
-                            value={employeeIncidentForm.type}
-                            onChange={(event) => setEmployeeIncidentForm((prev) => ({ ...prev, type: event.target.value as 'Fire' | 'Earthquake' | 'Typhoon' | 'Other' }))}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                          >
-                            <option value="Fire">Fire</option>
-                            <option value="Earthquake">Earthquake</option>
-                            <option value="Typhoon">Typhoon</option>
-                            <option value="Other">Other</option>
-                          </select>
-                        </label>
-                        <label className="text-sm font-semibold text-slate-700">
-                          <span className="mb-2 block">Location</span>
-                          <input
-                            value={employeeIncidentForm.locationLabel}
-                            onChange={(event) => setEmployeeIncidentForm((prev) => ({ ...prev, locationLabel: event.target.value }))}
-                            placeholder="Barangay or area"
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                          />
-                        </label>
+                        )}
                       </div>
-                      <label className="block text-sm font-semibold text-slate-700">
-                        <span className="mb-2 block">Incident name</span>
-                        <input
-                          value={employeeIncidentForm.incidentName}
-                          onChange={(event) => setEmployeeIncidentForm((prev) => ({ ...prev, incidentName: event.target.value }))}
-                          placeholder="Optional short title"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                        />
-                      </label>
-                      <label className="block text-sm font-semibold text-slate-700">
-                        <span className="mb-2 block">What happened?</span>
-                        <textarea
-                          value={employeeIncidentForm.description}
-                          onChange={(event) => setEmployeeIncidentForm((prev) => ({ ...prev, description: event.target.value }))}
-                          rows={5}
-                          placeholder="Share what is happening, how you are affected, and what support you need."
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                        />
-                      </label>
-                      <button type="submit" className="rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700">
-                        File incident report
-                      </button>
-                    </form>
-                  </div>
-                </section>
-
-                <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-[#002060] px-4 py-3 border-b border-[#001848]">
-                    <p className="text-white font-extrabold text-sm tracking-wide">Recent Updates</p>
-                    <p className="text-blue-300 text-[11px] mt-1">Your latest submissions</p>
-                  </div>
-                  <div className="p-6">
-                    <div className="space-y-3">
-                      {calamityReports.filter((report) => report.affectedEmployeeIds.includes(currentEmployee?.id ?? '')).slice(0, 4).map((report) => (
-                        <div key={report.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="font-semibold text-slate-900">{report.incidentName}</p>
-                          <p className="mt-1 text-sm text-slate-600">{report.description}</p>
-                          <p className="mt-2 text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">{report.timestamp}</p>
-                        </div>
-                      ))}
-                      {calamityReports.filter((report) => report.affectedEmployeeIds.includes(currentEmployee?.id ?? '')).length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                          No incident reports yet. Use the form to notify the team.
-                        </div>
-                      ) : null}
                     </div>
-                  </div>
-                </section>
+                  </section>
+                )}
               </div>
             </main>
           </div>
