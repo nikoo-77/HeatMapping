@@ -45,6 +45,9 @@ export interface Employee {
   address?: string; // Home address
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
   region?: string;         // Philippine admin region code e.g. 'NCR', 'VII', 'XI'
+  accessRole?: 'employee' | 'manager';
+  managerId?: string;
+  managerName?: string;
   team?: EmployeeTeam;
   distanceToEpicenter?: number;
   rescueDispatched?: boolean;

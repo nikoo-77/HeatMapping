@@ -50,6 +50,10 @@ export default function LoginPage({ onLogin, error, isSubmitting, officialEmailH
                 <p>Use an official email from Supabase · Password: 123456</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
+                <p className="font-semibold text-white">Manager access</p>
+                <p>Username: manager · Password: manager123</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
                 <p className="font-semibold text-white">Administrator access</p>
                 <p>Username: admin · Password: admin123</p>
               </div>

@@ -43,7 +43,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState('');
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
-  const [currentUser, setCurrentUser] = useState<{ username: string; role: 'official' | 'admin' }>({ username: '', role: 'official' });
+  const [currentUser, setCurrentUser] = useState<{ username: string; role: 'official' | 'admin' | 'manager' }>({ username: '', role: 'official' });
   const [officialAccountEmails, setOfficialAccountEmails] = useState<string[]>([]);
   const [employeeAidForm, setEmployeeAidForm] = useState({
     aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
@@ -69,7 +69,7 @@ export default function App() {
   const [locationUpdate, setLocationUpdate] = useState('');
 
   // ── Page navigation ─────────────────────────────────────────────────────
-  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive' | 'risk-map'>('dashboard');
+  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive' | 'risk-map' | 'team-overview'>('dashboard');
   // Employee Directory search/filter state
   const [dirSearch, setDirSearch] = useState('');
   const [dirDept,   setDirDept]   = useState('All Departments');
@@ -469,6 +469,42 @@ export default function App() {
       })
     );
     pushLog(`BROADCAST DISPATCHED: Manual SMS beacon dispatched to all ${triggeredCount} staff in active hazard bounds.`, 'warn');
+  };
+
+  const handleApproveAidApplication = (applicationId: string) => {
+    if (!isManagerUser) return;
+    const now = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    setAidApplications((prev) =>
+      prev.map((app) =>
+        app.id === applicationId
+          ? {
+              ...app,
+              status: 'Approved',
+              approver: currentEmployee?.name ?? 'Manager',
+              approvedDate: now,
+            }
+          : app
+      )
+    );
+    pushLog(`Manager approved aid application ${applicationId}.`, 'success');
+  };
+
+  const handleDisburseAidApplication = (applicationId: string) => {
+    if (!isManagerUser) return;
+    const now = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    setAidApplications((prev) =>
+      prev.map((app) =>
+        app.id === applicationId
+          ? {
+              ...app,
+              status: 'Disbursed',
+              approver: currentEmployee?.name ?? 'Manager',
+              approvedDate: now,
+            }
+          : app
+      )
+    );
+    pushLog(`Manager disbursed aid application ${applicationId}.`, 'success');
   };
 
   const handleSimulateReply = (employeeId: string, forcedStatus?: SafetyStatus) => {
@@ -1039,12 +1075,28 @@ export default function App() {
       return;
     }
 
+    const managerUsername = 'manager';
+    const managerPassword = 'manager123';
+    if (normalizedIdentifier === managerUsername && password === managerPassword) {
+      window.setTimeout(() => {
+        setCurrentUser({
+          username: managerUsername,
+          role: 'manager',
+        });
+        setIsAuthenticated(true);
+        setIsSubmittingLogin(false);
+      }, 350);
+      return;
+    }
+
+    const matchedEmployee = employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedIdentifier);
     const isOfficialEmail = officialAccountEmails.includes(normalizedIdentifier);
-    if (isOfficialEmail && password === officialPassword) {
+    if ((isOfficialEmail || matchedEmployee) && password === officialPassword) {
+      const isManager = matchedEmployee?.accessRole === 'manager';
       window.setTimeout(() => {
         setCurrentUser({
           username: normalizedIdentifier,
-          role: 'official',
+          role: isManager ? 'manager' : 'official',
         });
         setIsAuthenticated(true);
         setIsSubmittingLogin(false);
@@ -1064,11 +1116,55 @@ export default function App() {
     setCurrentUser({ username: '', role: 'official' });
   };
 
+  const managerTeamMemberIds = ['T8U', 'T8S'];
+
+  const managerDummyDirectReports = useMemo(() => {
+    return employees.filter((emp) => managerTeamMemberIds.includes(emp.id));
+  }, [employees]);
+
   const currentEmployee = useMemo(() => {
+    if (currentUser.role === 'manager' && currentUser.username === 'manager') {
+      return {
+        id: 'manager-dummy',
+        name: 'Manager',
+        role: 'Manager',
+        accessRole: 'manager',
+        department: 'Management',
+        lat: 0,
+        lng: 0,
+        gpsLat: 0,
+        gpsLng: 0,
+        carrier: 'Globe',
+        normalSignalStrength: -75,
+        battery: 100,
+        status: 'Green',
+        email: 'manager@dummy.local',
+        avatar: 'MG',
+        address: '',
+        islandGroup: 'Luzon',
+        region: 'NCR',
+      } as Employee;
+    }
+
     const normalizedEmail = currentUser.username.trim().toLowerCase();
     if (!normalizedEmail) return null;
     return employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedEmail) ?? null;
-  }, [currentUser.username, employees]);
+  }, [currentUser.username, currentUser.role, employees]);
+
+  const isManagerUser = currentUser.role === 'manager';
+
+  const directReports = useMemo(() => {
+    if (!isManagerUser) return [] as Employee[];
+    if (currentUser.username === 'manager') {
+      return managerDummyDirectReports;
+    }
+    const normalizedManagerName = currentEmployee?.name.trim().toLowerCase() ?? '';
+    return employees.filter((emp) => {
+      const matchesManagerId = emp.managerId && emp.managerId === currentEmployee?.id;
+      const matchesManagerName = emp.managerName?.trim().toLowerCase() === normalizedManagerName;
+      return emp.id !== currentEmployee?.id && (matchesManagerId || matchesManagerName);
+    });
+  }, [currentEmployee, currentUser.username, currentUser.role, employees, isManagerUser, managerDummyDirectReports]);
 
   useEffect(() => {
     if (currentEmployee) {
@@ -1827,50 +1923,60 @@ export default function App() {
               <MapIcon className="w-5 h-5 shrink-0" />
             </div>
             <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#002060] uppercase animate-fade-in">
-              CSR Crisis Intelligence Dashboard
+              {isManagerUser ? 'Manager Crisis Intelligence Dashboard' : 'CSR Crisis Intelligence Dashboard'}
             </h1>
           </div>
           <p className="text-xs text-slate-500 font-medium max-w-xl mt-1">
-            Analyzing workforce and satellite footprints for {employees.length} personnel across the Philippine Islands.
+            {isManagerUser
+              ? `Manager workspace for ${currentEmployee?.name ?? 'your team'}; direct report oversight and approval controls.`
+              : `Analyzing workforce and satellite footprints for ${employees.length} personnel across the Philippine Islands.`
+            }
           </p>
         </div>
 
         {/* Center: Role selector & team filter */}
-        <div className="flex flex-wrap items-center gap-3 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
-          <label htmlFor="viewer-role" className="text-xs font-bold text-slate-600 whitespace-nowrap">
-            Are you:
-          </label>
-          <select
-            id="viewer-role"
-            value={viewerRole}
-            onChange={(e) => {
-              const role = e.target.value as EmployeeTeam;
-              setViewerRole(role);
-              pushLog(`Viewing portal as ${role}.`, 'info');
-            }}
-            className="text-xs font-bold text-[#002060] bg-white border border-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#002060]/30"
-          >
-            <option value="HR/CSR">HR/CSR</option>
-            <option value="Manager">Manager</option>
-          </select>
-          <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer whitespace-nowrap">
-            <input
-              type="checkbox"
-              checked={filterByTeam}
+        {isManagerUser ? (
+          <div className="flex flex-col items-start gap-2 shrink-0 bg-slate-50/80 px-4 py-3 rounded-lg border border-slate-200">
+            <span className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">SHOW MY TEAM</span>
+            <span className="text-sm font-semibold text-slate-900">{directReports.length} members</span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
+            <label htmlFor="viewer-role" className="text-xs font-bold text-slate-600 whitespace-nowrap">
+              Are you:
+            </label>
+            <select
+              id="viewer-role"
+              value={viewerRole}
               onChange={(e) => {
-                setFilterByTeam(e.target.checked);
-                pushLog(
-                  e.target.checked
-                    ? `Filtering to ${viewerRole} team employees only.`
-                    : 'Showing all team employees.',
-                  'info'
-                );
+                const role = e.target.value as EmployeeTeam;
+                setViewerRole(role);
+                pushLog(`Viewing portal as ${role}.`, 'info');
               }}
-              className="rounded border-slate-300 text-[#002060] focus:ring-[#002060]/30 cursor-pointer"
-            />
-            Show my team only
-          </label>
-        </div>
+              className="text-xs font-bold text-[#002060] bg-white border border-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#002060]/30"
+            >
+              <option value="HR/CSR">HR/CSR</option>
+              <option value="Manager">Manager</option>
+            </select>
+            <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={filterByTeam}
+                onChange={(e) => {
+                  setFilterByTeam(e.target.checked);
+                  pushLog(
+                    e.target.checked
+                      ? `Filtering to ${viewerRole} team employees only.`
+                      : 'Showing all team employees.',
+                    'info'
+                  );
+                }}
+                className="rounded border-slate-300 text-[#002060] focus:ring-[#002060]/30 cursor-pointer"
+              />
+              Show my team only
+            </label>
+          </div>
+        )}
 
         {/* Right Side: user session + co-labelled corporate logos */}
         <div className="flex items-center gap-3 shrink-0 bg-slate-50/80 px-3 py-2 rounded-lg border border-slate-200">
@@ -1941,6 +2047,13 @@ export default function App() {
               <TrendingUp className={`w-4 h-4 shrink-0 ${activePage === 'executive' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
               <span className="flex-1 leading-tight">Executive Dashboard</span>
             </button>
+            {isManagerUser ? (
+              <button onClick={() => setActivePage('team-overview')}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'team-overview' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+                <Users className={`w-4 h-4 shrink-0 ${activePage === 'team-overview' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+                <span className="flex-1 leading-tight">Team Overview</span>
+              </button>
+            ) : null}
 
             {/* ── CRISIS MONITORING ── */}
             <div className="mx-1 my-2.5 border-t border-white/10" />
@@ -2024,7 +2137,7 @@ export default function App() {
 
       {/* Main Corporate Workspace */}
       <main className="flex-1 max-w-[1550px] w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
-        
+
         {/* Left Column: Region / Island Group Filter Panel */}
         <section className="lg:col-span-3 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col max-h-[750px]">
 
@@ -2514,6 +2627,56 @@ export default function App() {
       {/* ──────────── END DASHBOARD PAGE ──────────── */}
       </>
       }
+
+      {/* ──────────── TEAM OVERVIEW PAGE ──────────── */}
+      {activePage === 'team-overview' && (() => {
+        const reportCount = directReports.length;
+        return (
+          <div className="flex-1 p-6 bg-[#f8fafc]">
+            <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
+                    <Users className="w-5 h-5" /> Team Overview
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Review direct report safety status and send quick check-ins from the manager portal.</p>
+                </div>
+                <div className="rounded-3xl bg-white border border-slate-200 px-4 py-3 shadow-sm">
+                  <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Direct Reports</p>
+                  <p className="text-3xl font-black text-[#002060]">{reportCount}</p>
+                </div>
+              </div>
+
+              {reportCount === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-slate-500">
+                  No direct reports found for this manager.
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {directReports.map((emp) => (
+                    <div key={emp.id} className="rounded-3xl border border-slate-200 bg-white shadow-sm p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{emp.name}</p>
+                          <p className="text-xs text-slate-500 mt-1">{emp.department} · {emp.role}</p>
+                        </div>
+                        <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black ${emp.status === 'Green' ? 'bg-emerald-100 text-emerald-700' : emp.status === 'Yellow' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
+                          {emp.status}
+                        </span>
+                      </div>
+                      <p className="mt-4 text-sm text-slate-600 min-h-[56px]">{emp.address ?? 'No address available'}</p>
+                      <div className="mt-5 flex flex-col gap-2">
+                        <button onClick={() => handleSendCheckIn(emp.id)} className="rounded-2xl bg-[#002060] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#001848]">Send Check-In</button>
+                        <button onClick={() => handleSendEmail(emp.id)} className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-[#002060] hover:text-[#002060]">Send Email Alert</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ──────────── EMPLOYEE DIRECTORY PAGE ──────────── */}
       {activePage === 'directory' && (() => {
@@ -3408,6 +3571,7 @@ export default function App() {
                       <th className="text-left px-4 py-3 font-black">Filed Date</th>
                       <th className="text-center px-4 py-3 font-black">Status</th>
                       <th className="text-left px-4 py-3 font-black">Approver</th>
+                      {isManagerUser && <th className="text-left px-4 py-3 font-black">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -3447,6 +3611,24 @@ export default function App() {
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-slate-500 text-[11px]">{app.approver || '—'}</td>
+                              {isManagerUser && (
+                                <td className="px-4 py-3">
+                                  <div className="flex flex-wrap gap-2 justify-end">
+                                    {app.status === 'Submitted' && (
+                                      <button
+                                        onClick={() => handleApproveAidApplication(app.id)}
+                                        className="rounded-md bg-blue-600 px-2.5 py-1 text-[10px] font-black text-white hover:bg-blue-500 transition"
+                                      >Approve</button>
+                                    )}
+                                    {(app.status === 'Approved' || app.status === 'Under Review') && (
+                                      <button
+                                        onClick={() => handleDisburseAidApplication(app.id)}
+                                        className="rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] font-black text-white hover:bg-emerald-500 transition"
+                                      >Disburse</button>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
                             </tr>
                           );
                         })

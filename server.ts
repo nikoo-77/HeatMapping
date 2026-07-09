@@ -24,6 +24,7 @@ interface Employee {
   id: string;
   name: string;
   role: string;
+  accessRole?: 'employee' | 'manager';
   department: string;
   lat: number;
   lng: number;
@@ -39,6 +40,8 @@ interface Employee {
   address?: string;
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
   region?: string;
+  managerId?: string;
+  managerName?: string;
   team?: 'HR/CSR' | 'Manager';
   facility?: string;
 }
@@ -67,6 +70,8 @@ interface SupabaseEmployeeRow {
   'OFFICIAL EMAIL'?: string | null;
   'PERSONAL EMAIL'?: string | null;
   'MOBILE NUMBER'?: string | null;
+  role?: string | null;
+  'Manager\'s Name'?: string | null;
 }
 
 // ── Utility helpers ───────────────────────────────────────────────────────────
@@ -324,17 +329,21 @@ async function loadEmployees(): Promise<Employee[]> {
     // DU → department
     const department = (row['DU'] ?? 'Unknown').trim() || 'Unknown';
 
-    // Manager check
+    // Manager check and access role
     const managersId = (row['Managers ID'] ?? '').trim();
+    const managerName = ((row['Manager\'s Name'] ?? row['Managers Name']) ?? '').trim();
     const isManager = row['PeopleManager/Individual Contributor']
       ? row['PeopleManager/Individual Contributor']!.toLowerCase().includes('manager')
       : false;
+    const rawRole = (row['role'] ?? '').trim().toLowerCase();
+    const accessRole = rawRole === 'manager' || isManager ? 'manager' : 'employee';
 
     const empSeed = hashString(empId);
     employees.push({
       id: String(empId),
       name: fullName || 'Unknown Employee',
       role: designation,
+      accessRole,
       department,
       lat: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
       lng: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
@@ -350,6 +359,8 @@ async function loadEmployees(): Promise<Employee[]> {
       address: addressStr,
       islandGroup,
       region,
+      managerId: managersId || undefined,
+      managerName: managerName || undefined,
       team: isManager ? 'Manager' : 'HR/CSR',
       facility: row['Facility'] ?? undefined,
     });
