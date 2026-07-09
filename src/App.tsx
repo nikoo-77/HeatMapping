@@ -38,6 +38,131 @@ function getEmployeeCity(emp: Employee): string | null {
   return null;
 }
 
+type CalamityReportRecord = {
+  id: string;
+  timestamp: string;
+  type: string;
+  incidentName: string;
+  locationLabel: string;
+  lat: number;
+  lng: number;
+  radiusKm: number;
+  affectedCount: number;
+  affectedEmployeeIds: string[];
+  magnitude?: string;
+  signalLevel?: string;
+  description: string;
+};
+
+type PendingEmployeeReportRecord = {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeAvatar: string;
+  timestamp: string;
+  type: 'Fire' | 'Earthquake' | 'Typhoon' | 'Other';
+  incidentName: string;
+  locationLabel: string;
+  lat: number;
+  lng: number;
+  description: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+};
+
+type IncidentSessionSnapshot = {
+  simulationActive: boolean;
+  epicenter: { lat: number; lng: number; radiusKm: number };
+  activeDisaster: DisasterConfig;
+  resolvedReports: Record<string, boolean>;
+};
+
+const INCIDENT_STORAGE_KEYS = {
+  calamityReports: 'island_map_calamity_reports',
+  pendingReports: 'island_map_pending_employee_reports',
+  resolvedReports: 'island_map_resolved_reports',
+  incidentSession: 'island_map_incident_session',
+} as const;
+
+function readJsonStorage<T>(key: string, fallback: T): T {
+  try {
+    const saved = localStorage.getItem(key);
+    if (!saved) return fallback;
+    return JSON.parse(saved) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function readCalamityReportsFromStorage(): CalamityReportRecord[] {
+  const parsed = readJsonStorage<unknown>(INCIDENT_STORAGE_KEYS.calamityReports, []);
+  return Array.isArray(parsed) ? (parsed as CalamityReportRecord[]) : [];
+}
+
+function readPendingReportsFromStorage(): PendingEmployeeReportRecord[] {
+  const parsed = readJsonStorage<unknown>(INCIDENT_STORAGE_KEYS.pendingReports, []);
+  return Array.isArray(parsed) ? (parsed as PendingEmployeeReportRecord[]) : [];
+}
+
+function readResolvedReportsFromStorage(): Record<string, boolean> {
+  const parsed = readJsonStorage<unknown>(INCIDENT_STORAGE_KEYS.resolvedReports, {});
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, boolean>)
+    : {};
+}
+
+function readIncidentSessionFromStorage(): IncidentSessionSnapshot | null {
+  const parsed = readJsonStorage<unknown>(INCIDENT_STORAGE_KEYS.incidentSession, null);
+  if (!parsed || typeof parsed !== 'object') return null;
+  const session = parsed as Partial<IncidentSessionSnapshot>;
+  if (!session.epicenter || !session.activeDisaster) return null;
+  return {
+    simulationActive: Boolean(session.simulationActive),
+    epicenter: session.epicenter,
+    activeDisaster: session.activeDisaster,
+    resolvedReports: session.resolvedReports ?? {},
+  };
+}
+
+function createDefaultActiveDisaster(): DisasterConfig {
+  return {
+    id: 'fire',
+    name: 'Dense Residential Block Fire',
+    subName: 'Barangay Fire Hazard Outbreak',
+    icon: 'fire',
+    color: 'orange',
+    colorClass: 'text-orange-700 bg-orange-50 border-orange-200',
+    hexColor: '#f97316',
+    defaultX: 10.3311,
+    defaultY: 123.9053,
+    defaultRadius: 5,
+    locationName: 'Cebu IT Park Area',
+    description: 'An intense, rapid, localized residential conflagration causing dangerous thermal plumes, thick carbon fumes, and utility wire power shutdowns.',
+    greenTemplates: [
+      'Thick black smoke clouds. Evacuated sector safely.',
+      'Local power grid isolated for security. Standing by safe.',
+      'Fire trucks actively clearing perimeter. All clear.',
+      'Evacuated structure immediately. safe at compound.',
+      'Assembled at barangay community oval. Secure and accounted.',
+      'Safe. Fire controlled 4 houses away, moving to safety line.'
+    ],
+    replyTemplates: [
+      'House cleared. Evacuated block to relative safe ground.',
+      'Escape path clear. No injuries. Commencing safety reports.',
+      'Safe at nearby commercial parking zone. Fire truck at scene.',
+      'Safe. Smoke dissipating. Family sheltered at central oval.',
+      'Fire wall contained. Safe in secondary barangay line.',
+      'Cleared dense housing alley safely. In touch with marshals.'
+    ]
+  };
+}
+
+function clearIncidentStorage() {
+  localStorage.removeItem(INCIDENT_STORAGE_KEYS.calamityReports);
+  localStorage.removeItem(INCIDENT_STORAGE_KEYS.pendingReports);
+  localStorage.removeItem(INCIDENT_STORAGE_KEYS.resolvedReports);
+  localStorage.removeItem(INCIDENT_STORAGE_KEYS.incidentSession);
+}
+
 export default function App() {
   // ── Authentication ─────────────────────────────────────────────────────
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -57,6 +182,10 @@ export default function App() {
     description: '',
     locationLabel: '',
     incidentName: '',
+    lat: 0,
+    lng: 0,
+    locationPinned: false,
+    iAmVictim: true,
   });
   const [employeePortalMessage, setEmployeePortalMessage] = useState('');
   const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'alerts' | 'aid' | 'profile' | 'contacts' | 'notifications'>('dashboard');
@@ -90,21 +219,14 @@ export default function App() {
   });
 
   // ── Calamity Report History ──────────────────────────────────────────────
-  const [calamityReports, setCalamityReports] = useState<Array<{
-    id: string;
-    timestamp: string;
-    type: string;
-    incidentName: string;
-    locationLabel: string;
-    lat: number;
-    lng: number;
-    radiusKm: number;
-    affectedCount: number;
-    affectedEmployeeIds: string[];   // IDs captured at time of filing
-    magnitude?: string;
-    signalLevel?: string;
-    description: string;
-  }>>([])
+  const [calamityReports, setCalamityReports] = useState<CalamityReportRecord[]>(() => readCalamityReportsFromStorage());
+
+  // ── Pending Employee Calamity Reports (awaiting manager approval) ────────
+  const [pendingEmployeeReports, setPendingEmployeeReports] = useState<PendingEmployeeReportRecord[]>(() => readPendingReportsFromStorage());
+
+  // Geocoding state for the employee Calamity Report map
+  const [empIsGeocoding, setEmpIsGeocoding] = useState(false);
+  const [empGeocodeError, setEmpGeocodeError] = useState<string | null>(null);
 
   // Track which report card has its employee list expanded
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
@@ -116,7 +238,11 @@ export default function App() {
 
   // ── Active Incidents page filters ─────────────────────────────────────────
   const [incidentStatusFilter, setIncidentStatusFilter] = useState<'All' | 'Active' | 'Resolved'>('All');
-  const [resolvedReports, setResolvedReports] = useState<Record<string, boolean>>({});
+  const [resolvedReports, setResolvedReports] = useState<Record<string, boolean>>(() => {
+    const session = readIncidentSessionFromStorage();
+    if (session?.resolvedReports) return session.resolvedReports;
+    return readResolvedReportsFromStorage();
+  });
 
   // ── Aid Management state ──────────────────────────────────────────────────
   const [aidStatusFilter, setAidStatusFilter] = useState<'All' | 'Submitted' | 'Under Review' | 'Approved' | 'Disbursed' | 'Rejected'>('All');
@@ -175,7 +301,11 @@ export default function App() {
   const [filterByTeam, setFilterByTeam] = useState(false);
 
   // Toggle for Incident & Emergency Simulation Deck
-  const [simulationActive, setSimulationActive] = useState<boolean>(false);
+  const [simulationActive, setSimulationActive] = useState<boolean>(() => {
+    const session = readIncidentSessionFromStorage();
+    if (session) return session.simulationActive;
+    return readCalamityReportsFromStorage().length > 0;
+  });
 
   // ── Calamity Report Modal State ──────────────────────────────────────────
   const [showCalamityModal, setShowCalamityModal] = useState(false);
@@ -212,37 +342,26 @@ export default function App() {
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [geocodeError, setGeocodeError] = useState<string | null>(null);
 
+  // refs for the employee-side Calamity Report page map
+  const empCalamityMapRef = React.useRef<HTMLDivElement | null>(null);
+  const empCalamityLeafletRef = React.useRef<any>(null);
+  const empCalamityMarkerRef = React.useRef<any>(null);
+  const empCalamityFormRef = React.useRef(employeeIncidentForm);
+
   // Active Disaster Location — stored as real GPS coordinates + radius in km
-  const [epicenter, setEpicenter] = useState({ lat: 10.3311, lng: 123.9053, radiusKm: 5 });
-  const [activeDisaster, setActiveDisaster] = useState<DisasterConfig>({
-    id: 'fire',
-    name: 'Dense Residential Block Fire',
-    subName: 'Barangay Fire Hazard Outbreak',
-    icon: 'fire',
-    color: 'orange',
-    colorClass: 'text-orange-700 bg-orange-50 border-orange-200',
-    hexColor: '#f97316',
-    defaultX: 10.3311,
-    defaultY: 123.9053,
-    defaultRadius: 5,
-    locationName: 'Cebu IT Park Area',
-    description: 'An intense, rapid, localized residential conflagration causing dangerous thermal plumes, thick carbon fumes, and utility wire power shutdowns.',
-    greenTemplates: [
-      'Thick black smoke clouds. Evacuated sector safely.',
-      'Local power grid isolated for security. Standing by safe.',
-      'Fire trucks actively clearing perimeter. All clear.',
-      'Evacuated structure immediately. safe at compound.',
-      'Assembled at barangay community oval. Secure and accounted.',
-      'Safe. Fire controlled 4 houses away, moving to safety line.'
-    ],
-    replyTemplates: [
-      'House cleared. Evacuated block to relative safe ground.',
-      'Escape path clear. No injuries. Commencing safety reports.',
-      'Safe at nearby commercial parking zone. Fire truck at scene.',
-      'Safe. Smoke dissipating. Family sheltered at central oval.',
-      'Fire wall contained. Safe in secondary barangay line.',
-      'Cleared dense housing alley safely. In touch with marshals.'
-    ]
+  const [epicenter, setEpicenter] = useState(() => {
+    const session = readIncidentSessionFromStorage();
+    if (session?.epicenter) return session.epicenter;
+    const latestReport = readCalamityReportsFromStorage()[0];
+    if (latestReport) {
+      return { lat: latestReport.lat, lng: latestReport.lng, radiusKm: latestReport.radiusKm };
+    }
+    return { lat: 10.3311, lng: 123.9053, radiusKm: 5 };
+  });
+  const [activeDisaster, setActiveDisaster] = useState<DisasterConfig>(() => {
+    const session = readIncidentSessionFromStorage();
+    if (session?.activeDisaster) return session.activeDisaster;
+    return createDefaultActiveDisaster();
   });
 
   // Seeded employee database distributed across the three Philippine island groups
@@ -279,6 +398,19 @@ export default function App() {
     }, 2000);
     return () => clearTimeout(timer);
   }, [employees]);
+
+  // Persist calamity reports, pending employee reports, and active incident session
+  useEffect(() => {
+    localStorage.setItem(INCIDENT_STORAGE_KEYS.calamityReports, JSON.stringify(calamityReports));
+    localStorage.setItem(INCIDENT_STORAGE_KEYS.pendingReports, JSON.stringify(pendingEmployeeReports));
+    localStorage.setItem(INCIDENT_STORAGE_KEYS.resolvedReports, JSON.stringify(resolvedReports));
+    localStorage.setItem(INCIDENT_STORAGE_KEYS.incidentSession, JSON.stringify({
+      simulationActive,
+      epicenter,
+      activeDisaster,
+      resolvedReports,
+    } satisfies IncidentSessionSnapshot));
+  }, [calamityReports, pendingEmployeeReports, resolvedReports, simulationActive, epicenter, activeDisaster]);
 
   // Log dispatch helper
   const pushLog = useCallback((msg: string, type: 'info' | 'warn' | 'success' | 'err' = 'info') => {
@@ -667,12 +799,18 @@ export default function App() {
   };
 
   const handleResetDatabase = () => {
+    clearIncidentStorage();
+    setCalamityReports([]);
+    setPendingEmployeeReports([]);
+    setResolvedReports({});
+    setSimulationActive(false);
+    setEpicenter({ lat: 10.3311, lng: 123.9053, radiusKm: 5 });
+    setActiveDisaster(createDefaultActiveDisaster());
     setEmployees(generateAllIslandEmployees());
     setSelectedEmployee(null);
     setSelectedCity(null);
     setSelectedIslandGroup(null);
     setFilterByTeam(false);
-    setSimulationActive(false);
     pushLog('Database reset. All personnel records restored and active calamity report cleared.', 'info');
   };
 
@@ -894,7 +1032,161 @@ export default function App() {
     }
   };
 
+
+  // ── Employee Calamity Report Page — Leaflet map ───────────────────────────
+
+  // Keep empCalamityFormRef in sync so Leaflet click handler always sees fresh state
+  React.useEffect(() => {
+    empCalamityFormRef.current = employeeIncidentForm;
+  }, [employeeIncidentForm]);
+
+  // Mount/destroy employee calamity map when the Calamity Report page is active
+  React.useEffect(() => {
+    const isOnCalamityPage = employeePortalPage === 'checkin';
+    if (!isOnCalamityPage) {
+      if (empCalamityLeafletRef.current) {
+        empCalamityLeafletRef.current.remove();
+        empCalamityLeafletRef.current = null;
+        empCalamityMarkerRef.current = null;
+      }
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (!empCalamityMapRef.current || empCalamityLeafletRef.current) return;
+      const L = (window as any).L || require('leaflet');
+      const initLat = empCalamityFormRef.current.lat || 12.0;
+      const initLng = empCalamityFormRef.current.lng || 122.5;
+      const initZoom = empCalamityFormRef.current.lat ? 13 : 6;
+      const map = L.map(empCalamityMapRef.current, { center: [initLat, initLng], zoom: initZoom, zoomControl: true });
+      empCalamityLeafletRef.current = map;
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '\u00a9 OpenStreetMap contributors \u00a9 CARTO',
+        subdomains: 'abcd', maxZoom: 19,
+      }).addTo(map);
+      if (empCalamityFormRef.current.lat && empCalamityFormRef.current.lng) {
+        const pinIcon = L.divIcon({
+          className: '',
+          html: '<div style="width:22px;height:22px;background:#dc2626;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);"></div>',
+          iconSize: [22, 22], iconAnchor: [11, 22],
+        });
+        empCalamityMarkerRef.current = L.marker([empCalamityFormRef.current.lat, empCalamityFormRef.current.lng], { icon: pinIcon }).addTo(map);
+        setEmployeeIncidentForm(prev => ({ ...prev, locationPinned: true }));
+      }
+      map.on('click', (e: any) => {
+        const { lat, lng } = e.latlng;
+        setEmployeeIncidentForm(prev => ({ ...prev, lat, lng, locationPinned: true }));
+        if (empCalamityMarkerRef.current) {
+          empCalamityMarkerRef.current.setLatLng([lat, lng]);
+        } else {
+          const pinIcon = L.divIcon({
+            className: '',
+            html: '<div style="width:22px;height:22px;background:#dc2626;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);"></div>',
+            iconSize: [22, 22], iconAnchor: [11, 22],
+          });
+          empCalamityMarkerRef.current = L.marker([lat, lng], { icon: pinIcon }).addTo(map);
+        }
+      });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [employeePortalPage]);
+
+  const handleEmpGeocode = async () => {
+    const query = employeeIncidentForm.locationLabel.trim();
+    if (!query) { setEmpGeocodeError('Please type a location name first.'); return; }
+    setEmpIsGeocoding(true); setEmpGeocodeError(null);
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(query) + '&format=json&limit=1&countrycodes=ph';
+      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      const data = await res.json();
+      let foundLat: number, foundLng: number;
+      if (!data || data.length === 0) {
+        const url2 = 'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(query + ' Philippines') + '&format=json&limit=1';
+        const res2 = await fetch(url2, { headers: { 'Accept-Language': 'en' } });
+        const data2 = await res2.json();
+        if (!data2 || data2.length === 0) { setEmpGeocodeError('"' + query + '" not found. Try a more specific name or click the map.'); setEmpIsGeocoding(false); return; }
+        foundLat = parseFloat(data2[0].lat); foundLng = parseFloat(data2[0].lon);
+      } else { foundLat = parseFloat(data[0].lat); foundLng = parseFloat(data[0].lon); }
+      setEmployeeIncidentForm(prev => ({ ...prev, lat: foundLat, lng: foundLng, locationPinned: true }));
+      setEmpGeocodeError(null);
+      const L = (window as any).L || require('leaflet');
+      const map = empCalamityLeafletRef.current;
+      if (map) {
+        map.setView([foundLat, foundLng], 13, { animate: true });
+        if (empCalamityMarkerRef.current) { empCalamityMarkerRef.current.setLatLng([foundLat, foundLng]); }
+        else {
+          const pinIcon = L.divIcon({
+            className: '',
+            html: '<div style="width:22px;height:22px;background:#dc2626;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);"></div>',
+            iconSize: [22, 22], iconAnchor: [11, 22],
+          });
+          empCalamityMarkerRef.current = L.marker([foundLat, foundLng], { icon: pinIcon }).addTo(map);
+        }
+      }
+    } catch { setEmpGeocodeError('Network error — check your connection and try again.'); }
+    setEmpIsGeocoding(false);
+  };
+
+  const handleSubmitEmployeeCrisisReport = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentEmployee) { setEmployeePortalMessage('Your employee profile could not be found.'); return; }
+    if (!employeeIncidentForm.locationPinned) { setEmployeePortalMessage('Please pin a location on the map or search for one before submitting.'); return; }
+    if (!employeeIncidentForm.description.trim()) { setEmployeePortalMessage('Please describe the calamity before submitting.'); return; }
+    const incidentName = employeeIncidentForm.incidentName.trim() ||
+      (employeeIncidentForm.type + ' — ' + (employeeIncidentForm.locationLabel.trim() || 'My Location'));
+    const pendingReport = {
+      id: 'EMP-RPT-' + Date.now(),
+      employeeId: currentEmployee.id,
+      employeeName: currentEmployee.name,
+      employeeAvatar: currentEmployee.avatar ?? currentEmployee.name.charAt(0),
+      timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      type: employeeIncidentForm.type,
+      incidentName,
+      locationLabel: employeeIncidentForm.locationLabel.trim() || currentEmployee.address || 'My Location',
+      lat: employeeIncidentForm.lat,
+      lng: employeeIncidentForm.lng,
+      description: employeeIncidentForm.description.trim(),
+      status: 'Pending' as const,
+    };
+    setPendingEmployeeReports(prev => [pendingReport, ...prev]);
+    if (employeeIncidentForm.iAmVictim) {
+      setEmployees(prev => prev.map(emp =>
+        emp.id === currentEmployee.id ? { ...emp, status: 'Yellow' as SafetyStatus } : emp
+      ));
+    }
+    setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '', lat: 0, lng: 0, locationPinned: false, iAmVictim: true });
+    if (empCalamityLeafletRef.current) { empCalamityLeafletRef.current.remove(); empCalamityLeafletRef.current = null; empCalamityMarkerRef.current = null; }
+    setEmployeePortalMessage('Your calamity report has been submitted and is awaiting manager verification. Your status has been set to "Need Help" until approved.');
+    pushLog('PENDING REPORT: ' + currentEmployee.name + ' filed a self-reported calamity (' + pendingReport.type + '). Awaiting manager approval.', 'warn');
+  };
+
+  const handleApproveEmployeeReport = (reportId: string) => {
+    const report = pendingEmployeeReports.find(r => r.id === reportId);
+    if (!report) return;
+    const newReport = {
+      id: 'APPROVED-' + reportId,
+      timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      type: report.type, incidentName: report.incidentName, locationLabel: report.locationLabel,
+      lat: report.lat, lng: report.lng, radiusKm: 1, affectedCount: 1,
+      affectedEmployeeIds: [report.employeeId], description: report.description,
+    };
+    setCalamityReports(prev => [newReport, ...prev]);
+    setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'Approved' as const } : r));
+    setSimulationActive(true);
+    pushLog('MANAGER APPROVED: Calamity report by ' + report.employeeName + ' verified and added to Active Incidents.', 'success');
+  };
+
+  const handleRejectEmployeeReport = (reportId: string) => {
+    const report = pendingEmployeeReports.find(r => r.id === reportId);
+    if (!report) return;
+    setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'Rejected' as const } : r));
+    setEmployees(prev => prev.map(emp =>
+      emp.id === report.employeeId ? { ...emp, status: 'Green' as SafetyStatus } : emp
+    ));
+    pushLog('MANAGER REJECTED: Calamity report by ' + report.employeeName + ' was rejected.', 'warn');
+  };
+
   const handleDispatchRescue = (employeeId: string) => {
+
     setEmployees((prev) =>
       prev.map((emp) => {
         if (emp.id === employeeId) {
@@ -1169,8 +1461,16 @@ export default function App() {
   useEffect(() => {
     if (currentEmployee) {
       setLocationUpdate(currentEmployee.address ?? '');
+      // Pre-seed the calamity form with employee GPS so map auto-centers on their location
+      if (currentEmployee.gpsLat && currentEmployee.gpsLng) {
+        setEmployeeIncidentForm(prev => ({
+          ...prev,
+          lat: currentEmployee.gpsLat ?? 0,
+          lng: currentEmployee.gpsLng ?? 0,
+        }));
+      }
     }
-  }, [currentEmployee]);
+  }, [currentEmployee?.id]);
 
   const myAidApplications = useMemo(
     () => aidApplications.filter((application) => application.employeeId === currentEmployee?.id),
@@ -1240,7 +1540,7 @@ export default function App() {
     };
 
     setCalamityReports((prev) => [newReport, ...prev]);
-    setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '' });
+    setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '', lat: 0, lng: 0, locationPinned: false, iAmVictim: true });
     setEmployeePortalMessage('Your incident report has been filed and shared with the response team.');
     setSimulationActive(true);
     pushLog(`Self-reported incident filed by ${currentEmployee.name}.`, 'warn');
@@ -1407,7 +1707,7 @@ export default function App() {
               <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mt-2 mb-0.5">Employee Actions</p>
               {[
                 { key: 'dashboard', label: 'My Dashboard', icon: LayoutDashboard },
-                { key: 'checkin', label: 'Safety Check-In', icon: ShieldCheck },
+                { key: 'checkin', label: 'Calamity Report', icon: ShieldAlert },
                 { key: 'alerts', label: 'Alerts Near Me', icon: AlertTriangle },
                 { key: 'aid', label: 'Aid Assistance', icon: HeartHandshake },
                 { key: 'profile', label: 'My Profile', icon: BookUser },
@@ -1534,8 +1834,8 @@ export default function App() {
                               <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
                                 <FileWarning className="w-6 h-6 text-blue-600" />
                               </div>
-                              <h3 className="mt-4 text-lg font-bold text-slate-900">File Incident Report</h3>
-                              <p className="text-slate-600 text-sm mt-2">Report a local calamity, tag yourself as a victim, and provide location details.</p>
+                              <h3 className="mt-4 text-lg font-bold text-slate-900">File Calamity Report</h3>
+                              <p className="text-slate-600 text-sm mt-2">Report a local calamity with an interactive map, self-tag as a victim, and submit for manager verification.</p>
                               <button
                                 onClick={() => setEmployeePortalPage('checkin')}
                                 className="mt-4 text-blue-600 font-semibold text-sm hover:text-blue-700 flex items-center gap-2"
@@ -1649,39 +1949,194 @@ export default function App() {
                 )}
 
                 {employeePortalPage === 'checkin' && (
-                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                    <div className="px-6 py-5 bg-[#001f4b] border-b border-[#00172f]">
-                      <p className="text-white font-black text-lg tracking-[0.06em]">Safety Check-In</p>
-                      <p className="text-slate-300 text-sm mt-1">Update your status quickly when conditions change.</p>
+                  <div className="space-y-6">
+                    {/* Header */}
+                    <div>
+                      <h1 className="text-3xl font-black text-slate-900">Calamity Report</h1>
+                      <p className="text-slate-600 text-sm mt-1">File a local calamity report and self-tag as a victim. Your report will be reviewed by your manager before it appears in the official Active Incidents list.</p>
                     </div>
-                    <div className="p-7 space-y-5">
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <button
-                          onClick={handleMarkMyselfSafe}
-                          className="rounded-3xl bg-emerald-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600"
-                        >
-                          I’m Safe
-                        </button>
-                        <button
-                          onClick={handleMarkMyselfNeedHelp}
-                          className="rounded-3xl bg-amber-500 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600"
-                        >
-                          Need Help
-                        </button>
-                        <button
-                          onClick={handleTagMyselfAsVictim}
-                          className="rounded-3xl bg-rose-600 px-5 py-5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
-                        >
-                          Emergency
-                        </button>
+
+                    {/* My Submitted Reports */}
+                    {pendingEmployeeReports.filter(r => r.employeeId === currentEmployee?.id).length > 0 && (
+                      <section className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
+                        <div className="px-6 py-4 bg-gradient-to-r from-[#001f4b] to-[#00255a] flex items-center justify-between">
+                          <div>
+                            <p className="text-white font-black text-base tracking-wide">My Submitted Reports</p>
+                            <p className="text-blue-300 text-xs mt-0.5">Track the status of your filed calamity reports</p>
+                          </div>
+                          <span className="bg-amber-400/20 border border-amber-400/40 text-amber-300 text-[11px] font-black px-3 py-1 rounded-full">
+                            {pendingEmployeeReports.filter(r => r.employeeId === currentEmployee?.id && r.status === 'Pending').length} Pending
+                          </span>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                          {pendingEmployeeReports.filter(r => r.employeeId === currentEmployee?.id).map(report => {
+                            const statusCfgMap = {
+                              Pending:  { bg: 'bg-amber-50 border-amber-200 text-amber-700', label: '⏳ Pending Verification' },
+                              Approved: { bg: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: '✅ Approved' },
+                              Rejected: { bg: 'bg-rose-50 border-rose-200 text-rose-700', label: '❌ Rejected' },
+                            };
+                            const statusCfg = statusCfgMap[report.status];
+                            const typeEmoji: Record<string, string> = { Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' };
+                            return (
+                              <div key={report.id} className="px-6 py-4 flex items-start gap-4">
+                                <span className="text-2xl shrink-0 mt-0.5">{typeEmoji[report.type] ?? '⚠️'}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-bold text-slate-800 text-sm">{report.incidentName}</p>
+                                    <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${statusCfg.bg}`}>
+                                      {statusCfg.label}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-500 text-xs mt-0.5">{report.locationLabel}</p>
+                                  <p className="text-slate-400 text-xs mt-1 font-mono">{report.timestamp}</p>
+                                  {report.status === 'Rejected' && (
+                                    <p className="text-rose-600 text-xs mt-2 font-medium">Your report was reviewed and rejected by the manager. You may file a new report if the situation persists.</p>
+                                  )}
+                                  {report.status === 'Pending' && (
+                                    <p className="text-amber-700 text-xs mt-2">Your report is being reviewed. Your safety status has been set to <strong>Need Help</strong> in the meantime.</p>
+                                  )}
+                                  {report.status === 'Approved' && (
+                                    <p className="text-emerald-700 text-xs mt-2">Your report has been verified and added to the official Active Incidents list.</p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    )}
+
+                    {/* Report Form */}
+                    <section className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
+                      <div className="px-6 py-5 bg-gradient-to-r from-[#001f4b] to-[#00255a] border-b border-[#00172f]">
+                        <p className="text-white font-black text-lg tracking-[0.06em]">File a Calamity Report</p>
+                        <p className="text-slate-300 text-sm mt-1">Describe the calamity, pin your location on the map, and submit for manager review.</p>
                       </div>
-                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-sm font-semibold text-slate-900">Current status</p>
-                        <p className="mt-2 text-3xl font-black text-slate-900">{currentEmployee?.status ?? 'Green'}</p>
-                        <p className="mt-2 text-sm text-slate-600">{employeePortalMessage || 'Choose a status to update your manager and response team.'}</p>
-                      </div>
-                    </div>
-                  </section>
+
+                      <form onSubmit={handleSubmitEmployeeCrisisReport} className="p-6 space-y-6">
+
+                        {/* Success / Error message */}
+                        {employeePortalMessage && (
+                          <div className={`rounded-xl px-4 py-3 text-sm font-medium border ${
+                            employeePortalMessage.includes('awaiting')
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                              : 'bg-rose-50 border-rose-200 text-rose-700'
+                          }`}>
+                            {employeePortalMessage}
+                            <button type="button" onClick={() => setEmployeePortalMessage('')} className="ml-2 opacity-60 hover:opacity-100">✕</button>
+                          </div>
+                        )}
+
+                        {/* Calamity Type */}
+                        <div>
+                          <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Calamity Type</label>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {(['Fire', 'Earthquake', 'Typhoon', 'Other'] as const).map(t => {
+                              const emoji: Record<string, string> = { Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' };
+                              return (
+                                <button type="button" key={t}
+                                  onClick={() => setEmployeeIncidentForm(prev => ({ ...prev, type: t }))}
+                                  className={`rounded-xl py-3 text-sm font-bold border-2 transition flex flex-col items-center gap-1 ${
+                                    employeeIncidentForm.type === t
+                                      ? 'bg-[#002060] border-[#002060] text-white shadow-md'
+                                      : 'bg-white border-slate-200 text-slate-700 hover:border-[#002060] hover:bg-blue-50'
+                                  }`}
+                                >
+                                  <span className="text-xl">{emoji[t]}</span>
+                                  {t}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Incident name */}
+                        <div>
+                          <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Incident Name <span className="text-slate-400 font-normal normal-case">(optional)</span></label>
+                          <input
+                            type="text"
+                            value={employeeIncidentForm.incidentName}
+                            onChange={e => setEmployeeIncidentForm(prev => ({ ...prev, incidentName: e.target.value }))}
+                            placeholder={`e.g. ${employeeIncidentForm.type} in Barangay San Roque`}
+                            className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#002060]/30 placeholder:text-slate-400 transition"
+                          />
+                        </div>
+
+                        {/* Map + geocode */}
+                        <div>
+                          <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Incident Location</label>
+                          <p className="text-xs text-slate-500 mb-3">Search for a place or click directly on the map to pin the incident location. Only your own marker is shown.</p>
+                          <div className="flex gap-2 mb-3">
+                            <input
+                              type="text"
+                              value={employeeIncidentForm.locationLabel}
+                              onChange={e => setEmployeeIncidentForm(prev => ({ ...prev, locationLabel: e.target.value, locationPinned: false }))}
+                              onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleEmpGeocode())}
+                              placeholder="Search location (e.g. Tondo, Manila)"
+                              className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#002060]/30 placeholder:text-slate-400 transition"
+                            />
+                            <button type="button" onClick={handleEmpGeocode} disabled={empIsGeocoding}
+                              className="px-4 py-2.5 bg-[#002060] hover:bg-[#003399] disabled:bg-slate-300 text-white rounded-xl text-sm font-bold transition flex items-center gap-2 shrink-0">
+                              {empIsGeocoding ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <MapPin className="w-4 h-4" />}
+                              {empIsGeocoding ? 'Searching…' : 'Search'}
+                            </button>
+                          </div>
+                          {empGeocodeError && <p className="text-rose-600 text-xs mb-2 font-medium">{empGeocodeError}</p>}
+                          {employeeIncidentForm.locationPinned && (
+                            <div className="flex items-center gap-2 mb-2 text-emerald-700 text-xs font-bold">
+                              <CheckCircle className="w-4 h-4" />
+                              Location pinned: {employeeIncidentForm.lat.toFixed(4)}°N, {employeeIncidentForm.lng.toFixed(4)}°E
+                            </div>
+                          )}
+                          <div
+                            ref={empCalamityMapRef}
+                            className="w-full rounded-2xl overflow-hidden border border-slate-200 shadow-sm"
+                            style={{ height: '340px', zIndex: 0 }}
+                          />
+                          <p className="text-xs text-slate-400 mt-1.5">Click anywhere on the map to pin the incident location.</p>
+                        </div>
+
+                        {/* Description */}
+                        <div>
+                          <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Description <span className="text-rose-500">*</span></label>
+                          <textarea
+                            rows={4}
+                            value={employeeIncidentForm.description}
+                            onChange={e => setEmployeeIncidentForm(prev => ({ ...prev, description: e.target.value }))}
+                            placeholder="Describe what happened, severity, and any immediate danger you are in..."
+                            className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#002060]/30 placeholder:text-slate-400 transition resize-none"
+                          />
+                        </div>
+
+                        {/* I am a victim */}
+                        <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+                          <input
+                            id="iAmVictim"
+                            type="checkbox"
+                            checked={employeeIncidentForm.iAmVictim}
+                            onChange={e => setEmployeeIncidentForm(prev => ({ ...prev, iAmVictim: e.target.checked }))}
+                            className="mt-0.5 w-4 h-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                          />
+                          <label htmlFor="iAmVictim" className="cursor-pointer">
+                            <p className="text-sm font-bold text-amber-800">I am tagging myself as a victim of this calamity</p>
+                            <p className="text-xs text-amber-700 mt-0.5">Checking this will set your safety status to <strong>Need Help</strong> until the manager approves or rejects your report.</p>
+                          </label>
+                        </div>
+
+                        {/* Submit */}
+                        <div className="flex items-center justify-between pt-2">
+                          <p className="text-xs text-slate-500">Your report will be sent to your manager for verification before appearing in Active Incidents.</p>
+                          <button
+                            type="submit"
+                            className="ml-4 shrink-0 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-black px-6 py-3 rounded-2xl text-sm transition flex items-center gap-2 shadow-md active:scale-95"
+                          >
+                            <ShieldAlert className="w-4 h-4" />
+                            Submit Report
+                          </button>
+                        </div>
+                      </form>
+                    </section>
+                  </div>
                 )}
 
                 {employeePortalPage === 'alerts' && (
@@ -2064,6 +2519,9 @@ export default function App() {
               <span className="flex-1 leading-tight">Active Incidents</span>
               {calamityReports.length > 0 && (
                 <span className="bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{calamityReports.length}</span>
+              )}
+              {pendingEmployeeReports.filter(r => r.status === 'Pending').length > 0 && (
+                <span className="bg-amber-400 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none animate-pulse" title="Pending employee reports">{pendingEmployeeReports.filter(r => r.status === 'Pending').length}</span>
               )}
             </button>
             <button onClick={() => setActivePage('safety')}
@@ -3076,6 +3534,67 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* Pending Employee Calamity Reports — Verification Queue */}
+            {pendingEmployeeReports.filter(r => r.status === 'Pending').length > 0 && (
+              <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl overflow-hidden shadow-sm">
+                <div className="px-5 py-3.5 bg-gradient-to-r from-amber-600 to-orange-500 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-xl">⏳</span>
+                    <div>
+                      <p className="text-white font-black text-sm tracking-wide">Awaiting Manager Verification</p>
+                      <p className="text-amber-100 text-xs mt-0.5">Employee self-reported calamity reports pending your review</p>
+                    </div>
+                  </div>
+                  <span className="bg-white/20 border border-white/30 text-white text-xs font-black px-3 py-1 rounded-full">
+                    {pendingEmployeeReports.filter(r => r.status === 'Pending').length} Pending
+                  </span>
+                </div>
+                <div className="divide-y divide-amber-100">
+                  {pendingEmployeeReports.filter(r => r.status === 'Pending').map(report => {
+                    const typeEmoji = { Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' }[report.type] ?? '⚠️';
+                    return (
+                      <div key={report.id} className="px-5 py-4 flex items-start gap-4 bg-white/60 hover:bg-white/90 transition">
+                        <span className="text-2xl shrink-0 mt-0.5">{typeEmoji}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-black text-slate-800 text-sm">{report.incidentName}</p>
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full border bg-amber-100 border-amber-300 text-amber-800">
+                              {report.type}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="w-4 h-4 rounded-full bg-[#002060] text-white text-[9px] font-black flex items-center justify-center shrink-0">{report.employeeAvatar}</span>
+                            <span className="text-xs text-slate-700 font-semibold">{report.employeeName}</span>
+                            <span className="text-slate-400 text-xs">·</span>
+                            <span className="text-slate-500 text-xs font-mono">{report.timestamp}</span>
+                          </div>
+                          <p className="text-slate-500 text-xs mt-1">📍 {report.locationLabel}</p>
+                          {report.description && (
+                            <p className="text-slate-600 text-xs mt-1.5 leading-relaxed italic">"{report.description}"</p>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-2 shrink-0 ml-2">
+                          <button
+                            onClick={() => handleApproveEmployeeReport(report.id)}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-lg transition flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm"
+                          >
+                            ✓ Approve
+                          </button>
+                          <button
+                            onClick={() => handleRejectEmployeeReport(report.id)}
+                            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-black rounded-lg transition flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm"
+                          >
+                            ✕ Reject
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
 
             {/* Status filter */}
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm px-4 py-3 flex items-center gap-3 flex-wrap">
