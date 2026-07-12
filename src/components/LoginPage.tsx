@@ -83,9 +83,6 @@ export default function LoginPage({ onLogin, error, isSubmitting, officialEmailH
                     required
                   />
                 </div>
-                {officialEmailHint ? (
-                  <p className="mt-2 text-xs font-medium text-slate-500">Using Supabase email: {officialEmailHint}</p>
-                ) : null}
               </label>
 
               <label className="block text-sm font-semibold text-slate-700">
