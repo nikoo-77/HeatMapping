@@ -1458,6 +1458,32 @@ export default function App() {
     });
   }, [currentEmployee, currentUser.username, currentUser.role, employees, isManagerUser, managerDummyDirectReports]);
 
+  // For managers, every employee query is scoped to direct reports only.
+  // This is presentation-layer scoping; real authorization is enforced server-side
+  // (server.ts filters by "Manager's Name" and rejects mismatched actions with 403).
+  const scopedEmployees = useMemo<Employee[]>(() => {
+    if (!isManagerUser) return employees;
+    return directReports;
+  }, [isManagerUser, directReports, employees]);
+
+  // Status counts derived from the manager-scoped set (team only, not org-wide).
+  const scopedStatusCounts = useMemo(() => {
+    let green = 0, red = 0;
+    scopedEmployees.forEach(emp => {
+      if (emp.status === 'Green') green++;
+      else if (emp.status === 'Red') red++;
+    });
+    return { green, red };
+  }, [scopedEmployees]);
+
+  // Managers may not access org analytics, hazard config, or aid approval surfaces.
+  React.useEffect(() => {
+    if (!isManagerUser) return;
+    if (['executive', 'risk-map', 'aid'].includes(activePage)) {
+      setActivePage('team-overview');
+    }
+  }, [isManagerUser, activePage]);
+
   useEffect(() => {
     if (currentEmployee) {
       setLocationUpdate(currentEmployee.address ?? '');
@@ -2365,6 +2391,8 @@ export default function App() {
     );
   }
 
+  const headerCounts = isManagerUser ? scopedStatusCounts : employeeStatusCounts;
+
   return (
     <div className="bg-[#f8fafc] text-slate-900 min-h-screen flex flex-col font-sans transition-colors duration-250">
       
@@ -2384,7 +2412,7 @@ export default function App() {
           <p className="text-xs text-slate-500 font-medium max-w-xl mt-1">
             {isManagerUser
               ? `Manager workspace for ${currentEmployee?.name ?? 'your team'}; direct report oversight and approval controls.`
-              : `Analyzing workforce and satellite footprints for ${employees.length} personnel across the Philippine Islands.`
+              : `Analyzing workforce and satellite footprints for ${scopedEmployees.length} personnel across the Philippine Islands.`
             }
           </p>
         </div>
@@ -2497,11 +2525,13 @@ export default function App() {
               <LayoutDashboard className={`w-4 h-4 shrink-0 ${activePage === 'dashboard' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
               <span className="flex-1 leading-tight">Overview Dashboard</span>
             </button>
+            {!isManagerUser && (
             <button onClick={() => setActivePage('executive')}
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'executive' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
               <TrendingUp className={`w-4 h-4 shrink-0 ${activePage === 'executive' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
               <span className="flex-1 leading-tight">Executive Dashboard</span>
             </button>
+            )}
             {isManagerUser ? (
               <button onClick={() => setActivePage('team-overview')}
                 className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'team-overview' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
@@ -2528,19 +2558,22 @@ export default function App() {
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'safety' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
               <ShieldCheck className={`w-4 h-4 shrink-0 ${activePage === 'safety' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
               <span className="flex-1 leading-tight">Employee Safety</span>
-              {employeeStatusCounts.red > 0 && (
-                <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{employeeStatusCounts.red}</span>
+              {headerCounts.red > 0 && (
+                <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{headerCounts.red}</span>
               )}
             </button>
+            {!isManagerUser && (
             <button onClick={() => setActivePage('risk-map')}
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'risk-map' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
               <Layers className={`w-4 h-4 shrink-0 ${activePage === 'risk-map' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
               <span className="flex-1 leading-tight">Risk Classification Map</span>
             </button>
+            )}
 
             {/* ── AID MANAGEMENT ── */}
             <div className="mx-1 my-2.5 border-t border-white/10" />
             <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mb-0.5">Aid Management</p>
+            {!isManagerUser && (
             <button onClick={() => setActivePage('aid')}
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'aid' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
               <HeartHandshake className={`w-4 h-4 shrink-0 ${activePage === 'aid' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
@@ -2549,6 +2582,7 @@ export default function App() {
                 <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{aidApplications.filter(a => a.status === 'Submitted').length}</span>
               )}
             </button>
+            )}
 
             {/* ── EMPLOYEES ── */}
             <div className="mx-1 my-2.5 border-t border-white/10" />
@@ -2578,10 +2612,10 @@ export default function App() {
                 </span>
               </div>
               <div className="flex items-center justify-between pt-1 border-t border-white/10">
-                <span className="text-[10px] text-blue-300/50 font-mono">{employees.length} FTE</span>
-                <span className="text-[10px] text-emerald-400/70 font-mono">
-                  {employeeStatusCounts.green} safe
-                </span>
+                <span className="text-[10px] text-blue-300/50 font-mono">{scopedEmployees.length} FTE</span>
+                 <span className="text-[10px] text-emerald-400/70 font-mono">
+                   {headerCounts.green} safe
+                 </span>
               </div>
             </div>
           </div>
@@ -2603,7 +2637,7 @@ export default function App() {
           <div className="bg-[#002060] px-4 py-2.5 border-b border-[#001848] flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-white font-extrabold text-sm tracking-wide">Location Filter</span>
-              <span className="text-blue-300 font-mono text-[10px] font-bold">{employees.length} FTE</span>
+               <span className="text-blue-300 font-mono text-[10px] font-bold">{scopedEmployees.length} FTE</span>
             </div>
             {/* Tab switcher */}
             <div className="flex bg-white/10 rounded-lg p-0.5 gap-0.5">
@@ -2638,7 +2672,7 @@ export default function App() {
                 setSelectedIslandGroup(null);
                 setSelectedRegion(null);
                 setSelectedCity(null);
-                pushLog(`Viewing all Philippine island groups (${employees.length} employees).`, 'info');
+                 pushLog(`Viewing all Philippine island groups (${scopedEmployees.length} employees).`, 'info');
               }}
               className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-colors cursor-pointer border-b border-slate-200 hover:bg-[#ebf1fc] ${
                 !selectedIslandGroup && !selectedRegion && !selectedCity
@@ -2647,7 +2681,7 @@ export default function App() {
               }`}
             >
               <span className="font-extrabold text-[#002060] text-sm">🇵🇭 Philippines (All)</span>
-              <strong className="font-black text-[#002060] text-base">{employees.length}</strong>
+               <strong className="font-black text-[#002060] text-base">{scopedEmployees.length}</strong>
             </button>
 
             {/* ══ BY REGION TAB ══ */}
@@ -2896,7 +2930,7 @@ export default function App() {
           {/* Panel footer */}
           <div className="bg-slate-50 p-3 border-t border-slate-200 text-[10px] font-mono text-slate-500 font-bold text-center flex flex-col gap-0.5">
             <span>DATABASE SYNCHRONIZED</span>
-            <span>Total Headcount: {employees.length} fte</span>
+            <span>Total Headcount: {scopedEmployees.length} fte</span>
             {(selectedRegion || selectedIslandGroup) && (
               <span className="text-[#002060] font-black">
                 {selectedCity
@@ -2956,7 +2990,7 @@ export default function App() {
           {/* Map Layer container */}
           <div className="flex-1 relative min-h-[400px]">
             <InteractiveMap
-              employees={visibleEmployees}
+              employees={isManagerUser ? directReports : visibleEmployees}
               epicenter={epicenter}
               selectedEmployee={selectedEmployee}
               onSelectEmployee={setSelectedEmployee}
@@ -3000,7 +3034,7 @@ export default function App() {
           
 {/* Employee Roll-Call Panel */}
            <EmployeeRollCall
-             employees={visibleEmployees}
+              employees={isManagerUser ? directReports : visibleEmployees}
              epicenter={epicenter}
              onSelectEmployee={setSelectedEmployee}
              selectedEmployee={selectedEmployee}
@@ -3088,7 +3122,10 @@ export default function App() {
 
       {/* ──────────── TEAM OVERVIEW PAGE ──────────── */}
       {activePage === 'team-overview' && (() => {
-        const reportCount = directReports.length;
+        const headcount = directReports.length;
+        const safeCount = directReports.filter((e) => e.status === 'Green').length;
+        const safePct = headcount > 0 ? Math.round((safeCount / headcount) * 100) : 0;
+        const pendingCheckIns = directReports.filter((e) => !e.contacted).length;
         return (
           <div className="flex-1 p-6 bg-[#f8fafc]">
             <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
@@ -3099,15 +3136,29 @@ export default function App() {
                   </h2>
                   <p className="text-xs text-slate-500 mt-1">Review direct report safety status and send quick check-ins from the manager portal.</p>
                 </div>
-                <div className="rounded-3xl bg-white border border-slate-200 px-4 py-3 shadow-sm">
-                  <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Direct Reports</p>
-                  <p className="text-3xl font-black text-[#002060]">{reportCount}</p>
+              </div>
+
+              {/* Team metrics — the only figures a manager is authorized to see */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="rounded-3xl bg-white border border-slate-200 px-5 py-4 shadow-sm">
+                  <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Team Headcount</p>
+                  <p className="text-3xl font-black text-[#002060]">{headcount}</p>
+                </div>
+                <div className="rounded-3xl bg-white border border-slate-200 px-5 py-4 shadow-sm">
+                  <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">% Safe</p>
+                  <p className="text-3xl font-black text-emerald-600">{safePct}%</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">{safeCount} confirmed safe</p>
+                </div>
+                <div className="rounded-3xl bg-white border border-slate-200 px-5 py-4 shadow-sm">
+                  <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Pending Check-Ins</p>
+                  <p className="text-3xl font-black text-amber-600">{pendingCheckIns}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">awaiting response</p>
                 </div>
               </div>
 
-              {reportCount === 0 ? (
+              {headcount === 0 ? (
                 <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-slate-500">
-                  No direct reports found for this manager.
+                  No team members assigned to you yet.
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -3138,9 +3189,11 @@ export default function App() {
 
       {/* ──────────── EMPLOYEE DIRECTORY PAGE ──────────── */}
       {activePage === 'directory' && (() => {
-        const departments = ['All Departments', ...Array.from(new Set(employees.map(e => e.department))).sort()];
+        // Managers only browse their direct reports (list query scoped to team).
+        const dirSource = isManagerUser ? directReports : employees;
+        const departments = ['All Departments', ...Array.from(new Set(dirSource.map(e => e.department))).sort()];
         const regionCounts = new Map<string, number>();
-        employees.forEach((e) => {
+        dirSource.forEach((e) => {
           const code = e.region === 'NEEDS_UPDATE'
             ? 'NEEDS_UPDATE'
             : (e.region ?? resolveEmployeeRegion({
@@ -3165,7 +3218,7 @@ export default function App() {
             province: e.address?.split(',').slice(-1)[0]?.trim(),
           });
 
-        const filtered = employees.filter(e => {
+        const filtered = dirSource.filter(e => {
           const q = dirSearch.toLowerCase();
           const empRegion = getEmpRegion(e);
           const matchSearch  = !q || e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q) || e.department.toLowerCase().includes(q);
@@ -3194,9 +3247,10 @@ export default function App() {
                     <BookUser className="w-5 h-5" /> Employee Directory
                   </h2>
                   <p className="text-xs text-slate-500 mt-1">
-                    Manage employee records and residential location data across {employees.length} personnel.
+                    Manage employee records and residential location data across {scopedEmployees.length} personnel.
                   </p>
                 </div>
+                {!isManagerUser && (
                 <button
                   onClick={() => setShowAddEmployeeModal(true)}
                   className="bg-[#002060] hover:bg-[#003399] text-white text-xs font-black px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition active:scale-95 shadow-sm"
@@ -3204,6 +3258,7 @@ export default function App() {
                   <Plus className="w-4 h-4" />
                   Add Employee
                 </button>
+                )}
               </div>
 
               {/* Toolbar */}
@@ -3289,7 +3344,7 @@ export default function App() {
 
                   {/* Record count */}
                   <span className="text-[10px] text-slate-400 font-mono ml-auto whitespace-nowrap">
-                    {filtered.length} of {employees.length} records
+                    {filtered.length} of {dirSource.length} records
                   </span>
                 </div>
 
@@ -3444,7 +3499,8 @@ export default function App() {
                             </div>
                           </td>
 
-                          {/* Actions */}
+                          {/* Actions (hidden from managers — user/role admin is CSR/Admin only) */}
+                          {!isManagerUser && (
                           <td className="px-5 py-3.5 text-right relative">
                             <button
                               type="button"
@@ -3477,6 +3533,7 @@ export default function App() {
                               </div>
                             )}
                           </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -3820,7 +3877,9 @@ export default function App() {
 
       {/* ──────────── EMPLOYEE SAFETY STATUS PAGE ──────────── */}
       {activePage === 'safety' && (() => {
-        const safetyFiltered = employees.filter(emp => {
+        // Managers only see their direct reports on the safety roll-call.
+        const safetySource = isManagerUser ? directReports : employees;
+        const safetyFiltered = safetySource.filter(emp => {
           const q = safetySearch.toLowerCase();
           const matchSearch = !q || emp.name.toLowerCase().includes(q) || (emp.department || '').toLowerCase().includes(q);
           const matchIsland = safetyIslandFilter === 'All' || emp.islandGroup === safetyIslandFilter;
@@ -3829,10 +3888,10 @@ export default function App() {
             : emp.status === safetyStatusFilter;
           return matchSearch && matchIsland && matchStatus;
         });
-        const safeCount   = employees.filter(e => e.status === 'Green').length;
-        const awaitCount  = employees.filter(e => e.status === 'Yellow').length;
-        const noSigCount  = employees.filter(e => e.status === 'Red').length;
-        const respRate    = employees.length > 0 ? Math.round(((safeCount + awaitCount) / employees.length) * 100) : 100;
+        const safeCount   = safetySource.filter(e => e.status === 'Green').length;
+        const awaitCount  = safetySource.filter(e => e.status === 'Yellow').length;
+        const noSigCount  = safetySource.filter(e => e.status === 'Red').length;
+        const respRate    = safetySource.length > 0 ? Math.round(((safeCount + awaitCount) / safetySource.length) * 100) : 100;
         return (
           <div className="flex-1 p-6 bg-[#f8fafc]">
             <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
@@ -3863,7 +3922,7 @@ export default function App() {
               {/* KPI Strip */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 {[
-                  { label: 'Total Personnel', value: employees.length, color: 'bg-white border-slate-200', textColor: 'text-slate-800', Icon: Users },
+                  { label: 'Total Personnel', value: safetySource.length, color: 'bg-white border-slate-200', textColor: 'text-slate-800', Icon: Users },
                   { label: 'Safe / Confirmed', value: safeCount, color: 'bg-emerald-50 border-emerald-200', textColor: 'text-emerald-700', Icon: CheckCircle },
                   { label: 'Awaiting Reply', value: awaitCount, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-700', Icon: Clock },
                   { label: 'No Signal / SOS', value: noSigCount, color: 'bg-rose-50 border-rose-200', textColor: 'text-rose-700', Icon: ShieldAlert },
@@ -3903,7 +3962,7 @@ export default function App() {
                       }`}>{l}</button>
                   ))}
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono ml-auto">{safetyFiltered.length} of {employees.length}</span>
+                <span className="text-[10px] text-slate-400 font-mono ml-auto">{safetyFiltered.length} of {safetySource.length}</span>
               </div>
 
               {/* Table */}

@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { resolveEmployeeRegion } from './lib/regionResolver.js';
 
 const app = express();
+app.use(express.json());
 const PORT = Number(process.env.PORT || 5000);
 
 // ── Supabase client (service-role key for unrestricted server-side access) ──
@@ -369,11 +370,100 @@ async function loadEmployees(): Promise<Employee[]> {
   return employees;
 }
 
+// ── In-memory cache of loaded employees (service-role key bypasses Supabase RLS) ──
+let allEmployees: Employee[] = [];
+
+// Resolve a manager's employee id from their name (used for id-based matching).
+function resolveManagerId(managerName: string, managerId?: string): string | undefined {
+  if (managerId) return managerId;
+  const found = allEmployees.find(
+    (e) => e.name.toLowerCase() === managerName.trim().toLowerCase()
+  );
+  return found?.id;
+}
+
+// Authorization boundary: a manager may only act on employees that report to them.
+// Returns null when allowed, or an error descriptor when forbidden / not found.
+function enforceManagerAccess(
+  targetId: string,
+  managerName: string,
+  managerId?: string
+): { status: number; message: string } | null {
+  const target = allEmployees.find((e) => e.id === targetId);
+  if (!target) return { status: 404, message: 'Employee not found.' };
+
+  const mgrId = resolveManagerId(managerName, managerId);
+  const nameMatch =
+    target.managerName?.trim().toLowerCase() === managerName.trim().toLowerCase();
+  const idMatch = !!mgrId && target.managerId === mgrId;
+  if (!nameMatch && !idMatch) {
+    return {
+      status: 403,
+      message: 'Forbidden: the requested employee is not under your management.',
+    };
+  }
+  return null;
+}
+
+function readManagerFromRequest(req: express.Request): { name: string; id?: string } {
+  const name =
+    (req.query.manager as string) ||
+    (req.header('x-manager-name') as string) ||
+    '';
+  const id =
+    (req.query.managerId as string) ||
+    (req.header('x-manager-id') as string) ||
+    undefined;
+  return { name: name.trim(), id };
+}
+
 // ── Bootstrap server ──────────────────────────────────────────────────────────
 loadEmployees()
   .then((employees) => {
-    app.get('/api/employees', (_req, res) => {
-      res.json(employees);
+    allEmployees = employees;
+
+    // Manager-scoped read. When a manager is supplied, only their direct reports
+    // are returned (server-side authorization — never trust the client filter).
+    app.get('/api/employees', (req, res) => {
+      const { name } = readManagerFromRequest(req);
+      if (name) {
+        const mgrId = resolveManagerId(name);
+        const scoped = allEmployees.filter((emp) => {
+          const nameMatch =
+            emp.managerName?.trim().toLowerCase() === name.toLowerCase();
+          const idMatch = !!mgrId && emp.managerId === mgrId;
+          return emp.id !== mgrId && (nameMatch || idMatch);
+        });
+        return res.json(scoped);
+      }
+      res.json(allEmployees);
+    });
+
+    // Manager-scoped check-in (write). Rejects with 403 if target isn't a direct report.
+    app.post('/api/employees/:id/check-in', (req, res) => {
+      const { name, id } = readManagerFromRequest(req);
+      if (!name) return res.status(401).json({ message: 'Manager identity required.' });
+      const denied = enforceManagerAccess(req.params.id, name, id);
+      if (denied) return res.status(denied.status).json({ message: denied.message });
+      res.json({ message: 'Check-in dispatched.', employeeId: req.params.id });
+    });
+
+    // Manager-scoped follow-up (write).
+    app.post('/api/employees/:id/follow-up', (req, res) => {
+      const { name, id } = readManagerFromRequest(req);
+      if (!name) return res.status(401).json({ message: 'Manager identity required.' });
+      const denied = enforceManagerAccess(req.params.id, name, id);
+      if (denied) return res.status(denied.status).json({ message: denied.message });
+      res.json({ message: 'Follow-up sent.', employeeId: req.params.id });
+    });
+
+    // Manager-scoped detail/update (write).
+    app.patch('/api/employees/:id', (req, res) => {
+      const { name, id } = readManagerFromRequest(req);
+      if (!name) return res.status(401).json({ message: 'Manager identity required.' });
+      const denied = enforceManagerAccess(req.params.id, name, id);
+      if (denied) return res.status(denied.status).json({ message: denied.message });
+      res.json({ message: 'Employee updated.', employeeId: req.params.id });
     });
 
     const startServer = (port: number) => {
