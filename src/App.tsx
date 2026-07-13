@@ -14,6 +14,134 @@ import {
   HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap, Layers
 } from 'lucide-react';
 
+// ── Government Calamity Links Footer ─────────────────────────────────────────
+const GOV_SITES = [
+  { name: 'PHIVOLCS', full: 'Philippine Institute of Volcanology and Seismology', url: 'https://www.phivolcs.dost.gov.ph', color: '#c0392b', tag: 'Volcano & Earthquake' },
+  { name: 'PAGASA', full: 'Philippine Atmospheric, Geophysical & Astronomical Services Administration', url: 'https://www.pagasa.dost.gov.ph', color: '#1565c0', tag: 'Weather & Typhoon' },
+  { name: 'BFP', full: 'Bureau of Fire Protection', url: 'https://bfp.gov.ph', color: '#d84315', tag: 'Fire Emergency' },
+  { name: 'NDRRMC', full: 'National Disaster Risk Reduction and Management Council', url: 'https://ndrrmc.gov.ph', color: '#00695c', tag: 'Disaster Response' },
+  { name: 'OCD', full: 'Office of Civil Defense', url: 'https://www.ocd.gov.ph', color: '#283593', tag: 'Civil Defense' },
+  { name: 'PNP', full: 'Philippine National Police', url: 'https://pnp.gov.ph', color: '#1a237e', tag: 'Law & Order' },
+  { name: 'AFP', full: 'Armed Forces of the Philippines', url: 'https://www.afp.mil.ph', color: '#2e7d32', tag: 'Armed Forces' },
+  { name: 'DOH', full: 'Department of Health – Emergency', url: 'https://doh.gov.ph', color: '#6a1b9a', tag: 'Health Emergency' },
+  { name: 'DSWD', full: 'Department of Social Welfare and Development', url: 'https://www.dswd.gov.ph', color: '#f57f17', tag: 'Social Welfare' },
+  { name: 'PCG', full: 'Philippine Coast Guard', url: 'https://www.coastguard.gov.ph', color: '#0277bd', tag: 'Maritime Safety' },
+  { name: 'DPWH', full: 'Dept. of Public Works & Highways', url: 'https://www.dpwh.gov.ph', color: '#4e342e', tag: 'Infrastructure' },
+  { name: 'DOTr', full: 'Department of Transportation', url: 'https://www.dotr.gov.ph', color: '#37474f', tag: 'Transport Alerts' },
+];
+
+function GovernmentLinksFooter() {
+  const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
+  // Duplicate for seamless loop
+  const items = [...GOV_SITES, ...GOV_SITES];
+
+  return (
+    <footer
+      style={{
+        background: 'linear-gradient(90deg, #001440 0%, #002060 40%, #001848 100%)',
+        borderTop: '2px solid #0a3080',
+        overflow: 'hidden',
+        position: 'relative',
+        zIndex: 10,
+      }}
+    >
+      {/* Top label bar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 20px 4px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e', animation: 'pulse 1.5s infinite' }} />
+          <span style={{ color: '#94a3b8', fontSize: 9, fontWeight: 900, letterSpacing: '0.2em', textTransform: 'uppercase', fontFamily: 'monospace' }}>Philippine Disaster Monitoring Portals</span>
+        </div>
+        <span style={{ color: '#475569', fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.15em' }}>LIVE GOVERNMENT RESOURCES</span>
+      </div>
+
+      {/* Scrolling ticker */}
+      <div style={{ position: 'relative', padding: '5px 0' }}>
+        {/* Fade edges */}
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 60, background: 'linear-gradient(to right, #001440, transparent)', zIndex: 2, pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 60, background: 'linear-gradient(to left, #001848, transparent)', zIndex: 2, pointerEvents: 'none' }} />
+
+        <div
+          className="gov-ticker"
+          style={{ display: 'flex', gap: 0, alignItems: 'center' }}
+        >
+          {items.map((site, idx) => (
+            <a
+              key={idx}
+              href={site.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onMouseEnter={() => setHoveredIdx(idx)}
+              onMouseLeave={() => setHoveredIdx(null)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 14px',
+                margin: '0 2px',
+                borderRadius: 20,
+                textDecoration: 'none',
+                flexShrink: 0,
+                cursor: 'pointer',
+                border: `1px solid ${hoveredIdx === idx ? site.color : 'rgba(255,255,255,0.08)'}`,
+                background: hoveredIdx === idx ? `${site.color}22` : 'rgba(255,255,255,0.04)',
+                transition: 'all 0.2s ease',
+                transform: hoveredIdx === idx ? 'translateY(-1px) scale(1.03)' : 'translateY(0) scale(1)',
+                boxShadow: hoveredIdx === idx ? `0 4px 14px ${site.color}44` : 'none',
+              }}
+            >
+              <span style={{ color: hoveredIdx === idx ? '#fff' : '#cbd5e1', fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                {site.name}
+              </span>
+              <span style={{
+                fontSize: 9,
+                background: `${site.color}33`,
+                color: hoveredIdx === idx ? '#fff' : '#94a3b8',
+                border: `1px solid ${site.color}55`,
+                borderRadius: 4,
+                padding: '2px 6px',
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                whiteSpace: 'nowrap',
+                fontFamily: 'sans-serif',
+              }}>
+                {site.tag}
+              </span>
+            </a>
+          ))}
+        </div>
+      </div>
+
+      {/* Bottom bar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 20px 6px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+        <span style={{ color: '#334155', fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase' }}>WORKFORCE GEOGRAPHIC PROFILES PORTAL • SAVILLS &amp; INNODATA JOINT INFRASTRUCTURE MAP</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#475569', fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.12em' }}>
+          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 5px #f59e0b' }} />
+          DATABASE METRICS: OPERATIONAL
+        </span>
+      </div>
+
+      <style>{`
+        @keyframes gov-scroll {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .gov-ticker {
+          animation: gov-scroll 40s linear infinite;
+          will-change: transform;
+        }
+        .gov-ticker:hover {
+          animation-play-state: paused;
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
+    </footer>
+  );
+}
+
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -2387,6 +2515,8 @@ export default function App() {
             </main>
           </div>
         </div>
+        {/* Government Links Footer — Employee Portal */}
+        <GovernmentLinksFooter />
       </div>
     );
   }
@@ -3106,15 +3236,6 @@ export default function App() {
         </section>
 
       </main>
-
-      {/* Footer inside dashboard */}
-      <footer className="bg-[#002060] border-t border-[#001848] py-4 px-6 text-[11px] font-mono text-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 shadow-inner uppercase font-bold mt-auto">
-        <span>WORKFORCE GEOGRAPHIC PROFILES PORTAL • SAVILLS &amp; INNODATA JOINT INFRASTRUCTURE MAP</span>
-        <span className="flex items-center gap-1.5 tracking-wider text-slate-300">
-          <Activity className="w-4 h-4 text-amber-400 animate-pulse" />
-          <span>DATABASE METRICS: OPERATIONAL</span>
-        </span>
-      </footer>
 
       {/* ──────────── END DASHBOARD PAGE ──────────── */}
       </>
@@ -5053,6 +5174,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Government Links Footer — visible on all dashboard pages */}
+      <GovernmentLinksFooter />
 
     </div>
   );
