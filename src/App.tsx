@@ -2368,55 +2368,44 @@ export default function App() {
                   </section>
                 )}
 
-                {employeePortalPage === 'profile' && (
-                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                    <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f]">
-                      <p className="text-white font-black text-lg tracking-[0.06em]">My Profile</p>
-                      <p className="text-slate-300 text-sm mt-1">Review your contact details and keep your location current.</p>
-                    </div>
-                    <div className="p-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Name</p>
-                        <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
-                      </div>
-                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Department</p>
-                        <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.department ?? '—'}</p>
-                      </div>
-                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Carrier</p>
-                        <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.carrier ?? 'N/A'}</p>
-                      </div>
-                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Contact</p>
-                        <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.phone ?? 'Not provided'}</p>
-                      </div>
-                    </div>
-                    <div className="mt-6 grid gap-4 md:grid-cols-2">
-                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-sm font-semibold text-slate-900">Home address</p>
-                        <p className="mt-2 text-sm text-slate-600">{currentEmployee?.address ?? 'No address on file.'}</p>
-                      </div>
-                      <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-sm font-semibold text-slate-900">Update my location</p>
-                        <div className="mt-3 flex flex-col gap-3">
-                          <input
-                            value={locationUpdate}
-                            onChange={(event) => setLocationUpdate(event.target.value)}
-                            placeholder="Enter updated address"
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-                          />
-                          <button
-                            onClick={handleUpdateMyLocation}
-                            className="rounded-2xl bg-[#002060] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#001848]"
-                          >
-                            Save location
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-                )}
+                 {employeePortalPage === 'profile' && (
+                   <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                     <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f]">
+                       <p className="text-white font-black text-lg tracking-[0.06em]">My Profile</p>
+                       <p className="text-slate-300 text-sm mt-1">Review your personal and contact details.</p>
+                     </div>
+                     <div className="p-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Name</p>
+                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
+                       </div>
+                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Department</p>
+                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.department ?? '—'}</p>
+                       </div>
+                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">User ID</p>
+                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.userId ?? currentEmployee?.id ?? '—'}</p>
+                       </div>
+                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Contact Number</p>
+                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.contactNumber ?? currentEmployee?.phone ?? 'Not provided'}</p>
+                       </div>
+                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">GCash Number</p>
+                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.gcashNumber ?? 'Not provided'}</p>
+                       </div>
+                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Bank Account Details</p>
+                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.bankAccountDetails ?? 'Not provided'}</p>
+                       </div>
+                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 md:col-span-2 xl:col-span-4">
+                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Primary Address</p>
+                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.address ?? 'No address on file.'}</p>
+                       </div>
+                     </div>
+                   </section>
+                 )}
 
                 {employeePortalPage === 'contacts' && (
                   <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">

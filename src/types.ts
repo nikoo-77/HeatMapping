@@ -42,7 +42,11 @@ export interface Employee {
   lastResponseRecv?: string;
   safetyMessage?: string;
   avatar: string;
-  address?: string; // Home address
+  userId?: string;
+  contactNumber?: string;
+  gcashNumber?: string;
+  bankAccountDetails?: string;
+  address?: string; // Primary address
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
   region?: string;         // Philippine admin region code e.g. 'NCR', 'VII', 'XI'
   accessRole?: 'employee' | 'manager';
