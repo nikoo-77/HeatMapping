@@ -332,6 +332,18 @@ export default function App() {
   });
   const [locationUpdate, setLocationUpdate] = useState('');
 
+  // ── Edit Profile modal ───────────────────────────────────────────────────
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [editProfileForm, setEditProfileForm] = useState({
+    contactNumber: '',
+    gcashNumber: '',
+    bankAccountDetails: '',
+    address: '',
+  });
+  const [editProfileSaving, setEditProfileSaving] = useState(false);
+  const [editProfileError, setEditProfileError] = useState('');
+  const [editProfileSuccess, setEditProfileSuccess] = useState(false);
+
   // ── Page navigation ─────────────────────────────────────────────────────
   const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive' | 'risk-map' | 'team-overview'>('dashboard');
   // Employee Directory search/filter state
@@ -1834,6 +1846,53 @@ export default function App() {
     pushLog(`${currentEmployee.name} updated their location.`, 'success');
   };
 
+  // ── Edit Profile save handler ──────────────────────────────────────────────
+  const handleSaveProfile = async () => {
+    if (!currentEmployee) return;
+    setEditProfileSaving(true);
+    setEditProfileError('');
+    setEditProfileSuccess(false);
+    try {
+      const res = await fetch(`/api/employees/${currentEmployee.id}/profile`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactNumber: editProfileForm.contactNumber || undefined,
+          gcashNumber: editProfileForm.gcashNumber || undefined,
+          bankAccountDetails: editProfileForm.bankAccountDetails || undefined,
+          address: editProfileForm.address || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message ?? `Server error ${res.status}`);
+      }
+      // Update local state so the profile view reflects the changes immediately
+      setEmployees((prev) =>
+        prev.map((emp) =>
+          emp.id === currentEmployee.id
+            ? {
+                ...emp,
+                contactNumber: editProfileForm.contactNumber || emp.contactNumber,
+                gcashNumber: editProfileForm.gcashNumber || emp.gcashNumber,
+                bankAccountDetails: editProfileForm.bankAccountDetails || emp.bankAccountDetails,
+                address: editProfileForm.address || emp.address,
+              }
+            : emp
+        )
+      );
+      setEditProfileSuccess(true);
+      setTimeout(() => {
+        setShowEditProfileModal(false);
+        setEditProfileSuccess(false);
+      }, 1500);
+    } catch (err: any) {
+      setEditProfileError(err.message ?? 'Failed to save changes. Please try again.');
+    } finally {
+      setEditProfileSaving(false);
+    }
+  };
+
   const handleExportCalamityReport = (
     report: typeof calamityReports[number],
     affectedEmps: Employee[]
@@ -2365,43 +2424,132 @@ export default function App() {
                 )}
 
                  {employeePortalPage === 'profile' && (
-                   <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                     <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f]">
-                       <p className="text-white font-black text-lg tracking-[0.06em]">My Profile</p>
-                       <p className="text-slate-300 text-sm mt-1">Review your personal and contact details.</p>
-                     </div>
-                     <div className="p-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Name</p>
-                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
-                       </div>
-                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Department</p>
-                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.department ?? '—'}</p>
-                       </div>
-                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">User ID</p>
-                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.userId ?? currentEmployee?.id ?? '—'}</p>
-                       </div>
-                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Contact Number</p>
-                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.contactNumber ?? currentEmployee?.phone ?? 'Not provided'}</p>
-                       </div>
-                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">GCash Number</p>
-                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.gcashNumber ?? 'Not provided'}</p>
-                       </div>
-                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Bank Account Details</p>
-                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.bankAccountDetails ?? 'Not provided'}</p>
-                       </div>
-                       <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 md:col-span-2 xl:col-span-4">
-                         <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Primary Address</p>
-                         <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.address ?? 'No address on file.'}</p>
-                       </div>
-                     </div>
-                   </section>
-                 )}
+                   <>
+                    <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                      <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f] flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-white font-black text-lg tracking-[0.06em]">My Profile</p>
+                          <p className="text-slate-300 text-sm mt-1">Review your personal and contact details.</p>
+                        </div>
+                        <button
+                          id="edit-profile-btn"
+                          onClick={() => {
+                            setEditProfileForm({
+                              contactNumber: currentEmployee?.contactNumber ?? currentEmployee?.phone ?? '',
+                              gcashNumber: currentEmployee?.gcashNumber ?? '',
+                              bankAccountDetails: currentEmployee?.bankAccountDetails ?? '',
+                              address: currentEmployee?.address ?? '',
+                            });
+                            setEditProfileError('');
+                            setEditProfileSuccess(false);
+                            setShowEditProfileModal(true);
+                          }}
+                          className="flex items-center gap-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2 text-sm font-semibold text-white transition-all duration-150 active:scale-95"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                          </svg>
+                          Edit Profile
+                        </button>
+                      </div>
+                      <div className="p-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Name</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Department</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.department ?? 'â€”'}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">User ID</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.userId ?? currentEmployee?.id ?? 'â€”'}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Contact Number</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.contactNumber ?? currentEmployee?.phone ?? 'Not provided'}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">GCash Number</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.gcashNumber ?? 'Not provided'}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Bank Account Details</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.bankAccountDetails ?? 'Not provided'}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 md:col-span-2 xl:col-span-4">
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Primary Address</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.address ?? 'No address on file.'}</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    {/* Edit Profile Modal */}
+                    {showEditProfileModal && (
+                      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,15,40,0.55)', backdropFilter: 'blur(6px)' }}>
+                        <div className="relative w-full max-w-lg bg-white rounded-[32px] shadow-[0_32px_80px_rgba(0,20,60,0.22)] overflow-hidden">
+                          <div className="bg-[#001f4b] px-7 py-6 flex items-center justify-between">
+                            <div>
+                              <p className="text-white font-black text-base tracking-[0.06em]">Edit Profile</p>
+                              <p className="text-slate-300 text-xs mt-0.5">Update your contact and address information.</p>
+                            </div>
+                            <button id="close-edit-profile-btn" onClick={() => setShowEditProfileModal(false)} className="rounded-full bg-white/10 hover:bg-white/20 p-2 transition-colors" aria-label="Close">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                              </svg>
+                            </button>
+                          </div>
+                          <div className="p-7 space-y-5">
+                            <div className="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-full bg-[#001f4b] flex items-center justify-center text-white text-sm font-black shrink-0">{currentEmployee?.avatar ?? '?'}</div>
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
+                                <p className="text-xs text-slate-500">{currentEmployee?.department ?? ''} Â· ID: {currentEmployee?.id ?? 'â€”'}</p>
+                              </div>
+                            </div>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <label className="block">
+                                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 block mb-1.5">Contact Number</span>
+                                <input id="edit-contact-number" type="tel" value={editProfileForm.contactNumber} onChange={(e) => setEditProfileForm((prev) => ({ ...prev, contactNumber: e.target.value }))} placeholder="e.g. 09XX-XXX-XXXX" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-[#001f4b] transition-all" />
+                              </label>
+                              <label className="block">
+                                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 block mb-1.5">GCash Number</span>
+                                <input id="edit-gcash-number" type="tel" value={editProfileForm.gcashNumber} onChange={(e) => setEditProfileForm((prev) => ({ ...prev, gcashNumber: e.target.value }))} placeholder="e.g. 09XX-XXX-XXXX" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-[#001f4b] transition-all" />
+                              </label>
+                            </div>
+                            <label className="block">
+                              <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 block mb-1.5">Bank Account Details</span>
+                              <input id="edit-bank-account" type="text" value={editProfileForm.bankAccountDetails} onChange={(e) => setEditProfileForm((prev) => ({ ...prev, bankAccountDetails: e.target.value }))} placeholder="e.g. BDO 0012-3456-7890" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-[#001f4b] transition-all" />
+                            </label>
+                            <label className="block">
+                              <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 block mb-1.5">Primary Address</span>
+                              <textarea id="edit-address" rows={3} value={editProfileForm.address} onChange={(e) => setEditProfileForm((prev) => ({ ...prev, address: e.target.value }))} placeholder="House/Unit No., Street, Barangay, City, Province" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-[#001f4b] transition-all resize-none" />
+                            </label>
+                            {editProfileError && (
+                              <div className="rounded-2xl bg-red-50 border border-red-200 px-4 py-3 flex items-center gap-2 text-sm text-red-700">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                {editProfileError}
+                              </div>
+                            )}
+                            {editProfileSuccess && (
+                              <div className="rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-center gap-2 text-sm text-emerald-700 font-semibold">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                Profile updated successfully!
+                              </div>
+                            )}
+                          </div>
+                          <div className="px-7 pb-7 flex items-center justify-end gap-3">
+                            <button id="cancel-edit-profile-btn" onClick={() => setShowEditProfileModal(false)} disabled={editProfileSaving} className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50">Cancel</button>
+                            <button id="save-edit-profile-btn" onClick={handleSaveProfile} disabled={editProfileSaving || editProfileSuccess} className="rounded-xl bg-[#001f4b] hover:bg-[#00172f] px-6 py-2.5 text-sm font-semibold text-white transition-all active:scale-95 disabled:opacity-60 flex items-center gap-2">
+                              {editProfileSaving ? (<><svg className="w-4 h-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>Savingâ€¦</>) : editProfileSuccess ? (<><svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Saved!</>) : 'Save Changes'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                   </>
+                  )}
 
                 {employeePortalPage === 'contacts' && (
                   <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">

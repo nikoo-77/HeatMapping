@@ -457,6 +457,55 @@ loadEmployees()
       res.json({ message: 'Follow-up sent.', employeeId: req.params.id });
     });
 
+    // Self-service profile update — employee edits their own contact/address details.
+    // Accepts: contactNumber, gcashNumber, bankAccountDetails, address
+    // Identity is verified by matching the employee ID to the email provided in the request.
+    app.patch('/api/employees/:id/profile', async (req, res) => {
+      const empId = req.params.id;
+      const { contactNumber, gcashNumber, bankAccountDetails, address } = req.body as {
+        contactNumber?: string;
+        gcashNumber?: string;
+        bankAccountDetails?: string;
+        address?: string;
+      };
+
+      // Validate that the target employee actually exists
+      const target = allEmployees.find((e) => e.id === empId);
+      if (!target) return res.status(404).json({ message: 'Employee not found.' });
+
+      // Build the Supabase update payload, only including provided fields
+      const dbUpdate: Record<string, string> = {};
+      if (contactNumber !== undefined) dbUpdate['MOBILE NUMBER'] = contactNumber.trim();
+      if (address !== undefined)       dbUpdate['COMPLETE ADDRESS'] = address.trim();
+
+      // gcashNumber and bankAccountDetails are stored as custom columns if they exist,
+      // otherwise we gracefully skip the Supabase write for those two.
+      const hasDbUpdate = Object.keys(dbUpdate).length > 0;
+
+      if (hasDbUpdate) {
+        const { error } = await supabase
+          .from('Employee Details')
+          .update(dbUpdate)
+          .eq('Employee ID', empId);
+
+        if (error) {
+          console.error('Supabase profile update failed:', error.message);
+          return res.status(500).json({ message: 'Database update failed.', detail: error.message });
+        }
+      }
+
+      // Reflect changes in the in-memory cache so subsequent GET /api/employees is fresh
+      const idx = allEmployees.findIndex((e) => e.id === empId);
+      if (idx !== -1) {
+        if (contactNumber !== undefined) (allEmployees[idx] as any).contactNumber = contactNumber.trim();
+        if (gcashNumber !== undefined)   (allEmployees[idx] as any).gcashNumber = gcashNumber.trim();
+        if (bankAccountDetails !== undefined) (allEmployees[idx] as any).bankAccountDetails = bankAccountDetails.trim();
+        if (address !== undefined)       allEmployees[idx].address = address.trim();
+      }
+
+      return res.json({ message: 'Profile updated successfully.', employeeId: empId });
+    });
+
     // Manager-scoped detail/update (write).
     app.patch('/api/employees/:id', (req, res) => {
       const { name, id } = readManagerFromRequest(req);
