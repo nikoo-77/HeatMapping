@@ -7,10 +7,9 @@ export interface AidApplication {
   incidentId: string;
   incidentName: string;
   aidType: 'Cash' | 'Relief Goods' | 'Both';
-  amountPhp?: number;
   description: string;
   status: 'Submitted' | 'Under Review' | 'Approved' | 'Disbursed' | 'Rejected';
-  priority: 'Normal' | 'Urgent';
+  damageType: 'Major' | 'Minor';
   filedDate: string;
   approver?: string;
   approvedDate?: string;

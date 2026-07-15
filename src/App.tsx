@@ -308,9 +308,8 @@ export default function App() {
   const [officialAccountEmails, setOfficialAccountEmails] = useState<string[]>([]);
   const [employeeAidForm, setEmployeeAidForm] = useState({
     aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
-    amountPhp: '',
+    damageType: 'Major' as 'Major' | 'Minor',
     description: '',
-    priority: 'Normal' as 'Normal' | 'Urgent',
     incidentName: '',
   });
   const [employeeIncidentForm, setEmployeeIncidentForm] = useState({
@@ -387,21 +386,20 @@ export default function App() {
     employeeName: '',
     incidentName: '',
     aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
-    amountPhp: '',
+    damageType: 'Major' as 'Major' | 'Minor',
     description: '',
-    priority: 'Normal' as 'Normal' | 'Urgent',
     department: 'AI Operations',
     islandGroup: 'Luzon' as 'Luzon' | 'Visayas' | 'Mindanao',
   });
   const [aidApplications, setAidApplications] = useState<AidApplication[]>([
-    { id: 'AID-001', employeeId: '', employeeName: 'Maria Santos', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Both', amountPhp: 15000, description: 'Roof heavily damaged, household items lost. Family of 4.', status: 'Disbursed', priority: 'Urgent', filedDate: 'Jun 25, 2026', approver: 'HR Manager', approvedDate: 'Jun 26, 2026', department: 'AI Operations', islandGroup: 'Luzon' },
-    { id: 'AID-002', employeeId: '', employeeName: 'Juan dela Cruz', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Cash', amountPhp: 10000, description: 'Floodwater reached chest level. Evacuated to barangay shelter.', status: 'Approved', priority: 'Urgent', filedDate: 'Jun 25, 2026', approver: 'HR Manager', approvedDate: 'Jun 27, 2026', department: 'Data Engineering', islandGroup: 'Luzon' },
-    { id: 'AID-003', employeeId: '', employeeName: 'Ana Reyes', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Relief Goods', description: 'No food and water for 2 days. Family still at evacuation center.', status: 'Under Review', priority: 'Normal', filedDate: 'Jun 26, 2026', department: 'QC & Audit', islandGroup: 'Luzon' },
-    { id: 'AID-004', employeeId: '', employeeName: 'Carlos Mendoza', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', amountPhp: 8000, description: 'Personal belongings destroyed by fire. Temporary shelter needed.', status: 'Submitted', priority: 'Urgent', filedDate: 'Jun 28, 2026', department: 'GIS & Remote Sensing', islandGroup: 'Visayas' },
-    { id: 'AID-005', employeeId: '', employeeName: 'Liza Bautista', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Both', amountPhp: 12000, description: 'Minor burns, lost work laptop and clothing. Single parent.', status: 'Under Review', priority: 'Urgent', filedDate: 'Jun 28, 2026', department: 'Valuation Services', islandGroup: 'Visayas' },
-    { id: 'AID-006', employeeId: '', employeeName: 'Roberto Garcia', incidentId: '', incidentName: 'Earthquake — Davao', aidType: 'Cash', amountPhp: 5000, description: 'Wall cracks. House declared structurally unsafe by DPWH.', status: 'Approved', priority: 'Normal', filedDate: 'Jun 27, 2026', approver: 'Team Manager', approvedDate: 'Jun 28, 2026', department: 'Field Services', islandGroup: 'Mindanao' },
-    { id: 'AID-007', employeeId: '', employeeName: 'Patricia Flores', incidentId: '', incidentName: 'Earthquake — Davao', aidType: 'Relief Goods', description: 'Water and power outage for 3 days. Needs basic supplies.', status: 'Disbursed', priority: 'Normal', filedDate: 'Jun 27, 2026', approver: 'HR Manager', approvedDate: 'Jun 28, 2026', department: 'Solutions Group', islandGroup: 'Mindanao' },
-    { id: 'AID-008', employeeId: '', employeeName: 'Michael Torres', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', amountPhp: 10000, description: 'Renting unit in affected building. All personal items lost.', status: 'Submitted', priority: 'Normal', filedDate: 'Jun 29, 2026', department: 'Infrastructure Management', islandGroup: 'Visayas' },
+    { id: 'AID-001', employeeId: '', employeeName: 'Maria Santos', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Cash', description: 'Roof heavily damaged, household items lost. Family of 4.', status: 'Disbursed', damageType: 'Major', filedDate: 'Jun 25, 2026', approver: 'HR Manager', approvedDate: 'Jun 26, 2026', department: 'AI Operations', islandGroup: 'Luzon' },
+    { id: 'AID-002', employeeId: '', employeeName: 'Juan dela Cruz', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Cash', description: 'Floodwater reached chest level. Evacuated to barangay shelter.', status: 'Approved', damageType: 'Major', filedDate: 'Jun 25, 2026', approver: 'HR Manager', approvedDate: 'Jun 27, 2026', department: 'Data Engineering', islandGroup: 'Luzon' },
+    { id: 'AID-003', employeeId: '', employeeName: 'Ana Reyes', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Relief Goods', description: 'No food and water for 2 days. Family still at evacuation center.', status: 'Under Review', damageType: 'Minor', filedDate: 'Jun 26, 2026', department: 'QC & Audit', islandGroup: 'Luzon' },
+    { id: 'AID-004', employeeId: '', employeeName: 'Carlos Mendoza', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', description: 'Personal belongings destroyed by fire. Temporary shelter needed.', status: 'Submitted', damageType: 'Major', filedDate: 'Jun 28, 2026', department: 'GIS & Remote Sensing', islandGroup: 'Visayas' },
+    { id: 'AID-005', employeeId: '', employeeName: 'Liza Bautista', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', description: 'Minor burns, lost work laptop and clothing. Single parent.', status: 'Under Review', damageType: 'Minor', filedDate: 'Jun 28, 2026', department: 'Valuation Services', islandGroup: 'Visayas' },
+    { id: 'AID-006', employeeId: '', employeeName: 'Roberto Garcia', incidentId: '', incidentName: 'Earthquake — Davao', aidType: 'Cash', description: 'Wall cracks. House declared structurally unsafe by DPWH.', status: 'Approved', damageType: 'Major', filedDate: 'Jun 27, 2026', approver: 'Team Manager', approvedDate: 'Jun 28, 2026', department: 'Field Services', islandGroup: 'Mindanao' },
+    { id: 'AID-007', employeeId: '', employeeName: 'Patricia Flores', incidentId: '', incidentName: 'Earthquake — Davao', aidType: 'Relief Goods', description: 'Water and power outage for 3 days. Needs basic supplies.', status: 'Disbursed', damageType: 'Minor', filedDate: 'Jun 27, 2026', approver: 'HR Manager', approvedDate: 'Jun 28, 2026', department: 'Solutions Group', islandGroup: 'Mindanao' },
+    { id: 'AID-008', employeeId: '', employeeName: 'Michael Torres', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', description: 'Renting unit in affected building. All personal items lost.', status: 'Submitted', damageType: 'Major', filedDate: 'Jun 29, 2026', department: 'Infrastructure Management', islandGroup: 'Visayas' },
   ]);
 
   // State for Map View mode: 'island' or 'metro'
@@ -1686,9 +1684,8 @@ export default function App() {
       return;
     }
 
-    const amount = Number(employeeAidForm.amountPhp);
-    if (!employeeAidForm.description.trim() || Number.isNaN(amount) || amount <= 0) {
-      setEmployeePortalMessage('Please enter a valid aid request amount and description.');
+    if (!employeeAidForm.description.trim()) {
+      setEmployeePortalMessage('Please describe your aid request before submitting.');
       return;
     }
 
@@ -1699,17 +1696,16 @@ export default function App() {
       incidentId: '',
       incidentName: employeeAidForm.incidentName.trim() || 'Self-Reported Local Calamity',
       aidType: employeeAidForm.aidType,
-      amountPhp: amount,
       description: employeeAidForm.description.trim(),
       status: 'Submitted',
-      priority: employeeAidForm.priority,
+      damageType: employeeAidForm.damageType,
       filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
       department: currentEmployee.department,
       islandGroup: currentEmployee.islandGroup ?? 'Luzon',
     };
 
     setAidApplications((prev) => [newAidApplication, ...prev]);
-    setEmployeeAidForm({ aidType: 'Cash', amountPhp: '', description: '', priority: 'Normal', incidentName: '' });
+    setEmployeeAidForm({ aidType: 'Cash', damageType: 'Major', description: '', incidentName: '' });
     setEmployeePortalMessage('Your aid request has been submitted for review.');
     pushLog(`Employee aid request submitted by ${currentEmployee.name}.`, 'success');
   };
@@ -2472,51 +2468,40 @@ export default function App() {
                             >
                               <option value="Cash">Cash</option>
                               <option value="Relief Goods">Relief Goods</option>
-                              <option value="Both">Both</option>
+                              <option value="Both">Cash and Relief Goods</option>
                             </select>
-                          </label>
-                          <label className="text-sm font-semibold text-slate-700">
-                            <span className="mb-2 block">Priority</span>
-                            <select
-                              value={employeeAidForm.priority}
-                              onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, priority: event.target.value as 'Normal' | 'Urgent' }))}
-                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                            >
-                              <option value="Normal">Normal</option>
-                              <option value="Urgent">Urgent</option>
-                            </select>
-                          </label>
-                        </div>
-                        <label className="block text-sm font-semibold text-slate-700">
-                          <span className="mb-2 block">Incident / event name</span>
-                          <input
-                            value={employeeAidForm.incidentName}
-                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
-                            placeholder="e.g. Typhoon Carina"
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                          />
-                        </label>
-                        <label className="block text-sm font-semibold text-slate-700">
-                          <span className="mb-2 block">Amount (PHP)</span>
-                          <input
-                            type="number"
-                            min="1"
-                            value={employeeAidForm.amountPhp}
-                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, amountPhp: event.target.value }))}
-                            placeholder="5000"
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                          />
-                        </label>
-                        <label className="block text-sm font-semibold text-slate-700">
-                          <span className="mb-2 block">Why do you need aid?</span>
-                          <textarea
-                            value={employeeAidForm.description}
-                            onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, description: event.target.value }))}
-                            rows={4}
-                            placeholder="Describe your condition or the support you need."
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                          />
-                        </label>
+                         </label>
+                         <label className="text-sm font-semibold text-slate-700">
+                           <span className="mb-2 block">Type of Damage</span>
+                           <select
+                             value={employeeAidForm.damageType}
+                             onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, damageType: event.target.value as 'Major' | 'Minor' }))}
+                             className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                           >
+                             <option value="Major">Major</option>
+                             <option value="Minor">Minor</option>
+                           </select>
+                         </label>
+                       </div>
+                       <label className="block text-sm font-semibold text-slate-700">
+                         <span className="mb-2 block">Incident / event name</span>
+                         <input
+                           value={employeeAidForm.incidentName}
+                           onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
+                           placeholder="e.g. Typhoon Carina"
+                           className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                         />
+                       </label>
+                       <label className="block text-sm font-semibold text-slate-700">
+                         <span className="mb-2 block">Why do you need aid?</span>
+                         <textarea
+                           value={employeeAidForm.description}
+                           onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, description: event.target.value }))}
+                           rows={4}
+                           placeholder="Describe your condition or the support you need."
+                           className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                         />
+                       </label>
                         <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
                           Submit aid request
                         </button>
@@ -2539,7 +2524,7 @@ export default function App() {
                                   {application.status}
                                 </span>
                               </div>
-                              <p className="mt-3 text-sm text-slate-500">PHP {application.amountPhp?.toLocaleString() ?? '0'} · {application.aidType}</p>
+                              <p className="mt-3 text-sm text-slate-500">{application.aidType === 'Both' ? 'Cash and Relief Goods' : application.aidType} · {application.damageType}</p>
                             </div>
                           ))
                         )}
@@ -4296,9 +4281,9 @@ export default function App() {
           'Rejected':     { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
         };
         const filteredAid = aidApplications.filter(a => aidStatusFilter === 'All' || a.status === aidStatusFilter);
-        const totalPhp    = aidApplications.filter(a => a.status === 'Disbursed' || a.status === 'Approved').reduce((s, a) => s + (a.amountPhp || 0), 0);
         const pendingCnt  = aidApplications.filter(a => a.status === 'Submitted' || a.status === 'Under Review').length;
         const approvedCnt = aidApplications.filter(a => a.status === 'Approved' || a.status === 'Disbursed').length;
+        const majorDamageCnt = aidApplications.filter(a => a.damageType === 'Major').length;
         return (
           <div className="flex-1 p-6 bg-[#f8fafc]">
             <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
@@ -4323,7 +4308,7 @@ export default function App() {
                   { label: 'Total Applications', value: aidApplications.length, color: 'bg-white border-slate-200', textColor: 'text-slate-800' },
                   { label: 'Pending Review', value: pendingCnt, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-700' },
                   { label: 'Approved / Disbursed', value: approvedCnt, color: 'bg-emerald-50 border-emerald-200', textColor: 'text-emerald-700' },
-                  { label: 'Total Aid Value (PHP)', value: `₱${totalPhp.toLocaleString()}`, color: 'bg-blue-50 border-blue-200', textColor: 'text-blue-700' },
+                  { label: 'Major Damage Cases', value: majorDamageCnt, color: 'bg-rose-50 border-rose-200', textColor: 'text-rose-700' },
                 ].map(({ label, value, color, textColor }) => (
                   <div key={label} className={`${color} border rounded-xl p-4 flex flex-col gap-1`}>
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
@@ -4362,20 +4347,19 @@ export default function App() {
               {/* Table */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
                 <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-[#002060] text-white text-[10px] uppercase tracking-widest">
-                      <th className="text-left px-4 py-3 font-black">Case ID</th>
-                      <th className="text-left px-4 py-3 font-black">Employee</th>
-                      <th className="text-left px-4 py-3 font-black">Incident</th>
-                      <th className="text-left px-4 py-3 font-black">Aid Type</th>
-                      <th className="text-left px-4 py-3 font-black">Amount</th>
-                      <th className="text-left px-4 py-3 font-black">Priority</th>
-                      <th className="text-left px-4 py-3 font-black">Filed Date</th>
-                      <th className="text-center px-4 py-3 font-black">Status</th>
-                      <th className="text-left px-4 py-3 font-black">Approver</th>
-                      {isManagerUser && <th className="text-left px-4 py-3 font-black">Actions</th>}
-                    </tr>
-                  </thead>
+                   <thead>
+                     <tr className="bg-[#002060] text-white text-[10px] uppercase tracking-widest">
+                       <th className="text-left px-4 py-3 font-black">Case ID</th>
+                       <th className="text-left px-4 py-3 font-black">Employee</th>
+                       <th className="text-left px-4 py-3 font-black">Incident</th>
+                       <th className="text-left px-4 py-3 font-black">Aid Type</th>
+                       <th className="text-left px-4 py-3 font-black">Type of Damage</th>
+                       <th className="text-left px-4 py-3 font-black">Filed Date</th>
+                       <th className="text-center px-4 py-3 font-black">Status</th>
+                       <th className="text-left px-4 py-3 font-black">Approver</th>
+                       {isManagerUser && <th className="text-left px-4 py-3 font-black">Actions</th>}
+                     </tr>
+                   </thead>
                   <tbody>
                     {filteredAid.length === 0
                       ? <tr><td colSpan={9} className="text-center py-16 text-slate-400 text-sm">No applications match your filter.</td></tr>
@@ -4394,17 +4378,16 @@ export default function App() {
                                 <span className="text-slate-700 font-medium block truncate text-[11px]">{app.incidentName}</span>
                               </td>
                               <td className="px-4 py-3">
-                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                                  app.aidType === 'Cash' ? 'bg-blue-50 border-blue-200 text-blue-700' :
-                                  app.aidType === 'Relief Goods' ? 'bg-amber-50 border-amber-200 text-amber-700' :
-                                  'bg-purple-50 border-purple-200 text-purple-700'
-                                }`}>{app.aidType}</span>
+                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                   app.aidType === 'Cash' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                                   app.aidType === 'Relief Goods' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                                   'bg-purple-50 border-purple-200 text-purple-700'
+                                 }`}>{app.aidType === 'Both' ? 'Cash and Relief Goods' : app.aidType}</span>
                               </td>
-                              <td className="px-4 py-3 font-black text-slate-800">{app.amountPhp ? `₱${app.amountPhp.toLocaleString()}` : '—'}</td>
                               <td className="px-4 py-3">
                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                                  app.priority === 'Urgent' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-50 border-slate-200 text-slate-600'
-                                }`}>{app.priority}</span>
+                                  app.damageType === 'Major' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-50 border-slate-200 text-slate-600'
+                                }`}>{app.damageType}</span>
                               </td>
                               <td className="px-4 py-3 text-slate-500 font-mono text-[10px]">{app.filedDate}</td>
                               <td className="px-4 py-3 text-center">
@@ -4456,8 +4439,8 @@ export default function App() {
         const exAwaitCount   = employees.filter(e => e.status === 'Yellow').length;
         const exNoSigCount   = employees.filter(e => e.status === 'Red').length;
         const exRespRate     = employees.length > 0 ? Math.round(((exSafeCount + exAwaitCount) / employees.length) * 100) : 100;
-        const exDisbursed    = aidApplications.filter(a => a.status === 'Disbursed').reduce((s, a) => s + (a.amountPhp || 0), 0);
-        const exApproved     = aidApplications.filter(a => a.status === 'Approved').reduce((s, a) => s + (a.amountPhp || 0), 0);
+        const exDisbursed    = aidApplications.filter(a => a.status === 'Disbursed').length;
+        const exApproved     = aidApplications.filter(a => a.status === 'Approved').length;
         const islandBreakdown = (['Luzon', 'Visayas', 'Mindanao'] as const).map(ig => {
           const emps  = employees.filter(e => e.islandGroup === ig);
           const safe  = emps.filter(e => e.status === 'Green');
@@ -4465,11 +4448,12 @@ export default function App() {
           const colorKey = ig === 'Luzon' ? 'emerald' : ig === 'Visayas' ? 'blue' : 'amber';
           return { name: ig, total: emps.length, impacted, safe: safe.length, safeRate: emps.length > 0 ? Math.round((safe.length / emps.length) * 100) : 100, colorKey };
         });
-        const incidentAidMap: Record<string, { submitted: number; approved: number; total: number }> = {};
+        const incidentAidMap: Record<string, { submitted: number; approved: number; majorDamage: number }> = {};
         aidApplications.forEach(a => {
-          if (!incidentAidMap[a.incidentName]) incidentAidMap[a.incidentName] = { submitted: 0, approved: 0, total: 0 };
+          if (!incidentAidMap[a.incidentName]) incidentAidMap[a.incidentName] = { submitted: 0, approved: 0, majorDamage: 0 };
           incidentAidMap[a.incidentName].submitted++;
-          if (a.status === 'Approved' || a.status === 'Disbursed') { incidentAidMap[a.incidentName].approved++; incidentAidMap[a.incidentName].total += (a.amountPhp || 0); }
+          if (a.status === 'Approved' || a.status === 'Disbursed') { incidentAidMap[a.incidentName].approved++; }
+          if (a.damageType === 'Major') { incidentAidMap[a.incidentName].majorDamage++; }
         });
         // SVG donut helpers
         const donutTotal = exSafeCount + exAwaitCount + exNoSigCount || 1;
@@ -4505,7 +4489,7 @@ export default function App() {
                   { label: 'Active Incidents', value: calamityReports.length, sub: simulationActive ? '1 currently active' : 'No active alert', grad: 'from-[#002060] to-[#0055cc]', Icon: Siren },
                   { label: 'Employees Impacted', value: totalImpacted, sub: `of ${employees.length} total personnel`, grad: 'from-rose-600 to-rose-500', Icon: Users },
                   { label: 'Response Rate', value: `${exRespRate}%`, sub: `${exSafeCount} confirmed safe`, grad: 'from-emerald-700 to-emerald-500', Icon: ShieldCheck },
-                  { label: 'Aid Disbursed (PHP)', value: `₱${exDisbursed.toLocaleString()}`, sub: `₱${exApproved.toLocaleString()} pending`, grad: 'from-amber-600 to-amber-500', Icon: DollarSign },
+                  { label: 'Aid Disbursed', value: exDisbursed, sub: `${exApproved} approved`, grad: 'from-amber-600 to-amber-500', Icon: DollarSign },
                 ].map(({ label, value, sub, grad, Icon }) => (
                   <div key={label} className={`bg-gradient-to-br ${grad} rounded-2xl p-5 text-white shadow-lg`}>
                     <div className="flex items-center justify-between mb-3">
@@ -4601,24 +4585,24 @@ export default function App() {
                 </div>
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="bg-[#f0f4ff] text-[#002060] text-[10px] uppercase tracking-widest">
-                      <th className="text-left px-5 py-2.5 font-black">Incident</th>
-                      <th className="text-center px-5 py-2.5 font-black">Applications</th>
-                      <th className="text-center px-5 py-2.5 font-black">Approved</th>
-                      <th className="text-right px-5 py-2.5 font-black">Total Aid (PHP)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(incidentAidMap).map(([name, data], idx) => (
-                      <tr key={name} className={`border-t border-slate-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-                        <td className="px-5 py-3 font-semibold text-slate-700">{name}</td>
-                        <td className="px-5 py-3 text-center font-bold text-slate-700">{data.submitted}</td>
-                        <td className="px-5 py-3 text-center"><span className="text-emerald-700 font-black">{data.approved}</span></td>
-                        <td className="px-5 py-3 text-right font-black text-[#002060]">₱{data.total.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                    {Object.keys(incidentAidMap).length === 0 && (
-                      <tr><td colSpan={4} className="text-center py-10 text-slate-400">No aid applications filed yet.</td></tr>
+                     <tr className="bg-[#f0f4ff] text-[#002060] text-[10px] uppercase tracking-widest">
+                       <th className="text-left px-5 py-2.5 font-black">Incident</th>
+                       <th className="text-center px-5 py-2.5 font-black">Applications</th>
+                       <th className="text-center px-5 py-2.5 font-black">Approved</th>
+                       <th className="text-center px-5 py-2.5 font-black">Major Damage</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {Object.entries(incidentAidMap).map(([name, data], idx) => (
+                       <tr key={name} className={`border-t border-slate-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                         <td className="px-5 py-3 font-semibold text-slate-700">{name}</td>
+                         <td className="px-5 py-3 text-center font-bold text-slate-700">{data.submitted}</td>
+                         <td className="px-5 py-3 text-center"><span className="text-emerald-700 font-black">{data.approved}</span></td>
+                         <td className="px-5 py-3 text-center font-black text-rose-700">{data.majorDamage}</td>
+                       </tr>
+                     ))}
+                     {Object.keys(incidentAidMap).length === 0 && (
+                       <tr><td colSpan={4} className="text-center py-10 text-slate-400">No aid applications filed yet.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -5156,17 +5140,16 @@ export default function App() {
                   incidentId: '',
                   incidentName: aidForm.incidentName || 'General Crisis Aid',
                   aidType: aidForm.aidType,
-                  amountPhp: aidForm.amountPhp ? parseFloat(aidForm.amountPhp) : undefined,
                   description: aidForm.description.trim(),
                   status: 'Submitted',
-                  priority: aidForm.priority,
+                  damageType: aidForm.damageType,
                   filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
                   department: aidForm.department,
                   islandGroup: aidForm.islandGroup,
                 };
                 setAidApplications(prev => [newApp, ...prev]);
                 setShowAidModal(false);
-                setAidForm({ employeeName: '', incidentName: '', aidType: 'Cash', amountPhp: '', description: '', priority: 'Normal', department: 'AI Operations', islandGroup: 'Luzon' });
+                setAidForm({ employeeName: '', incidentName: '', aidType: 'Cash', damageType: 'Major', description: '', department: 'AI Operations', islandGroup: 'Luzon' });
                 pushLog(`📋 Aid Application filed: ${newApp.id} for ${newApp.employeeName} — ${newApp.aidType} · ${newApp.incidentName}`, 'success');
               }}
               className="p-6 flex flex-col gap-4"
@@ -5198,36 +5181,28 @@ export default function App() {
               {/* Aid Type */}
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Aid Type *</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['Cash', 'Relief Goods', 'Both'] as const).map(t => (
-                    <button key={t} type="button" onClick={() => setAidForm(p => ({ ...p, aidType: t }))}
-                      className={`py-2 px-3 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
-                        aidForm.aidType === t ? 'border-[#003399] bg-blue-50 text-[#002060] ring-1 ring-blue-300' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
-                      }`}>{t}</button>
-                  ))}
-                </div>
+                 <div className="grid grid-cols-3 gap-2">
+                   {(['Cash', 'Relief Goods', 'Both'] as const).map(t => (
+                     <button key={t} type="button" onClick={() => setAidForm(p => ({ ...p, aidType: t }))}
+                       className={`py-2 px-3 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
+                         aidForm.aidType === t ? 'border-[#003399] bg-blue-50 text-[#002060] ring-1 ring-blue-300' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                       }`}>{t === 'Both' ? 'Cash and Relief Goods' : t}</button>
+                   ))}
+                 </div>
               </div>
 
-              {/* Amount + Priority */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Amount (PHP)</label>
-                  <input type="number" min="0" placeholder="e.g. 10000"
-                    value={aidForm.amountPhp} onChange={e => setAidForm(p => ({ ...p, amountPhp: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Priority</label>
-                  <div className="flex gap-2">
-                    {(['Normal', 'Urgent'] as const).map(p => (
-                      <button key={p} type="button" onClick={() => setAidForm(prev => ({ ...prev, priority: p }))}
-                        className={`flex-1 py-2 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
-                          aidForm.priority === p
-                            ? p === 'Urgent' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-[#003399] bg-blue-50 text-[#002060]'
-                            : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
-                        }`}>{p}</button>
-                    ))}
-                  </div>
+              {/* Type of Damage */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Type of Damage</label>
+                <div className="flex gap-2">
+                  {(['Major', 'Minor'] as const).map(p => (
+                    <button key={p} type="button" onClick={() => setAidForm(prev => ({ ...prev, damageType: p }))}
+                      className={`flex-1 py-2 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
+                        aidForm.damageType === p
+                          ? p === 'Major' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-[#003399] bg-blue-50 text-[#002060]'
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                      }`}>{p}</button>
+                  ))}
                 </div>
               </div>
 
