@@ -194,7 +194,8 @@ type PendingEmployeeReportRecord = {
   lat: number;
   lng: number;
   description: string;
-  status: 'Pending' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'ManagerApproved' | 'Approved' | 'Rejected';
+  routedTo: string;
 };
 
 type IncidentSessionSnapshot = {
@@ -228,7 +229,14 @@ function readCalamityReportsFromStorage(): CalamityReportRecord[] {
 
 function readPendingReportsFromStorage(): PendingEmployeeReportRecord[] {
   const parsed = readJsonStorage<unknown>(INCIDENT_STORAGE_KEYS.pendingReports, []);
-  return Array.isArray(parsed) ? (parsed as PendingEmployeeReportRecord[]) : [];
+  const reports = Array.isArray(parsed) ? (parsed as PendingEmployeeReportRecord[]) : [];
+  return reports.map(r => ({ ...r, routedTo: r.routedTo ?? '' }));
+}
+
+function getManagerForEmployee(emp: Employee, allEmployees: Employee[]): string {
+  if (emp.managerId) return emp.managerId;
+  const manager = allEmployees.find(e => e.accessRole === 'manager' || e.team === 'Manager');
+  return manager?.id ?? 'manager-dummy';
 }
 
 function readResolvedReportsFromStorage(): Record<string, boolean> {
@@ -1261,6 +1269,7 @@ export default function App() {
     if (!employeeIncidentForm.description.trim()) { setEmployeePortalMessage('Please describe the calamity before submitting.'); return; }
     const incidentName = employeeIncidentForm.incidentName.trim() ||
       (employeeIncidentForm.type + ' — ' + (employeeIncidentForm.locationLabel.trim() || 'My Location'));
+    const routedTo = getManagerForEmployee(currentEmployee, employees);
     const pendingReport = {
       id: 'EMP-RPT-' + Date.now(),
       employeeId: currentEmployee.id,
@@ -1274,6 +1283,7 @@ export default function App() {
       lng: employeeIncidentForm.lng,
       description: employeeIncidentForm.description.trim(),
       status: 'Pending' as const,
+      routedTo,
     };
     setPendingEmployeeReports(prev => [pendingReport, ...prev]);
     if (employeeIncidentForm.iAmVictim) {
@@ -1284,12 +1294,41 @@ export default function App() {
     setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '', lat: 0, lng: 0, locationPinned: false, iAmVictim: true });
     if (empCalamityLeafletRef.current) { empCalamityLeafletRef.current.remove(); empCalamityLeafletRef.current = null; empCalamityMarkerRef.current = null; }
     setEmployeePortalMessage('Your calamity report has been submitted and is awaiting manager verification. Your status has been set to "Need Help" until approved.');
-    pushLog('PENDING REPORT: ' + currentEmployee.name + ' filed a self-reported calamity (' + pendingReport.type + '). Awaiting manager approval.', 'warn');
+    pushLog('PENDING REPORT: ' + currentEmployee.name + ' filed a self-reported calamity (' + pendingReport.type + '). Routed to manager for verification.', 'warn');
   };
 
   const handleApproveEmployeeReport = (reportId: string) => {
     const report = pendingEmployeeReports.find(r => r.id === reportId);
     if (!report) return;
+    if (currentUser.username !== 'manager' && report.routedTo !== currentEmployee?.id) {
+      pushLog('ACCESS DENIED: You are not the assigned manager for this report.', 'err');
+      return;
+    }
+    setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'ManagerApproved' as const } : r));
+    pushLog('MANAGER APPROVED: Calamity report by ' + report.employeeName + ' verified. Forwarded to CSR/Admin for final review.', 'success');
+  };
+
+  const handleRejectEmployeeReport = (reportId: string) => {
+    const report = pendingEmployeeReports.find(r => r.id === reportId);
+    if (!report) return;
+    if (currentUser.username !== 'manager' && report.routedTo !== currentEmployee?.id) {
+      pushLog('ACCESS DENIED: You are not the assigned manager for this report.', 'err');
+      return;
+    }
+    setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'Rejected' as const } : r));
+    setEmployees(prev => prev.map(emp =>
+      emp.id === report.employeeId ? { ...emp, status: 'Green' as SafetyStatus } : emp
+    ));
+    pushLog('MANAGER REJECTED: Calamity report by ' + report.employeeName + ' was rejected.', 'warn');
+  };
+
+  const handleCsrAdminApproveReport = (reportId: string) => {
+    const report = pendingEmployeeReports.find(r => r.id === reportId);
+    if (!report) return;
+    if (isManagerUser) {
+      pushLog('ACCESS DENIED: CSR/Admin action required. Managers cannot approve at this stage.', 'err');
+      return;
+    }
     const newReport = {
       id: 'APPROVED-' + reportId,
       timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
@@ -1300,17 +1339,21 @@ export default function App() {
     setCalamityReports(prev => [newReport, ...prev]);
     setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'Approved' as const } : r));
     setSimulationActive(true);
-    pushLog('MANAGER APPROVED: Calamity report by ' + report.employeeName + ' verified and added to Active Incidents.', 'success');
+    pushLog('CSR/ADMIN APPROVED: Calamity report by ' + report.employeeName + ' added to Active Incidents.', 'success');
   };
 
-  const handleRejectEmployeeReport = (reportId: string) => {
+  const handleCsrAdminRejectReport = (reportId: string) => {
     const report = pendingEmployeeReports.find(r => r.id === reportId);
     if (!report) return;
+    if (isManagerUser) {
+      pushLog('ACCESS DENIED: CSR/Admin action required. Managers cannot reject at this stage.', 'err');
+      return;
+    }
     setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'Rejected' as const } : r));
     setEmployees(prev => prev.map(emp =>
       emp.id === report.employeeId ? { ...emp, status: 'Green' as SafetyStatus } : emp
     ));
-    pushLog('MANAGER REJECTED: Calamity report by ' + report.employeeName + ' was rejected.', 'warn');
+    pushLog('CSR/ADMIN REJECTED: Calamity report by ' + report.employeeName + ' was rejected after manager verification.', 'warn');
   };
 
   const handleDispatchRescue = (employeeId: string) => {
@@ -2125,7 +2168,8 @@ export default function App() {
                         <div className="divide-y divide-slate-100">
                           {pendingEmployeeReports.filter(r => r.employeeId === currentEmployee?.id).map(report => {
                             const statusCfgMap = {
-                              Pending:  { bg: 'bg-amber-50 border-amber-200 text-amber-700', label: '⏳ Pending Verification' },
+                              Pending:  { bg: 'bg-amber-50 border-amber-200 text-amber-700', label: '⏳ Pending Manager Review' },
+                              ManagerApproved: { bg: 'bg-blue-50 border-blue-200 text-blue-700', label: '📋 Manager Approved — Pending CSR/Admin Review' },
                               Approved: { bg: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: '✅ Approved' },
                               Rejected: { bg: 'bg-rose-50 border-rose-200 text-rose-700', label: '❌ Rejected' },
                             };
@@ -2147,7 +2191,10 @@ export default function App() {
                                     <p className="text-rose-600 text-xs mt-2 font-medium">Your report was reviewed and rejected by the manager. You may file a new report if the situation persists.</p>
                                   )}
                                   {report.status === 'Pending' && (
-                                    <p className="text-amber-700 text-xs mt-2">Your report is being reviewed. Your safety status has been set to <strong>Need Help</strong> in the meantime.</p>
+                                    <p className="text-amber-700 text-xs mt-2">Your report is being reviewed by your manager. Your safety status has been set to <strong>Need Help</strong> in the meantime.</p>
+                                  )}
+                                  {report.status === 'ManagerApproved' && (
+                                    <p className="text-blue-700 text-xs mt-2">Your manager has verified your report. It is now pending final review by CSR/Admin.</p>
                                   )}
                                   {report.status === 'Approved' && (
                                     <p className="text-emerald-700 text-xs mt-2">Your report has been verified and added to the official Active Incidents list.</p>
@@ -2680,8 +2727,11 @@ export default function App() {
               {calamityReports.length > 0 && (
                 <span className="bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{calamityReports.length}</span>
               )}
-              {pendingEmployeeReports.filter(r => r.status === 'Pending').length > 0 && (
-                <span className="bg-amber-400 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none animate-pulse" title="Pending employee reports">{pendingEmployeeReports.filter(r => r.status === 'Pending').length}</span>
+              {isManagerUser && pendingEmployeeReports.filter(r => r.status === 'Pending' && (currentUser.username === 'manager' || r.routedTo === currentEmployee?.id || !r.routedTo)).length > 0 && (
+                <span className="bg-amber-400 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none animate-pulse" title="Pending employee reports">{pendingEmployeeReports.filter(r => r.status === 'Pending' && (currentUser.username === 'manager' || r.routedTo === currentEmployee?.id || !r.routedTo)).length}</span>
+              )}
+              {!isManagerUser && pendingEmployeeReports.filter(r => r.status === 'ManagerApproved').length > 0 && (
+                <span className="bg-blue-400 text-blue-900 text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none animate-pulse" title="Manager-verified reports awaiting final review">{pendingEmployeeReports.filter(r => r.status === 'ManagerApproved').length}</span>
               )}
             </button>
             <button onClick={() => setActivePage('safety')}
@@ -3713,23 +3763,23 @@ export default function App() {
               ))}
             </div>
 
-            {/* Pending Employee Calamity Reports — Verification Queue */}
-            {pendingEmployeeReports.filter(r => r.status === 'Pending').length > 0 && (
+            {/* Manager Verification Queue */}
+            {isManagerUser && pendingEmployeeReports.filter(r => r.status === 'Pending' && (currentUser.username === 'manager' || r.routedTo === currentEmployee?.id || !r.routedTo)).length > 0 && (
               <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl overflow-hidden shadow-sm">
                 <div className="px-5 py-3.5 bg-gradient-to-r from-amber-600 to-orange-500 flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
                     <span className="text-xl">⏳</span>
                     <div>
-                      <p className="text-white font-black text-sm tracking-wide">Awaiting Manager Verification</p>
-                      <p className="text-amber-100 text-xs mt-0.5">Employee self-reported calamity reports pending your review</p>
+                      <p className="text-white font-black text-sm tracking-wide">Manager Verification Queue</p>
+                      <p className="text-amber-100 text-xs mt-0.5">Employee self-reported calamity reports assigned to you for review</p>
                     </div>
                   </div>
                   <span className="bg-white/20 border border-white/30 text-white text-xs font-black px-3 py-1 rounded-full">
-                    {pendingEmployeeReports.filter(r => r.status === 'Pending').length} Pending
+                    {pendingEmployeeReports.filter(r => r.status === 'Pending' && (currentUser.username === 'manager' || r.routedTo === currentEmployee?.id || !r.routedTo)).length} Pending
                   </span>
                 </div>
                 <div className="divide-y divide-amber-100">
-                  {pendingEmployeeReports.filter(r => r.status === 'Pending').map(report => {
+                  {pendingEmployeeReports.filter(r => r.status === 'Pending' && (currentUser.username === 'manager' || r.routedTo === currentEmployee?.id || !r.routedTo)).map(report => {
                     const typeEmoji = { Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' }[report.type] ?? '⚠️';
                     return (
                       <div key={report.id} className="px-5 py-4 flex items-start gap-4 bg-white/60 hover:bg-white/90 transition">
@@ -3761,6 +3811,70 @@ export default function App() {
                           </button>
                           <button
                             onClick={() => handleRejectEmployeeReport(report.id)}
+                            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-black rounded-lg transition flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm"
+                          >
+                            ✕ Reject
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+
+            {/* CSR/Admin Verification Queue */}
+            {!isManagerUser && pendingEmployeeReports.filter(r => r.status === 'ManagerApproved').length > 0 && (
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl overflow-hidden shadow-sm">
+                <div className="px-5 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-500 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-xl">📋</span>
+                    <div>
+                      <p className="text-white font-black text-sm tracking-wide">CSR/Admin Final Review</p>
+                      <p className="text-blue-100 text-xs mt-0.5">Manager-verified calamity reports pending your approval</p>
+                    </div>
+                  </div>
+                  <span className="bg-white/20 border border-white/30 text-white text-xs font-black px-3 py-1 rounded-full">
+                    {pendingEmployeeReports.filter(r => r.status === 'ManagerApproved').length} Pending
+                  </span>
+                </div>
+                <div className="divide-y divide-blue-100">
+                  {pendingEmployeeReports.filter(r => r.status === 'ManagerApproved').map(report => {
+                    const typeEmoji = { Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' }[report.type] ?? '⚠️';
+                    return (
+                      <div key={report.id} className="px-5 py-4 flex items-start gap-4 bg-white/60 hover:bg-white/90 transition">
+                        <span className="text-2xl shrink-0 mt-0.5">{typeEmoji}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-black text-slate-800 text-sm">{report.incidentName}</p>
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full border bg-blue-100 border-blue-300 text-blue-800">
+                              {report.type}
+                            </span>
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full border bg-emerald-100 border-emerald-300 text-emerald-800">
+                              Manager Verified
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="w-4 h-4 rounded-full bg-[#002060] text-white text-[9px] font-black flex items-center justify-center shrink-0">{report.employeeAvatar}</span>
+                            <span className="text-xs text-slate-700 font-semibold">{report.employeeName}</span>
+                            <span className="text-slate-400 text-xs">·</span>
+                            <span className="text-slate-500 text-xs font-mono">{report.timestamp}</span>
+                          </div>
+                          <p className="text-slate-500 text-xs mt-1">📍 {report.locationLabel}</p>
+                          {report.description && (
+                            <p className="text-slate-600 text-xs mt-1.5 leading-relaxed italic">"{report.description}"</p>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-2 shrink-0 ml-2">
+                          <button
+                            onClick={() => handleCsrAdminApproveReport(report.id)}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-lg transition flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm"
+                          >
+                            ✓ Approve
+                          </button>
+                          <button
+                            onClick={() => handleCsrAdminRejectReport(report.id)}
                             className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-black rounded-lg transition flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm"
                           >
                             ✕ Reject
