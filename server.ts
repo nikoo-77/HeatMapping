@@ -1,7 +1,13 @@
-import dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
-dotenv.config(); // fallback to .env if present
 import express from 'express';
+
+// Only load .env files locally. On Vercel (and other PaaS) the platform
+// injects environment variables directly into process.env — dotenv MUST NOT
+// overwrite them, otherwise the real credentials get clobbered.
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  const dotenv = (await import('dotenv')).default;
+  dotenv.config({ path: '.env.local' });
+  dotenv.config(); // fallback to .env if present
+}
 import { createClient } from '@supabase/supabase-js';
 import { resolveEmployeeRegion } from './lib/regionResolver.js';
 
@@ -15,6 +21,9 @@ const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY!;
 
 if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
   console.error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY in environment.');
+  if (process.env.VERCEL) {
+    console.error('On Vercel, set SUPABASE_URL and SUPABASE_SECRET_KEY in the project Environment Variables.');
+  }
   process.exit(1);
 }
 
