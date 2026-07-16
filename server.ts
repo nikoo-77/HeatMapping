@@ -9,7 +9,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   dotenv.config(); // fallback to .env if present
 }
 import { createClient } from '@supabase/supabase-js';
-import { resolveEmployeeRegion } from './lib/regionResolver.ts';
+import { resolveEmployeeRegion } from './lib/regionResolver.js';
 
 const app = express();
 app.use(express.json());
