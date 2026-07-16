@@ -453,58 +453,6 @@ const ensureEmployeesLoaded = async (
   next();
 };
 
-app.get('/api/test-db', async (req, res) => {
-  const url = SUPABASE_URL;
-  const keyLength = SUPABASE_SECRET_KEY ? SUPABASE_SECRET_KEY.length : 0;
-  const keyPrefix = SUPABASE_SECRET_KEY ? SUPABASE_SECRET_KEY.substring(0, 8) : '';
-  
-  if (!supabase) {
-    return res.json({
-      status: 'error',
-      message: 'Supabase client is not initialized.',
-      supabase_url: url,
-      key_length: keyLength,
-      key_prefix: keyPrefix
-    });
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from('Employee Details')
-      .select('*')
-      .limit(1);
-    
-    if (error) {
-      return res.json({
-        status: 'error',
-        message: 'Query failed.',
-        error: error,
-        supabase_url: url,
-        key_length: keyLength,
-        key_prefix: keyPrefix
-      });
-    }
-
-    return res.json({
-      status: 'success',
-      message: 'Database connection verified.',
-      data: data,
-      supabase_url: url,
-      key_length: keyLength,
-      key_prefix: keyPrefix
-    });
-  } catch (err) {
-    return res.json({
-      status: 'error',
-      message: 'Exception occurred.',
-      error: String(err),
-      supabase_url: url,
-      key_length: keyLength,
-      key_prefix: keyPrefix
-    });
-  }
-});
-
 app.use(ensureEmployeesLoaded);
 
 // Manager-scoped read. When a manager is supplied, only their direct reports
