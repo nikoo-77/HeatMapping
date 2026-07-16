@@ -1,10 +1,10 @@
 import express from 'express';
+import dotenv from 'dotenv';
 
 // Only load .env files locally. On Vercel (and other PaaS) the platform
 // injects environment variables directly into process.env — dotenv MUST NOT
 // overwrite them, otherwise the real credentials get clobbered.
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  const dotenv = (await import('dotenv')).default;
   dotenv.config({ path: '.env.local' });
   dotenv.config(); // fallback to .env if present
 }
