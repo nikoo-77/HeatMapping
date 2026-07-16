@@ -45,6 +45,7 @@ const PROVINCE_TO_REGION: Record<string, string> = {
   'tagbilaran': 'VII',
   'danao': 'VII',
   // Region VI cities
+  'iloilo': 'VI',
   'bacolod': 'VI',
   'roxas city': 'VI',
   'kalibo': 'VI',
