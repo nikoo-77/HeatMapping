@@ -20,14 +20,7 @@ const GOV_SITES = [
   { name: 'PAGASA', full: 'Philippine Atmospheric, Geophysical & Astronomical Services Administration', url: 'https://www.pagasa.dost.gov.ph', color: '#1565c0', tag: 'Weather & Typhoon' },
   { name: 'BFP', full: 'Bureau of Fire Protection', url: 'https://bfp.gov.ph', color: '#d84315', tag: 'Fire Emergency' },
   { name: 'NDRRMC', full: 'National Disaster Risk Reduction and Management Council', url: 'https://ndrrmc.gov.ph', color: '#00695c', tag: 'Disaster Response' },
-  { name: 'OCD', full: 'Office of Civil Defense', url: 'https://www.ocd.gov.ph', color: '#283593', tag: 'Civil Defense' },
   { name: 'PNP', full: 'Philippine National Police', url: 'https://pnp.gov.ph', color: '#1a237e', tag: 'Law & Order' },
-  { name: 'AFP', full: 'Armed Forces of the Philippines', url: 'https://www.afp.mil.ph', color: '#2e7d32', tag: 'Armed Forces' },
-  { name: 'DOH', full: 'Department of Health – Emergency', url: 'https://doh.gov.ph', color: '#6a1b9a', tag: 'Health Emergency' },
-  { name: 'DSWD', full: 'Department of Social Welfare and Development', url: 'https://www.dswd.gov.ph', color: '#f57f17', tag: 'Social Welfare' },
-  { name: 'PCG', full: 'Philippine Coast Guard', url: 'https://www.coastguard.gov.ph', color: '#0277bd', tag: 'Maritime Safety' },
-  { name: 'DPWH', full: 'Dept. of Public Works & Highways', url: 'https://www.dpwh.gov.ph', color: '#4e342e', tag: 'Infrastructure' },
-  { name: 'DOTr', full: 'Department of Transportation', url: 'https://www.dotr.gov.ph', color: '#37474f', tag: 'Transport Alerts' },
 ];
 
 function GovernmentLinksFooter() {
@@ -55,14 +48,14 @@ function GovernmentLinksFooter() {
       </div>
 
       {/* Scrolling ticker */}
-      <div style={{ position: 'relative', padding: '5px 0' }}>
+      <div style={{ position: 'relative', padding: '8px 0' }}>
         {/* Fade edges */}
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 60, background: 'linear-gradient(to right, #001440, transparent)', zIndex: 2, pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 60, background: 'linear-gradient(to left, #001848, transparent)', zIndex: 2, pointerEvents: 'none' }} />
 
         <div
           className="gov-ticker"
-          style={{ display: 'flex', gap: 0, alignItems: 'center' }}
+          style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}
         >
           {items.map((site, idx) => (
             <a
@@ -75,10 +68,10 @@ function GovernmentLinksFooter() {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '4px 14px',
-                margin: '0 2px',
-                borderRadius: 20,
+                gap: 8,
+                padding: '10px 18px',
+                margin: '0 4px',
+                borderRadius: 24,
                 textDecoration: 'none',
                 flexShrink: 0,
                 cursor: 'pointer',
@@ -89,16 +82,16 @@ function GovernmentLinksFooter() {
                 boxShadow: hoveredIdx === idx ? `0 4px 14px ${site.color}44` : 'none',
               }}
             >
-              <span style={{ color: hoveredIdx === idx ? '#fff' : '#cbd5e1', fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+              <span style={{ color: hoveredIdx === idx ? '#fff' : '#cbd5e1', fontSize: 13, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                 {site.name}
               </span>
               <span style={{
-                fontSize: 9,
+                fontSize: 10,
                 background: `${site.color}33`,
                 color: hoveredIdx === idx ? '#fff' : '#94a3b8',
                 border: `1px solid ${site.color}55`,
-                borderRadius: 4,
-                padding: '2px 6px',
+                borderRadius: 6,
+                padding: '4px 8px',
                 fontWeight: 700,
                 letterSpacing: '0.04em',
                 textTransform: 'uppercase',
@@ -112,14 +105,6 @@ function GovernmentLinksFooter() {
         </div>
       </div>
 
-      {/* Bottom bar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 20px 6px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-        <span style={{ color: '#334155', fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase' }}>WORKFORCE GEOGRAPHIC PROFILES PORTAL • SAVILLS &amp; INNODATA JOINT INFRASTRUCTURE MAP</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#475569', fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.12em' }}>
-          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 5px #f59e0b' }} />
-          DATABASE METRICS: OPERATIONAL
-        </span>
-      </div>
 
       <style>{`
         @keyframes gov-scroll {
@@ -129,9 +114,6 @@ function GovernmentLinksFooter() {
         .gov-ticker {
           animation: gov-scroll 40s linear infinite;
           will-change: transform;
-        }
-        .gov-ticker:hover {
-          animation-play-state: paused;
         }
         @keyframes pulse {
           0%, 100% { opacity: 1; }
@@ -324,6 +306,14 @@ export default function App() {
   });
   const [employeePortalMessage, setEmployeePortalMessage] = useState('');
   const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'alerts' | 'aid' | 'profile' | 'contacts' | 'notifications'>('dashboard');
+  const [managerAidForm, setManagerAidForm] = useState({
+    employeeName: '',
+    aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
+    damageType: 'Major' as 'Major' | 'Minor',
+    description: '',
+    incidentName: '',
+  });
+  const [managerAidMessage, setManagerAidMessage] = useState('');
   const [managerCheckInRequest, setManagerCheckInRequest] = useState({
     active: true,
     title: 'Your manager requested a quick safety check-in for your area.',
@@ -345,7 +335,7 @@ export default function App() {
   const [editProfileSuccess, setEditProfileSuccess] = useState(false);
 
   // ── Page navigation ─────────────────────────────────────────────────────
-  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'executive' | 'risk-map' | 'team-overview'>('dashboard');
+  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'manager-aid' | 'executive' | 'risk-map' | 'team-overview'>('dashboard');
   // Employee Directory search/filter state
   const [dirSearch, setDirSearch] = useState('');
   const [dirDept,   setDirDept]   = useState('All Departments');
@@ -783,6 +773,57 @@ export default function App() {
       )
     );
     pushLog(`Manager disbursed aid application ${applicationId}.`, 'success');
+  };
+
+  const handleSubmitManagerAidApplication = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isManagerUser) return;
+    if (!managerAidForm.employeeName.trim()) {
+      setManagerAidMessage('Please enter the employee name before submitting.');
+      return;
+    }
+    if (!managerAidForm.description.trim()) {
+      setManagerAidMessage('Please describe the aid request before submitting.');
+      return;
+    }
+
+    const newAidApplication: AidApplication = {
+      id: `AID-MGR-${Date.now()}`,
+      employeeId: '',
+      employeeName: managerAidForm.employeeName.trim(),
+      incidentId: '',
+      incidentName: managerAidForm.incidentName.trim() || 'Self-Reported Local Calamity',
+      aidType: managerAidForm.aidType,
+      description: managerAidForm.description.trim(),
+      status: 'Submitted',
+      damageType: managerAidForm.damageType,
+      filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+      department: currentEmployee?.department ?? 'Unknown',
+      islandGroup: currentEmployee?.islandGroup ?? 'Luzon',
+    };
+
+    setAidApplications((prev) => [newAidApplication, ...prev]);
+    setManagerAidForm({ employeeName: '', aidType: 'Cash', damageType: 'Major', description: '', incidentName: '' });
+    setManagerAidMessage('Aid request submitted for manager review.');
+    pushLog(`Manager aid request filed for ${newAidApplication.employeeName}.`, 'success');
+  };
+
+  const handleForwardAidToAdmin = (applicationId: string) => {
+    if (!isManagerUser) return;
+    const now = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    setAidApplications((prev) =>
+      prev.map((app) =>
+        app.id === applicationId
+          ? {
+              ...app,
+              status: 'Manager Forwarded',
+              approver: currentEmployee?.name ?? 'Manager',
+              approvedDate: now,
+            }
+          : app
+      )
+    );
+    pushLog(`Manager approved and forwarded aid application ${applicationId} to admin.`, 'success');
   };
 
   const handleSimulateReply = (employeeId: string, forcedStatus?: SafetyStatus) => {
@@ -2831,6 +2872,16 @@ export default function App() {
             {/* ── AID MANAGEMENT ── */}
             <div className="mx-1 my-2.5 border-t border-white/10" />
             <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-300/40 px-1 mb-0.5">Aid Management</p>
+            {isManagerUser && (
+            <button onClick={() => setActivePage('manager-aid')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'manager-aid' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
+              <HeartHandshake className={`w-4 h-4 shrink-0 ${activePage === 'manager-aid' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
+              <span className="flex-1 leading-tight">Aid Assistance</span>
+              {aidApplications.filter(a => a.status === 'Submitted').length > 0 && (
+                <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{aidApplications.filter(a => a.status === 'Submitted').length}</span>
+              )}
+            </button>
+            )}
             {!isManagerUser && (
             <button onClick={() => setActivePage('aid')}
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'aid' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
@@ -2855,28 +2906,7 @@ export default function App() {
 
           <div className="mx-5 my-4 border-t border-white/10" />
 
-          {/* Status card */}
-          <div className="px-4">
-            <div className="bg-white/8 border border-white/10 rounded-xl p-3 flex flex-col gap-2">
-              <span className="text-[9px] font-black uppercase tracking-widest text-blue-300/60">System Status</span>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                <span className="text-[11px] text-emerald-300 font-bold">Database Live</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full shrink-0 ${ simulationActive ? 'bg-orange-400 animate-pulse' : 'bg-slate-600' }`} />
-                <span className={`text-[11px] font-bold ${ simulationActive ? 'text-orange-300' : 'text-blue-300/60' }`}>
-                  { simulationActive ? 'Incident Active' : 'No Active Alert' }
-                </span>
-              </div>
-              <div className="flex items-center justify-between pt-1 border-t border-white/10">
-                <span className="text-[10px] text-blue-300/50 font-mono">{scopedEmployees.length} FTE</span>
-                 <span className="text-[10px] text-emerald-400/70 font-mono">
-                   {headerCounts.green} safe
-                 </span>
-              </div>
-            </div>
-          </div>
+        
         </nav>
 
         {/* ── Page Content Area ── */}
@@ -4525,6 +4555,187 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ──────────── MANAGER AID ASSISTANCE PAGE ──────────── */}
+      {activePage === 'manager-aid' && (() => {
+        const managerAidStatusCfgMap: Record<string, { bg: string; dot: string }> = {
+          'Submitted':          { bg: 'bg-slate-100 text-slate-700 border-slate-300', dot: 'bg-slate-400' },
+          'Manager Forwarded':  { bg: 'bg-blue-100 text-blue-800 border-blue-300', dot: 'bg-blue-500' },
+          'Under Review':       { bg: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500' },
+          'Approved':           { bg: 'bg-teal-100 text-teal-800 border-teal-300', dot: 'bg-teal-500' },
+          'Disbursed':          { bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
+          'Rejected':           { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
+        };
+        const mgrAidApplications = aidApplications.filter((a) => a.approver === currentEmployee?.name || !a.approver || a.status === 'Submitted' || a.status === 'Manager Forwarded');
+        return (
+          <div className="flex-1 p-6 bg-[#f8fafc]">
+            <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
+
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
+                    <HeartHandshake className="w-5 h-5" /> Aid Assistance
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Apply for aid on behalf of your team. Submissions require your approval, then are forwarded to admin for final processing.</p>
+                </div>
+              </div>
+
+              {/* Workflow stepper */}
+              <div className="bg-white border border-slate-200 rounded-xl px-5 py-3 flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-1">Workflow:</span>
+                {['Submitted', 'Manager Forwarded', 'Approved', 'Disbursed'].map((step, i) => (
+                  <React.Fragment key={step}>
+                    {i > 0 && <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />}
+                    <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${managerAidStatusCfgMap[step]?.bg || ''}`}>{step}</span>
+                  </React.Fragment>
+                ))}
+                <span className="mx-2 text-slate-200">|</span>
+                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${managerAidStatusCfgMap['Rejected'].bg}`}>Rejected</span>
+              </div>
+
+              {/* Apply for Aid form */}
+              <section className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
+                <div className="bg-[#002060] px-6 py-4 border-b border-[#001848]">
+                  <p className="text-white font-extrabold text-sm tracking-wide">Apply for Aid Assistance</p>
+                  <p className="text-blue-300 text-[11px] mt-1">Submit a request for an employee. You must approve it before it is forwarded to admin.</p>
+                </div>
+                <div className="p-6">
+                  <form className="space-y-4" onSubmit={handleSubmitManagerAidApplication}>
+                    <label className="block text-sm font-semibold text-slate-700">
+                      <span className="mb-2 block">Employee name</span>
+                      <input
+                        value={managerAidForm.employeeName}
+                        onChange={(event) => setManagerAidForm((prev) => ({ ...prev, employeeName: event.target.value }))}
+                        placeholder="e.g. Maria Santos"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                      />
+                    </label>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="text-sm font-semibold text-slate-700">
+                        <span className="mb-2 block">Aid type</span>
+                        <select
+                          value={managerAidForm.aidType}
+                          onChange={(event) => setManagerAidForm((prev) => ({ ...prev, aidType: event.target.value as 'Cash' | 'Relief Goods' | 'Both' }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        >
+                          <option value="Cash">Cash</option>
+                          <option value="Relief Goods">Relief Goods</option>
+                          <option value="Both">Cash and Relief Goods</option>
+                        </select>
+                      </label>
+                      <label className="text-sm font-semibold text-slate-700">
+                        <span className="mb-2 block">Type of Damage</span>
+                        <select
+                          value={managerAidForm.damageType}
+                          onChange={(event) => setManagerAidForm((prev) => ({ ...prev, damageType: event.target.value as 'Major' | 'Minor' }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        >
+                          <option value="Major">Major</option>
+                          <option value="Minor">Minor</option>
+                        </select>
+                      </label>
+                    </div>
+                    <label className="block text-sm font-semibold text-slate-700">
+                      <span className="mb-2 block">Incident / event name</span>
+                      <input
+                        value={managerAidForm.incidentName}
+                        onChange={(event) => setManagerAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
+                        placeholder="e.g. Typhoon Carina"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                      />
+                    </label>
+                    <label className="block text-sm font-semibold text-slate-700">
+                      <span className="mb-2 block">Why do they need aid?</span>
+                      <textarea
+                        value={managerAidForm.description}
+                        onChange={(event) => setManagerAidForm((prev) => ({ ...prev, description: event.target.value }))}
+                        rows={4}
+                        placeholder="Describe the employee's condition or the support needed."
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none resize-none"
+                      />
+                    </label>
+                    {managerAidMessage && (
+                      <div className={`rounded-xl px-4 py-3 text-sm font-medium border ${
+                        managerAidMessage.includes('submitted') || managerAidMessage.includes('review')
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          : 'bg-rose-50 border-rose-200 text-rose-700'
+                      }`}>
+                        {managerAidMessage}
+                        <button type="button" onClick={() => setManagerAidMessage('')} className="ml-2 opacity-60 hover:opacity-100">✕</button>
+                      </div>
+                    )}
+                    <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
+                      Submit aid request
+                    </button>
+                  </form>
+                </div>
+              </section>
+
+              {/* Team Aid Applications */}
+              <section className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
+                <div className="px-6 py-4 bg-gradient-to-r from-[#001f4b] to-[#00255a] border-b border-[#00172f] flex items-center justify-between">
+                  <div>
+                    <p className="text-white font-black text-base tracking-wide">Team Aid Applications</p>
+                    <p className="text-blue-300 text-xs mt-0.5">Review submissions, approve, and forward to admin for final processing</p>
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {mgrAidApplications.length === 0 ? (
+                    <div className="px-6 py-12 text-center text-slate-400 text-sm">No aid applications submitted yet.</div>
+                  ) : (
+                    mgrAidApplications.map((application) => {
+                      const sc = managerAidStatusCfgMap[application.status] || managerAidStatusCfgMap['Submitted'];
+                      return (
+                        <div key={application.id} className="px-6 py-4 flex items-start gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-bold text-slate-800 text-sm">{application.employeeName}</p>
+                              <span className="text-[10px] font-mono text-slate-400">{application.id}</span>
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black ${sc.bg}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sc.dot}`} />{application.status}
+                              </span>
+                            </div>
+                            <p className="text-slate-500 text-xs mt-1">{application.incidentName} · {application.aidType === 'Both' ? 'Cash and Relief Goods' : application.aidType} · {application.damageType}</p>
+                            <p className="text-slate-600 text-xs mt-1.5">{application.description}</p>
+                            {application.status === 'Submitted' && (
+                              <p className="text-amber-700 text-xs mt-2">Awaiting your review. Approve to forward this request to admin.</p>
+                            )}
+                            {application.status === 'Manager Forwarded' && (
+                              <p className="text-blue-700 text-xs mt-2">Forwarded to admin. Awaiting final approval and disbursement.</p>
+                            )}
+                            {application.status === 'Approved' && (
+                              <p className="text-teal-700 text-xs mt-2">Approved by admin. Pending disbursement.</p>
+                            )}
+                          </div>
+                          <div className="shrink-0 flex flex-col gap-2">
+                            {application.status === 'Submitted' && (
+                              <>
+                                <button
+                                  onClick={() => handleForwardAidToAdmin(application.id)}
+                                  className="rounded-md bg-blue-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-blue-500 transition"
+                                >Approve &amp; Forward</button>
+                                <button
+                                  onClick={() => handleApproveAidApplication(application.id)}
+                                  className="rounded-md bg-rose-500 px-3 py-1.5 text-[11px] font-black text-white hover:bg-rose-400 transition"
+                                >Reject</button>
+                              </>
+                            )}
+                            {application.status === 'Manager Forwarded' && (
+                              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 text-center">With Admin</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
 
             </div>
           </div>
