@@ -2716,50 +2716,6 @@ export default function App() {
           </p>
         </div>
 
-        {/* Center: Role selector & team filter */}
-        {isManagerUser ? (
-          <div className="flex flex-col items-start gap-2 shrink-0 bg-slate-50/80 px-4 py-3 rounded-lg border border-slate-200">
-            <span className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">SHOW MY TEAM</span>
-            <span className="text-sm font-semibold text-slate-900">{directReports.length} members</span>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3 shrink-0 bg-slate-50/80 px-4 py-2 rounded-lg border border-slate-200">
-            <label htmlFor="viewer-role" className="text-xs font-bold text-slate-600 whitespace-nowrap">
-              Are you:
-            </label>
-            <select
-              id="viewer-role"
-              value={viewerRole}
-              onChange={(e) => {
-                const role = e.target.value as EmployeeTeam;
-                setViewerRole(role);
-                pushLog(`Viewing portal as ${role}.`, 'info');
-              }}
-              className="text-xs font-bold text-[#002060] bg-white border border-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#002060]/30"
-            >
-              <option value="HR/CSR">HR/CSR</option>
-              <option value="Manager">Manager</option>
-            </select>
-            <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer whitespace-nowrap">
-              <input
-                type="checkbox"
-                checked={filterByTeam}
-                onChange={(e) => {
-                  setFilterByTeam(e.target.checked);
-                  pushLog(
-                    e.target.checked
-                      ? `Filtering to ${viewerRole} team employees only.`
-                      : 'Showing all team employees.',
-                    'info'
-                  );
-                }}
-                className="rounded border-slate-300 text-[#002060] focus:ring-[#002060]/30 cursor-pointer"
-              />
-              Show my team only
-            </label>
-          </div>
-        )}
-
         {/* Right Side: user session + co-labelled corporate logos */}
         <div className="flex items-center gap-3 shrink-0 bg-slate-50/80 px-3 py-2 rounded-lg border border-slate-200">
           <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left">
