@@ -16,11 +16,11 @@ app.use(express.json());
 const PORT = Number(process.env.PORT || 5000);
 
 // ── Supabase client (service-role key for unrestricted server-side access) ──
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY!;
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
 
 if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
-  console.error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY in environment.');
+  console.error('Missing Supabase credentials in environment.');
   if (process.env.VERCEL) {
     console.error('On Vercel, set SUPABASE_URL and SUPABASE_SECRET_KEY in the project Environment Variables.');
   } else {
