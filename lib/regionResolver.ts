@@ -1,4 +1,4 @@
-import { PHILIPPINE_REGIONS } from '../src/data_islands.js';
+import { PHILIPPINE_REGIONS } from '../src/data_islands.ts';
 
 const PROVINCE_TO_REGION: Record<string, string> = {
   'metro manila': 'NCR',
