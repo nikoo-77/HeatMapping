@@ -3,7 +3,7 @@ dotenv.config({ path: '.env.local' });
 dotenv.config(); // fallback to .env if present
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
-import { resolveEmployeeRegion } from './lib/regionResolver';
+import { resolveEmployeeRegion } from './lib/regionResolver.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -424,137 +424,129 @@ function readManagerFromRequest(req: express.Request): { name: string; id?: stri
 }
 
 // ── Bootstrap server ──────────────────────────────────────────────────────────
-let employeeLoadError: string | null = null;
-
-// Manager-scoped read. When a manager is supplied, only their direct reports
-// are returned (server-side authorization — never trust the client filter).
-app.get('/api/employees', (req, res) => {
-  if (employeeLoadError) {
-    return res.status(500).json({ message: 'Database unavailable.', detail: employeeLoadError });
-  }
-  const { name } = readManagerFromRequest(req);
-  if (name) {
-    const mgrId = resolveManagerId(name);
-    const scoped = allEmployees.filter((emp) => {
-      const nameMatch =
-        emp.managerName?.trim().toLowerCase() === name.toLowerCase();
-      const idMatch = !!mgrId && emp.managerId === mgrId;
-      return emp.id !== mgrId && (nameMatch || idMatch);
-    });
-    return res.json(scoped);
-  }
-  res.json(allEmployees);
-});
-
-app.post('/api/employees/:id/check-in', (req, res) => {
-  if (employeeLoadError) {
-    return res.status(500).json({ message: 'Database unavailable.', detail: employeeLoadError });
-  }
-  const { name, id } = readManagerFromRequest(req);
-  if (!name) return res.status(401).json({ message: 'Manager identity required.' });
-  const denied = enforceManagerAccess(req.params.id, name, id);
-  if (denied) return res.status(denied.status).json({ message: denied.message });
-  res.json({ message: 'Check-in dispatched.', employeeId: req.params.id });
-});
-
-app.post('/api/employees/:id/follow-up', (req, res) => {
-  if (employeeLoadError) {
-    return res.status(500).json({ message: 'Database unavailable.', detail: employeeLoadError });
-  }
-  const { name, id } = readManagerFromRequest(req);
-  if (!name) return res.status(401).json({ message: 'Manager identity required.' });
-  const denied = enforceManagerAccess(req.params.id, name, id);
-  if (denied) return res.status(denied.status).json({ message: denied.message });
-  res.json({ message: 'Follow-up sent.', employeeId: req.params.id });
-});
-
-app.patch('/api/employees/:id/profile', async (req, res) => {
-  if (employeeLoadError) {
-    return res.status(500).json({ message: 'Database unavailable.', detail: employeeLoadError });
-  }
-  const empId = req.params.id;
-  const { contactNumber, gcashNumber, bankAccountDetails, address } = req.body as {
-    contactNumber?: string;
-    gcashNumber?: string;
-    bankAccountDetails?: string;
-    address?: string;
-  };
-
-  const target = allEmployees.find((e) => e.id === empId);
-  if (!target) return res.status(404).json({ message: 'Employee not found.' });
-
-  const dbUpdate: Record<string, string> = {};
-  if (contactNumber !== undefined) dbUpdate['MOBILE NUMBER'] = contactNumber.trim();
-  if (address !== undefined)       dbUpdate['COMPLETE ADDRESS'] = address.trim();
-
-  const hasDbUpdate = Object.keys(dbUpdate).length > 0;
-
-  if (hasDbUpdate) {
-    const { error } = await supabase
-      .from('Employee Details')
-      .update(dbUpdate)
-      .eq('Employee ID', empId);
-
-    if (error) {
-      console.error('Supabase profile update failed:', error.message);
-      return res.status(500).json({ message: 'Database update failed.', detail: error.message });
-    }
-  }
-
-  const idx = allEmployees.findIndex((e) => e.id === empId);
-  if (idx !== -1) {
-    if (contactNumber !== undefined) (allEmployees[idx] as any).contactNumber = contactNumber.trim();
-    if (gcashNumber !== undefined)   (allEmployees[idx] as any).gcashNumber = gcashNumber.trim();
-    if (bankAccountDetails !== undefined) (allEmployees[idx] as any).bankAccountDetails = bankAccountDetails.trim();
-    if (address !== undefined)       allEmployees[idx].address = address.trim();
-  }
-
-  return res.json({ message: 'Profile updated successfully.', employeeId: empId });
-});
-
-app.patch('/api/employees/:id', (req, res) => {
-  if (employeeLoadError) {
-    return res.status(500).json({ message: 'Database unavailable.', detail: employeeLoadError });
-  }
-  const { name, id } = readManagerFromRequest(req);
-  if (!name) return res.status(401).json({ message: 'Manager identity required.' });
-  const denied = enforceManagerAccess(req.params.id, name, id);
-  if (denied) return res.status(denied.status).json({ message: denied.message });
-  res.json({ message: 'Employee updated.', employeeId: req.params.id });
-});
-
-const startServer = (port: number) => {
-  const DIST_DIR = path.join(__dirname, 'dist');
-
-  app.use(express.static(DIST_DIR));
-
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(DIST_DIR, 'index.html'));
-  });
-
-  app.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
-    console.log(`Loaded ${allEmployees.length} employees from Supabase.`);
-  }).on('error', (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EADDRINUSE') {
-      console.warn(`Port ${port} is busy, trying ${port + 1}`);
-      startServer(port + 1);
-    } else {
-      console.error('Failed to start server:', err);
-      process.exit(1);
-    }
-  });
-};
-
-startServer(PORT);
-
 loadEmployees()
   .then((employees) => {
     allEmployees = employees;
-    console.log(`Employee data loaded: ${employees.length} records.`);
+
+    // Manager-scoped read. When a manager is supplied, only their direct reports
+    // are returned (server-side authorization — never trust the client filter).
+    app.get('/api/employees', (req, res) => {
+      const { name } = readManagerFromRequest(req);
+      if (name) {
+        const mgrId = resolveManagerId(name);
+        const scoped = allEmployees.filter((emp) => {
+          const nameMatch =
+            emp.managerName?.trim().toLowerCase() === name.toLowerCase();
+          const idMatch = !!mgrId && emp.managerId === mgrId;
+          return emp.id !== mgrId && (nameMatch || idMatch);
+        });
+        return res.json(scoped);
+      }
+      res.json(allEmployees);
+    });
+
+    // Manager-scoped check-in (write). Rejects with 403 if target isn't a direct report.
+    app.post('/api/employees/:id/check-in', (req, res) => {
+      const { name, id } = readManagerFromRequest(req);
+      if (!name) return res.status(401).json({ message: 'Manager identity required.' });
+      const denied = enforceManagerAccess(req.params.id, name, id);
+      if (denied) return res.status(denied.status).json({ message: denied.message });
+      res.json({ message: 'Check-in dispatched.', employeeId: req.params.id });
+    });
+
+    // Manager-scoped follow-up (write).
+    app.post('/api/employees/:id/follow-up', (req, res) => {
+      const { name, id } = readManagerFromRequest(req);
+      if (!name) return res.status(401).json({ message: 'Manager identity required.' });
+      const denied = enforceManagerAccess(req.params.id, name, id);
+      if (denied) return res.status(denied.status).json({ message: denied.message });
+      res.json({ message: 'Follow-up sent.', employeeId: req.params.id });
+    });
+
+    // Self-service profile update — employee edits their own contact/address details.
+    // Accepts: contactNumber, gcashNumber, bankAccountDetails, address
+    // Identity is verified by matching the employee ID to the email provided in the request.
+    app.patch('/api/employees/:id/profile', async (req, res) => {
+      const empId = req.params.id;
+      const { contactNumber, gcashNumber, bankAccountDetails, address } = req.body as {
+        contactNumber?: string;
+        gcashNumber?: string;
+        bankAccountDetails?: string;
+        address?: string;
+      };
+
+      // Validate that the target employee actually exists
+      const target = allEmployees.find((e) => e.id === empId);
+      if (!target) return res.status(404).json({ message: 'Employee not found.' });
+
+      // Build the Supabase update payload, only including provided fields
+      const dbUpdate: Record<string, string> = {};
+      if (contactNumber !== undefined) dbUpdate['MOBILE NUMBER'] = contactNumber.trim();
+      if (address !== undefined)       dbUpdate['COMPLETE ADDRESS'] = address.trim();
+
+      // gcashNumber and bankAccountDetails are stored as custom columns if they exist,
+      // otherwise we gracefully skip the Supabase write for those two.
+      const hasDbUpdate = Object.keys(dbUpdate).length > 0;
+
+      if (hasDbUpdate) {
+        const { error } = await supabase
+          .from('Employee Details')
+          .update(dbUpdate)
+          .eq('Employee ID', empId);
+
+        if (error) {
+          console.error('Supabase profile update failed:', error.message);
+          return res.status(500).json({ message: 'Database update failed.', detail: error.message });
+        }
+      }
+
+      // Reflect changes in the in-memory cache so subsequent GET /api/employees is fresh
+      const idx = allEmployees.findIndex((e) => e.id === empId);
+      if (idx !== -1) {
+        if (contactNumber !== undefined) (allEmployees[idx] as any).contactNumber = contactNumber.trim();
+        if (gcashNumber !== undefined)   (allEmployees[idx] as any).gcashNumber = gcashNumber.trim();
+        if (bankAccountDetails !== undefined) (allEmployees[idx] as any).bankAccountDetails = bankAccountDetails.trim();
+        if (address !== undefined)       allEmployees[idx].address = address.trim();
+      }
+
+      return res.json({ message: 'Profile updated successfully.', employeeId: empId });
+    });
+
+    // Manager-scoped detail/update (write).
+    app.patch('/api/employees/:id', (req, res) => {
+      const { name, id } = readManagerFromRequest(req);
+      if (!name) return res.status(401).json({ message: 'Manager identity required.' });
+      const denied = enforceManagerAccess(req.params.id, name, id);
+      if (denied) return res.status(denied.status).json({ message: denied.message });
+      res.json({ message: 'Employee updated.', employeeId: req.params.id });
+    });
+
+    const startServer = (port: number) => {
+      const DIST_DIR = path.join(__dirname, 'dist');
+
+      app.use(express.static(DIST_DIR));
+
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(DIST_DIR, 'index.html'));
+      });
+
+      app.listen(port, () => {
+        console.log(`Server listening on port ${port}`);
+        console.log(`Loaded ${employees.length} employees from Supabase.`);
+      }).on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          console.warn(`Port ${port} is busy, trying ${port + 1}`);
+          startServer(port + 1);
+        } else {
+          console.error('Failed to start server:', err);
+          process.exit(1);
+        }
+      });
+    };
+
+    startServer(PORT);
   })
   .catch((err) => {
     console.error('Failed to load employees from Supabase:', err);
-    employeeLoadError = err instanceof Error ? err.message : String(err);
+    process.exit(1);
   });
-
