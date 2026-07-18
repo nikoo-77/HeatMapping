@@ -14,7 +14,10 @@ const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY!;
 
 if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
-  console.error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY in environment.');
+  console.error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY.');
+  console.error('Set these as environment variables in your deployment platform.');
+  console.error('  SUPABASE_URL=https://your-project.supabase.co');
+  console.error('  SUPABASE_SECRET_KEY=your-service-role-key');
   process.exit(1);
 }
 
