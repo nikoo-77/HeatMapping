@@ -4,11 +4,13 @@ dotenv.config(); // fallback to .env if present
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { resolveEmployeeRegion } from './lib/regionResolver';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const app = express();
 app.use(express.json());
-
-let employeeLoadError: string | null = null;
+const PORT = Number(process.env.PORT || 5000);
 
 // ── Supabase client (service-role key for unrestricted server-side access) ──
 const SUPABASE_URL = process.env.SUPABASE_URL!;
@@ -19,7 +21,7 @@ if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
   console.error('Set these as environment variables in your deployment platform.');
   console.error('  SUPABASE_URL=https://your-project.supabase.co');
   console.error('  SUPABASE_SECRET_KEY=your-service-role-key');
-  employeeLoadError = 'Missing SUPABASE_URL or SUPABASE_SECRET_KEY environment variables.';
+  process.exit(1);
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY);
@@ -421,7 +423,8 @@ function readManagerFromRequest(req: express.Request): { name: string; id?: stri
   return { name: name.trim(), id };
 }
 
-// ── Bootstrap ─────────────────────────────────────────────────────────────────
+// ── Bootstrap server ──────────────────────────────────────────────────────────
+let employeeLoadError: string | null = null;
 
 // Manager-scoped read. When a manager is supplied, only their direct reports
 // are returned (server-side authorization — never trust the client filter).
@@ -520,7 +523,31 @@ app.patch('/api/employees/:id', (req, res) => {
   res.json({ message: 'Employee updated.', employeeId: req.params.id });
 });
 
-// ── Bootstrap ─────────────────────────────────────────────────────────────────
+const startServer = (port: number) => {
+  const DIST_DIR = path.join(__dirname, 'dist');
+
+  app.use(express.static(DIST_DIR));
+
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+  });
+
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+    console.log(`Loaded ${allEmployees.length} employees from Supabase.`);
+  }).on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`Port ${port} is busy, trying ${port + 1}`);
+      startServer(port + 1);
+    } else {
+      console.error('Failed to start server:', err);
+      process.exit(1);
+    }
+  });
+};
+
+startServer(PORT);
+
 loadEmployees()
   .then((employees) => {
     allEmployees = employees;
@@ -530,6 +557,4 @@ loadEmployees()
     console.error('Failed to load employees from Supabase:', err);
     employeeLoadError = err instanceof Error ? err.message : String(err);
   });
-
-export default app;
 
