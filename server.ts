@@ -4,10 +4,7 @@ dotenv.config(); // fallback to .env if present
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { resolveEmployeeRegion } from './lib/regionResolver.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const app = express();
 app.use(express.json());
 const PORT = Number(process.env.PORT || 5000);
@@ -522,14 +519,6 @@ loadEmployees()
     });
 
     const startServer = (port: number) => {
-      const DIST_DIR = path.join(__dirname, 'dist');
-
-      app.use(express.static(DIST_DIR));
-
-      app.get('*', (req, res) => {
-        res.sendFile(path.join(DIST_DIR, 'index.html'));
-      });
-
       app.listen(port, () => {
         console.log(`Server listening on port ${port}`);
         console.log(`Loaded ${employees.length} employees from Supabase.`);
