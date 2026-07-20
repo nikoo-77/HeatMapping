@@ -50,6 +50,14 @@ export const HAZARD_TYPE_CONFIG: Record<string, HazardTypeConfig> = {
     icon: '🌊',
     description: 'Eastern and western coastal strips exposed to tsunami inundation from offshore events.',
   },
+  fire: {
+    type: 'fire',
+    label: 'Fire-Prone Areas',
+    color: '#ea580c',
+    fillColor: 'rgba(234, 88, 12, 0.35)',
+    icon: '🔥',
+    description: 'Dense urban, industrial, and dry-season wildland corridors with elevated structural and brush-fire risk.',
+  },
 };
 
 export const RISK_LEVEL_OPACITY: Record<string, number> = {
@@ -399,6 +407,68 @@ export const HAZARD_ZONES: HazardZone[] = [
     province: 'Zambales',
     description: 'Manila Trench offshore generates tsunami risk for western Luzon coastal municipalities.',
     polygon: [[14.80, 119.90], [15.20, 120.10], [15.10, 120.25], [14.75, 120.15], [14.70, 119.95]],
+  },
+
+  // ── FIRE ───────────────────────────────────────────────────────────────────
+  {
+    id: 'fire-manila-port',
+    name: 'Manila Port & Warehouse District',
+    type: 'fire',
+    riskLevel: 'high',
+    region: 'NCR',
+    province: 'Metro Manila',
+    description: 'Dense warehouses, fuel storage, and informal settlements create elevated structural fire risk.',
+    polygon: [[14.56, 120.94], [14.62, 120.98], [14.60, 121.02], [14.55, 121.00], [14.53, 120.96]],
+  },
+  {
+    id: 'fire-quezon-city',
+    name: 'Quezon City Dense Housing Belt',
+    type: 'fire',
+    riskLevel: 'high',
+    region: 'NCR',
+    province: 'Metro Manila',
+    description: 'High-density residential blocks with limited firebreak spacing raise conflagration risk in dry months.',
+    polygon: [[14.64, 121.02], [14.70, 121.06], [14.68, 121.12], [14.62, 121.10], [14.60, 121.04]],
+  },
+  {
+    id: 'fire-cebu-carbon',
+    name: 'Cebu Carbon Market Corridor',
+    type: 'fire',
+    riskLevel: 'moderate',
+    region: 'VII',
+    province: 'Cebu',
+    description: 'Mixed commercial–warehouse blocks with aging electrical loads elevate urban fire exposure.',
+    polygon: [[10.28, 123.88], [10.32, 123.91], [10.31, 123.94], [10.27, 123.93], [10.26, 123.89]],
+  },
+  {
+    id: 'fire-clark-industrial',
+    name: 'Clark–Angeles Industrial Zone',
+    type: 'fire',
+    riskLevel: 'moderate',
+    region: 'III',
+    province: 'Pampanga',
+    description: 'Industrial parks and logistics yards with fuel and chemical storage raise fire hazard.',
+    polygon: [[15.15, 120.52], [15.22, 120.58], [15.20, 120.64], [15.12, 120.60], [15.10, 120.54]],
+  },
+  {
+    id: 'fire-davao-urban',
+    name: 'Davao Downtown Fire Corridor',
+    type: 'fire',
+    riskLevel: 'moderate',
+    region: 'XI',
+    province: 'Davao del Sur',
+    description: 'Compact CBD and market districts carry elevated structural fire risk during peak dry season.',
+    polygon: [[7.05, 125.58], [7.10, 125.62], [7.08, 125.66], [7.03, 125.64], [7.02, 125.59]],
+  },
+  {
+    id: 'fire-laguna-tech',
+    name: 'Laguna Technopark Belt',
+    type: 'fire',
+    riskLevel: 'moderate',
+    region: 'IV-A',
+    province: 'Laguna',
+    description: 'Manufacturing and electronics campuses with chemical processes elevate industrial fire risk.',
+    polygon: [[14.22, 121.10], [14.28, 121.16], [14.26, 121.20], [14.20, 121.18], [14.18, 121.12]],
   },
 ];
 

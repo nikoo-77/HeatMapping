@@ -103,7 +103,7 @@ export interface BroadcastLog {
   employeeId?: string;
 }
 
-export type HazardType = 'flood' | 'landslide' | 'storm_surge' | 'earthquake' | 'volcanic' | 'tsunami';
+export type HazardType = 'flood' | 'landslide' | 'storm_surge' | 'earthquake' | 'volcanic' | 'tsunami' | 'fire';
 export type HazardRiskLevel = 'high' | 'moderate' | 'low';
 
 export interface HazardZone {
@@ -116,6 +116,19 @@ export interface HazardZone {
   polygon: [number, number][];
   region?: string;
   province?: string;
+}
+
+/** Per-region hazard classification used by the Risk Classification Map choropleth */
+export interface RegionHazardEntry {
+  type: HazardType;
+  riskLevel: HazardRiskLevel;
+  note: string;
+}
+
+export interface RegionHazardProfile {
+  regionCode: string;
+  regionName: string;
+  hazards: RegionHazardEntry[];
 }
 
 export interface HazardTypeConfig {
