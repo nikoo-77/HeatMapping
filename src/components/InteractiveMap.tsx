@@ -107,7 +107,7 @@ interface InteractiveMapProps {
   selectedCity?: string | null;
   selectedIslandGroup?: 'Luzon' | 'Visayas' | 'Mindanao' | null;
   selectedRegion?: string | null;
-  /** When true (manager view), pins appear from team member selection instead of location filters. */
+  /** When true, only the selected employee's pin is rendered (manager team focus or directory View in Map). */
   teamFocusMode?: boolean;
 }
 
@@ -678,7 +678,7 @@ export default function InteractiveMap({
               <span className="text-base leading-none">📍</span>
               <span>
                 {teamFocusMode
-                  ? 'Select a team member to view their location pin'
+                  ? 'Select an employee to view their location pin'
                   : 'Select a location from the panel to view employee pins'}
               </span>
             </div>

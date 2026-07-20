@@ -353,6 +353,8 @@ export default function App() {
   const [dirRegion, setDirRegion] = useState<string>('All');
   const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
   const [dirActionsMenuId, setDirActionsMenuId] = useState<string | null>(null);
+  /** When set, Overview map shows only this employee's pin (avoids rendering all FTEs). */
+  const [mapSoloEmployeeId, setMapSoloEmployeeId] = useState<string | null>(null);
   const [newEmpForm, setNewEmpForm] = useState({
     name: '',
     role: 'Data Analyst',
@@ -1796,6 +1798,19 @@ export default function App() {
     setSelectedIslandGroup(null);
   }, [isManagerUser]);
 
+  // Exit directory "View in Map" solo-pin mode when location filters are applied
+  // or the focused employee is cleared.
+  React.useEffect(() => {
+    if (!mapSoloEmployeeId) return;
+    if (selectedCity || selectedRegion || selectedIslandGroup) {
+      setMapSoloEmployeeId(null);
+      return;
+    }
+    if (!selectedEmployee || selectedEmployee.id !== mapSoloEmployeeId) {
+      setMapSoloEmployeeId(null);
+    }
+  }, [mapSoloEmployeeId, selectedCity, selectedRegion, selectedIslandGroup, selectedEmployee]);
+
   useEffect(() => {
     if (currentEmployee) {
       setLocationUpdate(currentEmployee.address ?? '');
@@ -3230,10 +3245,12 @@ export default function App() {
                 setSelectedIslandGroup(null);
                 setSelectedRegion(null);
                 setSelectedCity(null);
+                setMapSoloEmployeeId(null);
+                setSelectedEmployee(null);
                  pushLog(`Viewing all Philippine island groups (${scopedEmployees.length} employees).`, 'info');
               }}
               className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-colors cursor-pointer border-b border-slate-200 hover:bg-[#ebf1fc] ${
-                !selectedIslandGroup && !selectedRegion && !selectedCity
+                !selectedIslandGroup && !selectedRegion && !selectedCity && !mapSoloEmployeeId
                   ? 'bg-[#d9e1f2] border-l-4 border-l-[#002060]'
                   : 'bg-slate-50'
               }`}
@@ -3489,7 +3506,9 @@ export default function App() {
           <div className="bg-slate-50 p-3 border-t border-slate-200 text-[10px] font-mono text-slate-500 font-bold text-center flex flex-col gap-0.5">
             <span>DATABASE SYNCHRONIZED</span>
             <span>Total Headcount: {scopedEmployees.length} fte</span>
-            {(selectedRegion || selectedIslandGroup) && (
+            {mapSoloEmployeeId && selectedEmployee ? (
+              <span className="text-[#002060] font-black">Single pin: {selectedEmployee.name}</span>
+            ) : (selectedRegion || selectedIslandGroup) && (
               <span className="text-[#002060] font-black">
                 {selectedCity
                   ? `Viewing: ${selectedCity}`
@@ -3513,6 +3532,8 @@ export default function App() {
               <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
               {isManagerUser
                 ? (selectedEmployee ? `${selectedEmployee.name} — Location` : 'My Team — Overview')
+                : mapSoloEmployeeId && selectedEmployee
+                ? `${selectedEmployee.name} — Single Pin`
                 : selectedCity
                 ? `${selectedCity} — Local View`
                 : selectedRegion
@@ -3524,6 +3545,22 @@ export default function App() {
 
             {/* Right: Calamity Report + Reset controls */}
             <div className="flex flex-wrap items-center gap-2">
+
+              {mapSoloEmployeeId && selectedEmployee && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMapSoloEmployeeId(null);
+                    setSelectedEmployee(null);
+                    pushLog('Cleared single-employee map focus.', 'info');
+                  }}
+                  className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white rounded-md text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
+                  title="Exit single-pin view and return to national overview"
+                >
+                  <X className="w-3 h-3 shrink-0" />
+                  <span>Exit Pin Focus</span>
+                </button>
+              )}
 
               {/* ── Calamity Report Button ── */}
               <button
@@ -3552,7 +3589,13 @@ export default function App() {
           {/* Map Layer container */}
           <div className="flex-1 relative min-h-[400px]">
             <InteractiveMap
-              employees={isManagerUser ? directReports : visibleEmployees}
+              employees={
+                isManagerUser
+                  ? directReports
+                  : mapSoloEmployeeId
+                  ? employees.filter((e) => e.id === mapSoloEmployeeId)
+                  : visibleEmployees
+              }
               epicenter={epicenter}
               selectedEmployee={selectedEmployee}
               onSelectEmployee={setSelectedEmployee}
@@ -3561,10 +3604,10 @@ export default function App() {
               activeDisaster={activeDisaster}
               mapView={mapView}
               simulationActive={simulationActive}
-              selectedCity={isManagerUser ? null : selectedCity}
-              selectedIslandGroup={isManagerUser ? null : selectedIslandGroup}
-              selectedRegion={isManagerUser ? null : selectedRegion}
-              teamFocusMode={isManagerUser}
+              selectedCity={isManagerUser || mapSoloEmployeeId ? null : selectedCity}
+              selectedIslandGroup={isManagerUser || mapSoloEmployeeId ? null : selectedIslandGroup}
+              selectedRegion={isManagerUser || mapSoloEmployeeId ? null : selectedRegion}
+              teamFocusMode={isManagerUser || Boolean(mapSoloEmployeeId)}
             />
 
             {/* Static Overlay Card inside Metro Cebu Map View */}
@@ -4073,6 +4116,24 @@ export default function App() {
                                 className="absolute right-5 top-full mt-1 z-20 min-w-[160px] bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-left"
                                 onMouseDown={(e) => e.stopPropagation()}
                               >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDirActionsMenuId(null);
+                                    setSelectedCity(null);
+                                    setSelectedRegion(null);
+                                    setSelectedIslandGroup(null);
+                                    setSelectedEmployee(emp);
+                                    setMapSoloEmployeeId(emp.id);
+                                    setActivePage('dashboard');
+                                    pushLog(`Map focus: ${emp.name} — single pin view.`, 'info');
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-[#002060] hover:bg-[#ebf1fc] transition-colors cursor-pointer"
+                                >
+                                  <MapPin className="w-3.5 h-3.5 shrink-0" />
+                                  View in Map
+                                </button>
                                 <button
                                   type="button"
                                   onClick={(e) => {
