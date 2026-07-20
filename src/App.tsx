@@ -11,7 +11,8 @@ import {
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
   AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
   FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2,
-  HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap, Layers
+  HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap, Layers,
+  Paperclip, Eye, Download
 } from 'lucide-react';
 
 // ── Government Calamity Links Footer ─────────────────────────────────────────
@@ -178,6 +179,15 @@ type PendingEmployeeReportRecord = {
   description: string;
   status: 'Pending' | 'ManagerApproved' | 'Approved' | 'Rejected';
   routedTo: string;
+};
+
+type AppNotification = {
+  id: string;
+  title: string;
+  description: string;
+  createdAt: string;
+  audience: 'employee' | 'manager' | 'admin' | 'all';
+  employeeId?: string;
 };
 
 type IncidentSessionSnapshot = {
@@ -382,27 +392,39 @@ export default function App() {
   });
 
   // ── Aid Management state ──────────────────────────────────────────────────
-  const [aidStatusFilter, setAidStatusFilter] = useState<'All' | 'Submitted' | 'Under Review' | 'Approved' | 'Disbursed' | 'Rejected'>('All');
-  const [showAidModal, setShowAidModal] = useState(false);
-  const [aidForm, setAidForm] = useState({
-    employeeName: '',
-    incidentName: '',
-    aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
-    damageType: 'Major' as 'Major' | 'Minor',
-    description: '',
-    department: 'AI Operations',
-    islandGroup: 'Luzon' as 'Luzon' | 'Visayas' | 'Mindanao',
-  });
-  const [aidApplications, setAidApplications] = useState<AidApplication[]>([
-    { id: 'AID-001', employeeId: '', employeeName: 'Maria Santos', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Cash', description: 'Roof heavily damaged, household items lost. Family of 4.', status: 'Disbursed', damageType: 'Major', filedDate: 'Jun 25, 2026', approver: 'HR Manager', approvedDate: 'Jun 26, 2026', department: 'AI Operations', islandGroup: 'Luzon' },
-    { id: 'AID-002', employeeId: '', employeeName: 'Juan dela Cruz', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Cash', description: 'Floodwater reached chest level. Evacuated to barangay shelter.', status: 'Approved', damageType: 'Major', filedDate: 'Jun 25, 2026', approver: 'HR Manager', approvedDate: 'Jun 27, 2026', department: 'Data Engineering', islandGroup: 'Luzon' },
-    { id: 'AID-003', employeeId: '', employeeName: 'Ana Reyes', incidentId: '', incidentName: 'Typhoon Carina — Bulacan', aidType: 'Relief Goods', description: 'No food and water for 2 days. Family still at evacuation center.', status: 'Under Review', damageType: 'Minor', filedDate: 'Jun 26, 2026', department: 'QC & Audit', islandGroup: 'Luzon' },
-    { id: 'AID-004', employeeId: '', employeeName: 'Carlos Mendoza', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', description: 'Personal belongings destroyed by fire. Temporary shelter needed.', status: 'Submitted', damageType: 'Major', filedDate: 'Jun 28, 2026', department: 'GIS & Remote Sensing', islandGroup: 'Visayas' },
-    { id: 'AID-005', employeeId: '', employeeName: 'Liza Bautista', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', description: 'Minor burns, lost work laptop and clothing. Single parent.', status: 'Under Review', damageType: 'Minor', filedDate: 'Jun 28, 2026', department: 'Valuation Services', islandGroup: 'Visayas' },
-    { id: 'AID-006', employeeId: '', employeeName: 'Roberto Garcia', incidentId: '', incidentName: 'Earthquake — Davao', aidType: 'Cash', description: 'Wall cracks. House declared structurally unsafe by DPWH.', status: 'Approved', damageType: 'Major', filedDate: 'Jun 27, 2026', approver: 'Team Manager', approvedDate: 'Jun 28, 2026', department: 'Field Services', islandGroup: 'Mindanao' },
-    { id: 'AID-007', employeeId: '', employeeName: 'Patricia Flores', incidentId: '', incidentName: 'Earthquake — Davao', aidType: 'Relief Goods', description: 'Water and power outage for 3 days. Needs basic supplies.', status: 'Disbursed', damageType: 'Minor', filedDate: 'Jun 27, 2026', approver: 'HR Manager', approvedDate: 'Jun 28, 2026', department: 'Solutions Group', islandGroup: 'Mindanao' },
-    { id: 'AID-008', employeeId: '', employeeName: 'Michael Torres', incidentId: '', incidentName: 'Fire — Cebu IT Park Area', aidType: 'Cash', description: 'Renting unit in affected building. All personal items lost.', status: 'Submitted', damageType: 'Major', filedDate: 'Jun 29, 2026', department: 'Infrastructure Management', islandGroup: 'Visayas' },
+  const [aidStatusFilter, setAidStatusFilter] = useState<'All' | 'Pending Manager Review' | 'Rejected by Manager' | 'Pending Admin Review' | 'Rejected by Admin/CSR' | 'Approved'>('All');
+  const [aidApplications, setAidApplications] = useState<AidApplication[]>([]);
+  const [aidLoading, setAidLoading] = useState(false);
+  const [aidError, setAidError] = useState('');
+  const [employeeAidSubmitting, setEmployeeAidSubmitting] = useState(false);
+  const [employeeAidAttachments, setEmployeeAidAttachments] = useState<File[]>([]);
+  const [employeeAidAttachmentError, setEmployeeAidAttachmentError] = useState('');
+  const employeeAidFileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [appNotifications, setAppNotifications] = useState<AppNotification[]>([
+    {
+      id: 'seed-weather-advisory',
+      title: 'Weather advisory issued for Cebu',
+      description: 'Typhoon signal level may change in the next 6 hours.',
+      createdAt: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      audience: 'all',
+    },
+    {
+      id: 'seed-relief-distribution',
+      title: 'Relief package distribution scheduled',
+      description: 'Aid team will coordinate with affected barangays.',
+      createdAt: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      audience: 'all',
+    },
+    {
+      id: 'seed-shelter-update',
+      title: 'Shelter availability updated',
+      description: 'Nearest barangay hall is now open for evacuees.',
+      createdAt: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      audience: 'all',
+    },
   ]);
+  const [showAidDetailsModal, setShowAidDetailsModal] = useState(false);
+  const [selectedAidApplication, setSelectedAidApplication] = useState<AidApplication | null>(null);
 
   // State for Map View mode: 'island' or 'metro'
   const [mapView, setMapView] = useState<'island' | 'metro'>('island');
@@ -557,6 +579,17 @@ export default function App() {
     ]);
   }, []);
 
+  const pushNotification = useCallback((notification: Omit<AppNotification, 'id' | 'createdAt'>) => {
+    setAppNotifications((prev) => [
+      {
+        ...notification,
+        id: `${Date.now()}-${Math.random()}`,
+        createdAt: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      },
+      ...prev,
+    ]);
+  }, []);
+
   useEffect(() => {
     const loadFromServer = async () => {
       try {
@@ -590,6 +623,56 @@ export default function App() {
     };
     loadFromServer();
   }, [pushLog]);
+
+  const loadAidApplications = useCallback(async () => {
+    if (!isAuthenticated) return;
+    setAidLoading(true);
+    setAidError('');
+    try {
+      const normalizedEmail = currentUser.username.trim().toLowerCase();
+      const activeEmployee = currentUser.role === 'manager' && currentUser.username === 'manager'
+        ? ({ id: 'manager-dummy', name: 'Manager' } as Pick<Employee, 'id' | 'name'>)
+        : employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedEmail);
+
+      const params = new URLSearchParams({
+        viewerRole: currentUser.role,
+      });
+      if (currentUser.role === 'official' && !activeEmployee?.id) {
+        setAidApplications([]);
+        return;
+      }
+      if (currentUser.role === 'official' && activeEmployee?.id) {
+        params.set('viewerEmployeeId', activeEmployee.id);
+      }
+      if (currentUser.role === 'manager') {
+        params.set('managerName', activeEmployee?.name ?? currentUser.username);
+        if (activeEmployee?.id) {
+          params.set('managerId', activeEmployee.id);
+        }
+      }
+
+      const res = await fetch(`/api/aid-assistance?${params.toString()}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.message || 'Failed to load aid assistance requests.');
+      }
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setAidApplications(data as AidApplication[]);
+      } else {
+        setAidApplications([]);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load aid assistance requests.';
+      setAidError(message);
+    } finally {
+      setAidLoading(false);
+    }
+  }, [currentUser.role, currentUser.username, employees, isAuthenticated]);
+
+  useEffect(() => {
+    loadAidApplications();
+  }, [loadAidApplications]);
 
   // Compute GPS Haversine distance (km) from epicenter to employee home
   const getDistance = useCallback((emp: Employee) => {
@@ -739,91 +822,90 @@ export default function App() {
     pushLog(`BROADCAST DISPATCHED: Manual SMS beacon dispatched to all ${triggeredCount} staff in active hazard bounds.`, 'warn');
   };
 
-  const handleApproveAidApplication = (applicationId: string) => {
-    if (!isManagerUser) return;
-    const now = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    setAidApplications((prev) =>
-      prev.map((app) =>
-        app.id === applicationId
-          ? {
-              ...app,
-              status: 'Approved',
-              approver: currentEmployee?.name ?? 'Manager',
-              approvedDate: now,
-            }
-          : app
-      )
-    );
-    pushLog(`Manager approved aid application ${applicationId}.`, 'success');
+  const handleOpenAidDetails = (application: AidApplication) => {
+    setSelectedAidApplication(application);
+    setShowAidDetailsModal(true);
   };
 
-  const handleDisburseAidApplication = (applicationId: string) => {
+  const handleManagerAidReview = async (applicationId: string, decision: 'approve' | 'reject') => {
     if (!isManagerUser) return;
-    const now = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    setAidApplications((prev) =>
-      prev.map((app) =>
-        app.id === applicationId
-          ? {
-              ...app,
-              status: 'Disbursed',
-              approver: currentEmployee?.name ?? 'Manager',
-              approvedDate: now,
-            }
-          : app
-      )
-    );
-    pushLog(`Manager disbursed aid application ${applicationId}.`, 'success');
+    const remarks = window.prompt('Manager remarks (optional):', '') ?? '';
+    try {
+      const res = await fetch(`/api/aid-assistance/${applicationId}/manager-review`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          managerName: currentEmployee?.name ?? currentUser.username,
+          managerId: currentEmployee?.id,
+          decision,
+          remarks,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.message || 'Failed to submit manager review.');
+      }
+      pushLog(`Manager ${decision === 'approve' ? 'approved' : 'rejected'} aid request ${body.requestCode ?? applicationId}.`, decision === 'approve' ? 'success' : 'warn');
+      if (body.employeeId) {
+        pushNotification({
+          audience: 'employee',
+          employeeId: body.employeeId,
+          title: `Aid Request ${decision === 'approve' ? 'Approved by Manager' : 'Rejected by Manager'}`,
+          description: `${body.requestCode ?? 'Request'} was ${decision === 'approve' ? 'approved and forwarded to Admin/CSR' : 'rejected'} by your manager.${remarks ? ` Remarks: ${remarks}` : ''}`,
+        });
+      }
+      if (decision === 'approve') {
+        pushNotification({
+          audience: 'admin',
+          title: 'Aid Request Pending Admin/CSR Review',
+          description: `${body.requestCode ?? 'A request'} was manager-approved and is ready for final review.`,
+        });
+      }
+      await loadAidApplications();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to submit manager review.';
+      setAidError(message);
+      pushLog(`Aid manager review failed: ${message}`, 'err');
+    }
+  };
+
+  const handleAdminAidReview = async (applicationId: string, decision: 'approve' | 'reject') => {
+    if (currentUser.role !== 'admin') return;
+    const remarks = window.prompt('Admin/CSR remarks (optional):', '') ?? '';
+    try {
+      const res = await fetch(`/api/aid-assistance/${applicationId}/admin-review`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviewerName: currentUser.username,
+          decision,
+          remarks,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.message || 'Failed to submit admin review.');
+      }
+      pushLog(`Admin/CSR ${decision === 'approve' ? 'approved' : 'rejected'} aid request ${body.requestCode ?? applicationId}.`, decision === 'approve' ? 'success' : 'warn');
+      if (body.employeeId) {
+        pushNotification({
+          audience: 'employee',
+          employeeId: body.employeeId,
+          title: `Aid Request ${decision === 'approve' ? 'Approved' : 'Rejected by Admin/CSR'}`,
+          description: `${body.requestCode ?? 'Request'} received a final decision.${remarks ? ` Remarks: ${remarks}` : ''}`,
+        });
+      }
+      await loadAidApplications();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to submit admin review.';
+      setAidError(message);
+      pushLog(`Aid admin review failed: ${message}`, 'err');
+    }
   };
 
   const handleSubmitManagerAidApplication = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!isManagerUser) return;
-    if (!managerAidForm.employeeName.trim()) {
-      setManagerAidMessage('Please enter the employee name before submitting.');
-      return;
-    }
-    if (!managerAidForm.description.trim()) {
-      setManagerAidMessage('Please describe the aid request before submitting.');
-      return;
-    }
-
-    const newAidApplication: AidApplication = {
-      id: `AID-MGR-${Date.now()}`,
-      employeeId: '',
-      employeeName: managerAidForm.employeeName.trim(),
-      incidentId: '',
-      incidentName: managerAidForm.incidentName.trim() || 'Self-Reported Local Calamity',
-      aidType: managerAidForm.aidType,
-      description: managerAidForm.description.trim(),
-      status: 'Submitted',
-      damageType: managerAidForm.damageType,
-      filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
-      department: currentEmployee?.department ?? 'Unknown',
-      islandGroup: currentEmployee?.islandGroup ?? 'Luzon',
-    };
-
-    setAidApplications((prev) => [newAidApplication, ...prev]);
-    setManagerAidForm({ employeeName: '', aidType: 'Cash', damageType: 'Major', description: '', incidentName: '' });
-    setManagerAidMessage('Aid request submitted for manager review.');
-    pushLog(`Manager aid request filed for ${newAidApplication.employeeName}.`, 'success');
-  };
-
-  const handleForwardAidToAdmin = (applicationId: string) => {
-    if (!isManagerUser) return;
-    const now = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    setAidApplications((prev) =>
-      prev.map((app) =>
-        app.id === applicationId
-          ? {
-              ...app,
-              status: 'Manager Forwarded',
-              approver: currentEmployee?.name ?? 'Manager',
-              approvedDate: now,
-            }
-          : app
-      )
-    );
-    pushLog(`Manager approved and forwarded aid application ${applicationId} to admin.`, 'success');
+    setManagerAidMessage('Employees must submit Aid Assistance requests directly from the employee portal.');
   };
 
   const handleSimulateReply = (employeeId: string, forcedStatus?: SafetyStatus) => {
@@ -1730,8 +1812,22 @@ export default function App() {
     [calamityReports, currentEmployee?.id]
   );
 
-  const handleSubmitEmployeeAidApplication = (event: React.FormEvent) => {
+  const handleEmployeeAidAttachmentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    const validMime = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+    const invalid = files.find((file) => !validMime.has(file.type));
+    if (invalid) {
+      setEmployeeAidAttachmentError('Only PDF, JPG, JPEG, and PNG files are allowed.');
+      setEmployeeAidAttachments([]);
+      return;
+    }
+    setEmployeeAidAttachmentError('');
+    setEmployeeAidAttachments(files);
+  };
+
+  const handleSubmitEmployeeAidApplication = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (employeeAidSubmitting) return;
     if (!currentEmployee) {
       setEmployeePortalMessage('Your employee profile could not be found. Please sign in with your official email.');
       return;
@@ -1742,25 +1838,46 @@ export default function App() {
       return;
     }
 
-    const newAidApplication: AidApplication = {
-      id: `AID-EMP-${Date.now()}`,
-      employeeId: currentEmployee.id,
-      employeeName: currentEmployee.name,
-      incidentId: '',
-      incidentName: employeeAidForm.incidentName.trim() || 'Self-Reported Local Calamity',
-      aidType: employeeAidForm.aidType,
-      description: employeeAidForm.description.trim(),
-      status: 'Submitted',
-      damageType: employeeAidForm.damageType,
-      filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
-      department: currentEmployee.department,
-      islandGroup: currentEmployee.islandGroup ?? 'Luzon',
-    };
+    try {
+      setEmployeeAidSubmitting(true);
+      const formData = new FormData();
+      formData.append('employeeId', currentEmployee.id);
+      formData.append('aidType', employeeAidForm.aidType);
+      formData.append('damageType', employeeAidForm.damageType);
+      formData.append('incidentName', employeeAidForm.incidentName.trim());
+      formData.append('description', employeeAidForm.description.trim());
+      employeeAidAttachments.forEach((file) => {
+        formData.append('attachments', file);
+      });
 
-    setAidApplications((prev) => [newAidApplication, ...prev]);
-    setEmployeeAidForm({ aidType: 'Cash', damageType: 'Major', description: '', incidentName: '' });
-    setEmployeePortalMessage('Your aid request has been submitted for review.');
-    pushLog(`Employee aid request submitted by ${currentEmployee.name}.`, 'success');
+      const res = await fetch('/api/aid-assistance', {
+        method: 'POST',
+        body: formData,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = body?.detail ? ` (${body.detail})` : '';
+        throw new Error((body?.message || 'Failed to submit aid request.') + detail);
+      }
+
+      setEmployeeAidForm({ aidType: 'Cash', damageType: 'Major', description: '', incidentName: '' });
+      setEmployeeAidAttachments([]);
+      setEmployeeAidAttachmentError('');
+      setEmployeePortalMessage('Your aid request has been submitted and is pending manager review.');
+      pushLog(`Employee aid request submitted by ${currentEmployee.name}.`, 'success');
+      pushNotification({
+        audience: 'manager',
+        title: 'New Aid Assistance Request',
+        description: `${currentEmployee.name} submitted ${body.requestCode ?? 'an aid request'} for manager review.`,
+      });
+      await loadAidApplications();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to submit aid request.';
+      setEmployeePortalMessage(message);
+      pushLog(`Aid submission failed for ${currentEmployee.name}: ${message}`, 'err');
+    } finally {
+      setEmployeeAidSubmitting(false);
+    }
   };
 
   const handleSubmitEmployeeIncidentReport = (event: React.FormEvent) => {
@@ -2621,16 +2738,23 @@ export default function App() {
                       <p className="text-slate-300 text-sm mt-1">Recent alerts and portal messages for your action.</p>
                     </div>
                     <div className="p-7 space-y-4">
-                      {[
-                        { title: 'Weather advisory issued for Cebu', description: 'Typhoon signal level may change in the next 6 hours.' },
-                        { title: 'Relief package distribution scheduled', description: 'Aid team will coordinate with affected barangays.' },
-                        { title: 'Shelter availability updated', description: 'Nearest barangay hall is now open for evacuees.' },
-                      ].map((item) => (
-                        <div key={item.title} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                          <p className="font-semibold text-slate-900">{item.title}</p>
-                          <p className="mt-2 text-sm text-slate-600">{item.description}</p>
-                        </div>
-                      ))}
+                      {appNotifications
+                        .filter((item) => {
+                          if (item.audience === 'all') return true;
+                          if (item.audience === 'employee') {
+                            return item.employeeId ? item.employeeId === currentEmployee?.id : true;
+                          }
+                          return false;
+                        })
+                        .map((item) => (
+                          <div key={item.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="font-semibold text-slate-900">{item.title}</p>
+                              <span className="text-[10px] text-slate-400 font-mono">{item.createdAt}</span>
+                            </div>
+                            <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+                          </div>
+                        ))}
                       <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                         <p className="font-semibold text-slate-900">Portal messages</p>
                         <p className="mt-2 text-sm text-slate-600">{employeePortalMessage || 'No new personal notifications.'}</p>
@@ -2647,6 +2771,16 @@ export default function App() {
                     </div>
                     <div className="p-6">
                       <form className="space-y-4" onSubmit={handleSubmitEmployeeAidApplication}>
+                        {employeePortalMessage && (
+                          <div className={`rounded-xl px-4 py-3 text-sm font-medium border ${
+                            employeePortalMessage.toLowerCase().includes('submitted') || employeePortalMessage.toLowerCase().includes('pending manager review')
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                              : 'bg-rose-50 border-rose-200 text-rose-700'
+                          }`}>
+                            {employeePortalMessage}
+                            <button type="button" onClick={() => setEmployeePortalMessage('')} className="ml-2 opacity-60 hover:opacity-100">✕</button>
+                          </div>
+                        )}
                         <div className="grid gap-4 md:grid-cols-2">
                           <label className="text-sm font-semibold text-slate-700">
                             <span className="mb-2 block">Aid type</span>
@@ -2691,8 +2825,48 @@ export default function App() {
                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
                          />
                        </label>
-                        <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
-                          Submit aid request
+                        <label className="block text-sm font-semibold text-slate-700">
+                          <span className="mb-2 block">Supporting Attachment(s)</span>
+                          <input
+                            ref={employeeAidFileInputRef}
+                            type="file"
+                            multiple
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={handleEmployeeAidAttachmentChange}
+                            className="hidden"
+                          />
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => employeeAidFileInputRef.current?.click()}
+                              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#002060] hover:text-[#002060] inline-flex items-center gap-2"
+                            >
+                              <Paperclip className="w-4 h-4" /> Upload Files
+                            </button>
+                            <span className="text-xs text-slate-500">
+                              {employeeAidAttachments.length > 0 ? `${employeeAidAttachments.length} file(s) selected` : 'No files selected'}
+                            </span>
+                          </div>
+                          <input
+                            type="text"
+                            readOnly
+                            value={employeeAidAttachments.map((file) => file.name).join(', ')}
+                            placeholder="Selected file names will appear here"
+                            className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 outline-none"
+                          />
+                          <p className="mt-1 text-xs text-slate-500">Accepted formats: PDF, JPG, JPEG, PNG.</p>
+                          {employeeAidAttachmentError && (
+                            <p className="mt-1 text-xs text-rose-600">{employeeAidAttachmentError}</p>
+                          )}
+                        </label>
+                        <button
+                          type="submit"
+                          disabled={employeeAidSubmitting}
+                          className={`rounded-2xl px-4 py-2.5 text-sm font-semibold text-white transition ${
+                            employeeAidSubmitting ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#002060] hover:bg-[#001848]'
+                          }`}
+                        >
+                          {employeeAidSubmitting ? 'Submitting...' : 'Submit aid request'}
                         </button>
                       </form>
 
@@ -2708,12 +2882,23 @@ export default function App() {
                                 <div>
                                   <p className="font-semibold text-slate-900">{application.incidentName}</p>
                                   <p className="mt-1 text-sm text-slate-600">{application.description}</p>
+                                  <p className="mt-1 text-xs text-slate-500 font-mono">{application.requestCode}</p>
                                 </div>
                                 <span className="rounded-full bg-[#002060]/10 px-2.5 py-1 text-xs font-semibold text-[#002060]">
                                   {application.status}
                                 </span>
                               </div>
                               <p className="mt-3 text-sm text-slate-500">{application.aidType === 'Both' ? 'Cash and Relief Goods' : application.aidType} · {application.damageType}</p>
+                              <div className="mt-3 flex items-center justify-between gap-3">
+                                <span className="text-xs text-slate-500">Attachments: {application.attachments.length}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenAidDetails(application)}
+                                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-[#002060] hover:text-[#002060]"
+                                >
+                                  View Details
+                                </button>
+                              </div>
                             </div>
                           ))
                         )}
@@ -2877,8 +3062,8 @@ export default function App() {
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'manager-aid' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
               <HeartHandshake className={`w-4 h-4 shrink-0 ${activePage === 'manager-aid' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
               <span className="flex-1 leading-tight">Aid Assistance</span>
-              {aidApplications.filter(a => a.status === 'Submitted').length > 0 && (
-                <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{aidApplications.filter(a => a.status === 'Submitted').length}</span>
+              {aidApplications.filter(a => a.status === 'Pending Manager Review').length > 0 && (
+                <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{aidApplications.filter(a => a.status === 'Pending Manager Review').length}</span>
               )}
             </button>
             )}
@@ -2887,8 +3072,8 @@ export default function App() {
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left group ${activePage === 'aid' ? 'bg-white/15 text-white border border-white/10 shadow-inner' : 'text-blue-200/80 hover:bg-white/10 hover:text-white'}`}>
               <HeartHandshake className={`w-4 h-4 shrink-0 ${activePage === 'aid' ? 'text-white' : 'text-blue-300 group-hover:text-white'}`} />
               <span className="flex-1 leading-tight">Aid Applications</span>
-              {aidApplications.filter(a => a.status === 'Submitted').length > 0 && (
-                <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{aidApplications.filter(a => a.status === 'Submitted').length}</span>
+              {aidApplications.filter(a => a.status === 'Pending Manager Review').length > 0 && (
+                <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">{aidApplications.filter(a => a.status === 'Pending Manager Review').length}</span>
               )}
             </button>
             )}
@@ -4408,15 +4593,15 @@ export default function App() {
       {/* ──────────── AID APPLICATIONS PAGE ──────────── */}
       {activePage === 'aid' && (() => {
         const statusCfgMap: Record<string, { bg: string; dot: string }> = {
-          'Submitted':    { bg: 'bg-slate-100 text-slate-700 border-slate-300', dot: 'bg-slate-400' },
-          'Under Review': { bg: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500' },
-          'Approved':     { bg: 'bg-blue-100 text-blue-800 border-blue-300', dot: 'bg-blue-500' },
-          'Disbursed':    { bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
-          'Rejected':     { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
+          'Pending Manager Review': { bg: 'bg-slate-100 text-slate-700 border-slate-300', dot: 'bg-slate-400' },
+          'Pending Admin Review':   { bg: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500' },
+          'Approved':               { bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
+          'Rejected by Manager':    { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
+          'Rejected by Admin/CSR':  { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
         };
         const filteredAid = aidApplications.filter(a => aidStatusFilter === 'All' || a.status === aidStatusFilter);
-        const pendingCnt  = aidApplications.filter(a => a.status === 'Submitted' || a.status === 'Under Review').length;
-        const approvedCnt = aidApplications.filter(a => a.status === 'Approved' || a.status === 'Disbursed').length;
+        const pendingCnt  = aidApplications.filter(a => a.status === 'Pending Manager Review' || a.status === 'Pending Admin Review').length;
+        const approvedCnt = aidApplications.filter(a => a.status === 'Approved').length;
         const majorDamageCnt = aidApplications.filter(a => a.damageType === 'Major').length;
         return (
           <div className="flex-1 p-6 bg-[#f8fafc]">
@@ -4428,12 +4613,9 @@ export default function App() {
                   <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
                     <HeartHandshake className="w-5 h-5" /> Aid Applications
                   </h2>
-                  <p className="text-xs text-slate-500 mt-1">Track, review, and approve Crisis Aid applications from assessment through disbursement.</p>
+                  <p className="text-xs text-slate-500 mt-1">Track and finalize manager-approved Aid Assistance requests.</p>
                 </div>
-                <button onClick={() => setShowAidModal(true)}
-                  className="bg-[#002060] hover:bg-[#003399] text-white text-xs font-black px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition active:scale-95 shadow-sm">
-                  <Plus className="w-4 h-4" /> New Application
-                </button>
+                {aidLoading && <span className="text-xs text-slate-500">Loading requests...</span>}
               </div>
 
               {/* KPI Strip */}
@@ -4441,7 +4623,7 @@ export default function App() {
                 {[
                   { label: 'Total Applications', value: aidApplications.length, color: 'bg-white border-slate-200', textColor: 'text-slate-800' },
                   { label: 'Pending Review', value: pendingCnt, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-700' },
-                  { label: 'Approved / Disbursed', value: approvedCnt, color: 'bg-emerald-50 border-emerald-200', textColor: 'text-emerald-700' },
+                  { label: 'Approved', value: approvedCnt, color: 'bg-emerald-50 border-emerald-200', textColor: 'text-emerald-700' },
                   { label: 'Major Damage Cases', value: majorDamageCnt, color: 'bg-rose-50 border-rose-200', textColor: 'text-rose-700' },
                 ].map(({ label, value, color, textColor }) => (
                   <div key={label} className={`${color} border rounded-xl p-4 flex flex-col gap-1`}>
@@ -4454,21 +4636,21 @@ export default function App() {
               {/* Workflow stepper */}
               <div className="bg-white border border-slate-200 rounded-xl px-5 py-3 flex items-center gap-2 flex-wrap">
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-1">Workflow:</span>
-                {['Submitted', 'Under Review', 'Approved', 'Disbursed'].map((step, i) => (
+                {['Pending Manager Review', 'Pending Admin Review', 'Approved'].map((step, i) => (
                   <React.Fragment key={step}>
                     {i > 0 && <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />}
                     <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${statusCfgMap[step]?.bg || ''}`}>{step}</span>
                   </React.Fragment>
                 ))}
                 <span className="mx-2 text-slate-200">|</span>
-                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${statusCfgMap['Rejected'].bg}`}>Rejected</span>
+                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${statusCfgMap['Rejected by Manager'].bg}`}>Rejected</span>
               </div>
 
               {/* Status filter */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-sm px-4 py-3 flex items-center gap-3 flex-wrap">
                 <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Filter:</span>
                 <div className="flex gap-1.5 bg-slate-50 border border-slate-200 rounded-lg p-1 flex-wrap">
-                  {(['All', 'Submitted', 'Under Review', 'Approved', 'Disbursed', 'Rejected'] as const).map(s => (
+                  {(['All', 'Pending Manager Review', 'Pending Admin Review', 'Approved', 'Rejected by Manager', 'Rejected by Admin/CSR'] as const).map(s => (
                     <button key={s} onClick={() => setAidStatusFilter(s)}
                       className={`px-2.5 py-1.5 rounded-md text-[11px] font-black border transition-all cursor-pointer ${
                         aidStatusFilter === s ? 'bg-[#002060] border-[#001848] text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
@@ -4477,6 +4659,10 @@ export default function App() {
                 </div>
                 <span className="text-[10px] text-slate-400 font-mono ml-auto">{filteredAid.length} of {aidApplications.length} records</span>
               </div>
+
+              {aidError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">{aidError}</div>
+              )}
 
               {/* Table */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
@@ -4490,18 +4676,18 @@ export default function App() {
                        <th className="text-left px-4 py-3 font-black">Type of Damage</th>
                        <th className="text-left px-4 py-3 font-black">Filed Date</th>
                        <th className="text-center px-4 py-3 font-black">Status</th>
-                       <th className="text-left px-4 py-3 font-black">Approver</th>
-                       {isManagerUser && <th className="text-left px-4 py-3 font-black">Actions</th>}
+                       <th className="text-left px-4 py-3 font-black">Manager Review</th>
+                       <th className="text-left px-4 py-3 font-black">Actions</th>
                      </tr>
                    </thead>
                   <tbody>
                     {filteredAid.length === 0
                       ? <tr><td colSpan={9} className="text-center py-16 text-slate-400 text-sm">No applications match your filter.</td></tr>
                       : filteredAid.map((app, idx) => {
-                          const sc = statusCfgMap[app.status] || statusCfgMap['Submitted'];
+                          const sc = statusCfgMap[app.status] || statusCfgMap['Pending Manager Review'];
                           return (
                             <tr key={app.id} className={`border-t border-slate-100 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-[#f8fafc]'} hover:bg-blue-50/40`}>
-                              <td className="px-4 py-3 font-mono font-black text-[#002060] text-[11px]">{app.id}</td>
+                              <td className="px-4 py-3 font-mono font-black text-[#002060] text-[11px]">{app.requestCode}</td>
                               <td className="px-4 py-3">
                                 <div className="flex flex-col gap-0.5">
                                   <span className="font-bold text-slate-800">{app.employeeName}</span>
@@ -4529,25 +4715,27 @@ export default function App() {
                                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sc.dot}`} />{app.status}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-slate-500 text-[11px]">{app.approver || '—'}</td>
-                              {isManagerUser && (
-                                <td className="px-4 py-3">
-                                  <div className="flex flex-wrap gap-2 justify-end">
-                                    {app.status === 'Submitted' && (
+                              <td className="px-4 py-3 text-slate-500 text-[11px]">{app.managerReview?.reviewedBy || '—'}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex flex-wrap gap-2 justify-end">
+                                  <button
+                                    onClick={() => handleOpenAidDetails(app)}
+                                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black text-slate-700 hover:border-[#002060] hover:text-[#002060] transition inline-flex items-center gap-1"
+                                  ><Eye className="w-3 h-3" />Details</button>
+                                  {currentUser.role === 'admin' && app.status === 'Pending Admin Review' && (
+                                    <>
                                       <button
-                                        onClick={() => handleApproveAidApplication(app.id)}
-                                        className="rounded-md bg-blue-600 px-2.5 py-1 text-[10px] font-black text-white hover:bg-blue-500 transition"
-                                      >Approve</button>
-                                    )}
-                                    {(app.status === 'Approved' || app.status === 'Under Review') && (
-                                      <button
-                                        onClick={() => handleDisburseAidApplication(app.id)}
+                                        onClick={() => handleAdminAidReview(app.id, 'approve')}
                                         className="rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] font-black text-white hover:bg-emerald-500 transition"
-                                      >Disburse</button>
-                                    )}
-                                  </div>
-                                </td>
-                              )}
+                                      >Approve</button>
+                                      <button
+                                        onClick={() => handleAdminAidReview(app.id, 'reject')}
+                                        className="rounded-md bg-rose-600 px-2.5 py-1 text-[10px] font-black text-white hover:bg-rose-500 transition"
+                                      >Reject</button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
                             </tr>
                           );
                         })
@@ -4564,14 +4752,14 @@ export default function App() {
       {/* ──────────── MANAGER AID ASSISTANCE PAGE ──────────── */}
       {activePage === 'manager-aid' && (() => {
         const managerAidStatusCfgMap: Record<string, { bg: string; dot: string }> = {
-          'Submitted':          { bg: 'bg-slate-100 text-slate-700 border-slate-300', dot: 'bg-slate-400' },
-          'Manager Forwarded':  { bg: 'bg-blue-100 text-blue-800 border-blue-300', dot: 'bg-blue-500' },
-          'Under Review':       { bg: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500' },
-          'Approved':           { bg: 'bg-teal-100 text-teal-800 border-teal-300', dot: 'bg-teal-500' },
-          'Disbursed':          { bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
-          'Rejected':           { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
+          'Pending Manager Review': { bg: 'bg-slate-100 text-slate-700 border-slate-300', dot: 'bg-slate-400' },
+          'Pending Admin Review':   { bg: 'bg-blue-100 text-blue-800 border-blue-300', dot: 'bg-blue-500' },
+          'Approved':               { bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
+          'Rejected by Manager':    { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
+          'Rejected by Admin/CSR':  { bg: 'bg-rose-100 text-rose-800 border-rose-300', dot: 'bg-rose-500' },
         };
-        const mgrAidApplications = aidApplications.filter((a) => a.approver === currentEmployee?.name || !a.approver || a.status === 'Submitted' || a.status === 'Manager Forwarded');
+        const directReportIds = new Set(directReports.map((emp) => emp.id));
+        const mgrAidApplications = aidApplications.filter((a) => directReportIds.has(a.employeeId));
         return (
           <div className="flex-1 p-6 bg-[#f8fafc]">
             <div className="max-w-[1550px] mx-auto flex flex-col gap-5">
@@ -4582,98 +4770,31 @@ export default function App() {
                   <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
                     <HeartHandshake className="w-5 h-5" /> Aid Assistance
                   </h2>
-                  <p className="text-xs text-slate-500 mt-1">Apply for aid on behalf of your team. Submissions require your approval, then are forwarded to admin for final processing.</p>
+                  <p className="text-xs text-slate-500 mt-1">Review Aid Assistance requests submitted by your direct reports.</p>
                 </div>
               </div>
 
               {/* Workflow stepper */}
               <div className="bg-white border border-slate-200 rounded-xl px-5 py-3 flex items-center gap-2 flex-wrap">
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-1">Workflow:</span>
-                {['Submitted', 'Manager Forwarded', 'Approved', 'Disbursed'].map((step, i) => (
+                {['Pending Manager Review', 'Pending Admin Review', 'Approved'].map((step, i) => (
                   <React.Fragment key={step}>
                     {i > 0 && <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />}
                     <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${managerAidStatusCfgMap[step]?.bg || ''}`}>{step}</span>
                   </React.Fragment>
                 ))}
                 <span className="mx-2 text-slate-200">|</span>
-                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${managerAidStatusCfgMap['Rejected'].bg}`}>Rejected</span>
+                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${managerAidStatusCfgMap['Rejected by Manager'].bg}`}>Rejected</span>
               </div>
 
               {/* Apply for Aid form */}
               <section className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
                 <div className="bg-[#002060] px-6 py-4 border-b border-[#001848]">
-                  <p className="text-white font-extrabold text-sm tracking-wide">Apply for Aid Assistance</p>
-                  <p className="text-blue-300 text-[11px] mt-1">Submit a request for an employee. You must approve it before it is forwarded to admin.</p>
+                  <p className="text-white font-extrabold text-sm tracking-wide">Submission Policy</p>
+                  <p className="text-blue-300 text-[11px] mt-1">Aid Assistance requests are employee-initiated and routed to you for review.</p>
                 </div>
-                <div className="p-6">
-                  <form className="space-y-4" onSubmit={handleSubmitManagerAidApplication}>
-                    <label className="block text-sm font-semibold text-slate-700">
-                      <span className="mb-2 block">Employee name</span>
-                      <input
-                        value={managerAidForm.employeeName}
-                        onChange={(event) => setManagerAidForm((prev) => ({ ...prev, employeeName: event.target.value }))}
-                        placeholder="e.g. Maria Santos"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                      />
-                    </label>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <label className="text-sm font-semibold text-slate-700">
-                        <span className="mb-2 block">Aid type</span>
-                        <select
-                          value={managerAidForm.aidType}
-                          onChange={(event) => setManagerAidForm((prev) => ({ ...prev, aidType: event.target.value as 'Cash' | 'Relief Goods' | 'Both' }))}
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                        >
-                          <option value="Cash">Cash</option>
-                          <option value="Relief Goods">Relief Goods</option>
-                          <option value="Both">Cash and Relief Goods</option>
-                        </select>
-                      </label>
-                      <label className="text-sm font-semibold text-slate-700">
-                        <span className="mb-2 block">Type of Damage</span>
-                        <select
-                          value={managerAidForm.damageType}
-                          onChange={(event) => setManagerAidForm((prev) => ({ ...prev, damageType: event.target.value as 'Major' | 'Minor' }))}
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                        >
-                          <option value="Major">Major</option>
-                          <option value="Minor">Minor</option>
-                        </select>
-                      </label>
-                    </div>
-                    <label className="block text-sm font-semibold text-slate-700">
-                      <span className="mb-2 block">Incident / event name</span>
-                      <input
-                        value={managerAidForm.incidentName}
-                        onChange={(event) => setManagerAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
-                        placeholder="e.g. Typhoon Carina"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                      />
-                    </label>
-                    <label className="block text-sm font-semibold text-slate-700">
-                      <span className="mb-2 block">Why do they need aid?</span>
-                      <textarea
-                        value={managerAidForm.description}
-                        onChange={(event) => setManagerAidForm((prev) => ({ ...prev, description: event.target.value }))}
-                        rows={4}
-                        placeholder="Describe the employee's condition or the support needed."
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none resize-none"
-                      />
-                    </label>
-                    {managerAidMessage && (
-                      <div className={`rounded-xl px-4 py-3 text-sm font-medium border ${
-                        managerAidMessage.includes('submitted') || managerAidMessage.includes('review')
-                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                          : 'bg-rose-50 border-rose-200 text-rose-700'
-                      }`}>
-                        {managerAidMessage}
-                        <button type="button" onClick={() => setManagerAidMessage('')} className="ml-2 opacity-60 hover:opacity-100">✕</button>
-                      </div>
-                    )}
-                    <button type="submit" className="rounded-2xl bg-[#002060] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#001848]">
-                      Submit aid request
-                    </button>
-                  </form>
+                <div className="p-6 text-sm text-slate-600">
+                  Employees submit requests from the Employee Portal. Your role here is to review, approve, or reject submissions from your direct reports.
                 </div>
               </section>
 
@@ -4682,7 +4803,7 @@ export default function App() {
                 <div className="px-6 py-4 bg-gradient-to-r from-[#001f4b] to-[#00255a] border-b border-[#00172f] flex items-center justify-between">
                   <div>
                     <p className="text-white font-black text-base tracking-wide">Team Aid Applications</p>
-                    <p className="text-blue-300 text-xs mt-0.5">Review submissions, approve, and forward to admin for final processing</p>
+                    <p className="text-blue-300 text-xs mt-0.5">Review direct-report submissions for manager approval or rejection</p>
                   </div>
                 </div>
                 <div className="divide-y divide-slate-100">
@@ -4690,43 +4811,47 @@ export default function App() {
                     <div className="px-6 py-12 text-center text-slate-400 text-sm">No aid applications submitted yet.</div>
                   ) : (
                     mgrAidApplications.map((application) => {
-                      const sc = managerAidStatusCfgMap[application.status] || managerAidStatusCfgMap['Submitted'];
+                      const sc = managerAidStatusCfgMap[application.status] || managerAidStatusCfgMap['Pending Manager Review'];
                       return (
                         <div key={application.id} className="px-6 py-4 flex items-start gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className="font-bold text-slate-800 text-sm">{application.employeeName}</p>
-                              <span className="text-[10px] font-mono text-slate-400">{application.id}</span>
+                              <span className="text-[10px] font-mono text-slate-400">{application.requestCode}</span>
                               <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black ${sc.bg}`}>
                                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sc.dot}`} />{application.status}
                               </span>
                             </div>
                             <p className="text-slate-500 text-xs mt-1">{application.incidentName} · {application.aidType === 'Both' ? 'Cash and Relief Goods' : application.aidType} · {application.damageType}</p>
                             <p className="text-slate-600 text-xs mt-1.5">{application.description}</p>
-                            {application.status === 'Submitted' && (
+                            {application.status === 'Pending Manager Review' && (
                               <p className="text-amber-700 text-xs mt-2">Awaiting your review. Approve to forward this request to admin.</p>
                             )}
-                            {application.status === 'Manager Forwarded' && (
-                              <p className="text-blue-700 text-xs mt-2">Forwarded to admin. Awaiting final approval and disbursement.</p>
+                            {application.status === 'Pending Admin Review' && (
+                              <p className="text-blue-700 text-xs mt-2">Forwarded to admin. Awaiting final decision.</p>
                             )}
                             {application.status === 'Approved' && (
-                              <p className="text-teal-700 text-xs mt-2">Approved by admin. Pending disbursement.</p>
+                              <p className="text-teal-700 text-xs mt-2">Approved by admin/CSR.</p>
                             )}
                           </div>
                           <div className="shrink-0 flex flex-col gap-2">
-                            {application.status === 'Submitted' && (
+                            <button
+                              onClick={() => handleOpenAidDetails(application)}
+                              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700 hover:border-[#002060] hover:text-[#002060] transition inline-flex items-center gap-1"
+                            ><Eye className="w-3 h-3" />Details</button>
+                            {application.status === 'Pending Manager Review' && (
                               <>
                                 <button
-                                  onClick={() => handleForwardAidToAdmin(application.id)}
+                                  onClick={() => handleManagerAidReview(application.id, 'approve')}
                                   className="rounded-md bg-blue-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-blue-500 transition"
-                                >Approve &amp; Forward</button>
+                                >Approve</button>
                                 <button
-                                  onClick={() => handleApproveAidApplication(application.id)}
+                                  onClick={() => handleManagerAidReview(application.id, 'reject')}
                                   className="rounded-md bg-rose-500 px-3 py-1.5 text-[11px] font-black text-white hover:bg-rose-400 transition"
                                 >Reject</button>
                               </>
                             )}
-                            {application.status === 'Manager Forwarded' && (
+                            {application.status === 'Pending Admin Review' && (
                               <span className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 text-center">With Admin</span>
                             )}
                           </div>
@@ -4754,7 +4879,7 @@ export default function App() {
         const exAwaitCount   = employees.filter(e => e.status === 'Yellow').length;
         const exNoSigCount   = employees.filter(e => e.status === 'Red').length;
         const exRespRate     = employees.length > 0 ? Math.round(((exSafeCount + exAwaitCount) / employees.length) * 100) : 100;
-        const exDisbursed    = aidApplications.filter(a => a.status === 'Disbursed').length;
+        const exPendingFinal = aidApplications.filter(a => a.status === 'Pending Admin Review').length;
         const exApproved     = aidApplications.filter(a => a.status === 'Approved').length;
         const islandBreakdown = (['Luzon', 'Visayas', 'Mindanao'] as const).map(ig => {
           const emps  = employees.filter(e => e.islandGroup === ig);
@@ -4767,7 +4892,7 @@ export default function App() {
         aidApplications.forEach(a => {
           if (!incidentAidMap[a.incidentName]) incidentAidMap[a.incidentName] = { submitted: 0, approved: 0, majorDamage: 0 };
           incidentAidMap[a.incidentName].submitted++;
-          if (a.status === 'Approved' || a.status === 'Disbursed') { incidentAidMap[a.incidentName].approved++; }
+          if (a.status === 'Approved') { incidentAidMap[a.incidentName].approved++; }
           if (a.damageType === 'Major') { incidentAidMap[a.incidentName].majorDamage++; }
         });
         // SVG donut helpers
@@ -4804,7 +4929,7 @@ export default function App() {
                   { label: 'Active Incidents', value: calamityReports.length, sub: simulationActive ? '1 currently active' : 'No active alert', grad: 'from-[#002060] to-[#0055cc]', Icon: Siren },
                   { label: 'Employees Impacted', value: totalImpacted, sub: `of ${employees.length} total personnel`, grad: 'from-rose-600 to-rose-500', Icon: Users },
                   { label: 'Response Rate', value: `${exRespRate}%`, sub: `${exSafeCount} confirmed safe`, grad: 'from-emerald-700 to-emerald-500', Icon: ShieldCheck },
-                  { label: 'Aid Disbursed', value: exDisbursed, sub: `${exApproved} approved`, grad: 'from-amber-600 to-amber-500', Icon: DollarSign },
+                  { label: 'Pending Final Review', value: exPendingFinal, sub: `${exApproved} approved`, grad: 'from-amber-600 to-amber-500', Icon: DollarSign },
                 ].map(({ label, value, sub, grad, Icon }) => (
                   <div key={label} className={`bg-gradient-to-br ${grad} rounded-2xl p-5 text-white shadow-lg`}>
                     <div className="flex items-center justify-between mb-3">
@@ -5417,153 +5542,102 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Aid Application Modal ──────────────────────────────────────────── */}
-      {showAidModal && (
+      {showAidDetailsModal && selectedAidApplication && (
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           style={{ background: 'rgba(0,10,40,0.70)', backdropFilter: 'blur(6px)' }}
-          onClick={() => setShowAidModal(false)}
+          onClick={() => setShowAidDetailsModal(false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl border border-blue-100 w-full max-w-lg max-h-[92vh] overflow-y-auto flex flex-col"
+            className="bg-white rounded-2xl shadow-2xl border border-blue-100 w-full max-w-4xl max-h-[92vh] overflow-y-auto flex flex-col"
             onClick={e => e.stopPropagation()}
           >
             <div className="bg-gradient-to-r from-[#002060] via-[#003399] to-[#0055cc] px-6 py-4 flex items-center justify-between rounded-t-2xl shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="bg-white/15 p-2 rounded-lg border border-white/20">
-                  <HeartHandshake className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-white font-black text-base tracking-tight">New Aid Application</h2>
-                  <p className="text-blue-200 text-xs font-medium">File a crisis aid request for an employee</p>
-                </div>
+              <div>
+                <h2 className="text-white font-black text-base tracking-tight">Aid Assistance Request Details</h2>
+                <p className="text-blue-200 text-xs font-medium">{selectedAidApplication.requestCode}</p>
               </div>
-              <button onClick={() => setShowAidModal(false)}
-                className="text-white/60 hover:text-white hover:bg-white/15 p-2 rounded-lg transition-all cursor-pointer border border-transparent hover:border-white/20">
+              <button onClick={() => setShowAidDetailsModal(false)} className="text-white/70 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                if (!aidForm.employeeName.trim()) return;
-                const newApp: AidApplication = {
-                  id: `AID-${String(aidApplications.length + 1).padStart(3, '0')}`,
-                  employeeId: '',
-                  employeeName: aidForm.employeeName.trim(),
-                  incidentId: '',
-                  incidentName: aidForm.incidentName || 'General Crisis Aid',
-                  aidType: aidForm.aidType,
-                  description: aidForm.description.trim(),
-                  status: 'Submitted',
-                  damageType: aidForm.damageType,
-                  filedDate: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
-                  department: aidForm.department,
-                  islandGroup: aidForm.islandGroup,
-                };
-                setAidApplications(prev => [newApp, ...prev]);
-                setShowAidModal(false);
-                setAidForm({ employeeName: '', incidentName: '', aidType: 'Cash', damageType: 'Major', description: '', department: 'AI Operations', islandGroup: 'Luzon' });
-                pushLog(`📋 Aid Application filed: ${newApp.id} for ${newApp.employeeName} — ${newApp.aidType} · ${newApp.incidentName}`, 'success');
-              }}
-              className="p-6 flex flex-col gap-4"
-            >
-              {/* Employee Name */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Employee Full Name *</label>
-                <input type="text" required placeholder="e.g. Maria Clara Santos"
-                  value={aidForm.employeeName} onChange={e => setAidForm(p => ({ ...p, employeeName: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-
-{/* Incident */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Related Incident</label>
-                  <select
-                    value={aidForm.incidentName}
-                    onChange={e => setAidForm(p => ({ ...p, incidentName: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                  >
-                    <option value="">Fire, Earthquake, Typhoon, or Other</option>
-                    <option value="Fire">🔥 Fire</option>
-                    <option value="Earthquake">🚨 Earthquake</option>
-                    <option value="Typhoon">🌀 Typhoon</option>
-                    <option value="Other">⚠️ Other</option>
-                  </select>
+            <div className="p-6 grid gap-6 md:grid-cols-2">
+              <section className="rounded-xl border border-slate-200 p-4">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Employee Information</p>
+                <div className="mt-3 text-sm text-slate-700 space-y-1">
+                  <p><span className="font-semibold">Employee ID:</span> {selectedAidApplication.employeeId}</p>
+                  <p><span className="font-semibold">Employee Name:</span> {selectedAidApplication.employeeName}</p>
+                  <p><span className="font-semibold">Department:</span> {selectedAidApplication.department}</p>
+                  <p><span className="font-semibold">Position:</span> {selectedAidApplication.position || '—'}</p>
                 </div>
+              </section>
 
-              {/* Aid Type */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Aid Type *</label>
-                 <div className="grid grid-cols-3 gap-2">
-                   {(['Cash', 'Relief Goods', 'Both'] as const).map(t => (
-                     <button key={t} type="button" onClick={() => setAidForm(p => ({ ...p, aidType: t }))}
-                       className={`py-2 px-3 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
-                         aidForm.aidType === t ? 'border-[#003399] bg-blue-50 text-[#002060] ring-1 ring-blue-300' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
-                       }`}>{t === 'Both' ? 'Cash and Relief Goods' : t}</button>
-                   ))}
-                 </div>
-              </div>
+              <section className="rounded-xl border border-slate-200 p-4">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Aid Assistance Details</p>
+                <div className="mt-3 text-sm text-slate-700 space-y-1">
+                  <p><span className="font-semibold">Aid Type:</span> {selectedAidApplication.aidType === 'Both' ? 'Cash and Relief Goods' : selectedAidApplication.aidType}</p>
+                  <p><span className="font-semibold">Type of Damage:</span> {selectedAidApplication.damageType}</p>
+                  <p><span className="font-semibold">Incident / Event Name:</span> {selectedAidApplication.incidentName}</p>
+                  <p><span className="font-semibold">Why Do You Need Aid?:</span> {selectedAidApplication.description}</p>
+                  <p><span className="font-semibold">Date Submitted:</span> {selectedAidApplication.filedDate}</p>
+                  <p><span className="font-semibold">Current Status:</span> {selectedAidApplication.status}</p>
+                </div>
+              </section>
 
-              {/* Type of Damage */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Type of Damage</label>
-                <div className="flex gap-2">
-                  {(['Major', 'Minor'] as const).map(p => (
-                    <button key={p} type="button" onClick={() => setAidForm(prev => ({ ...prev, damageType: p }))}
-                      className={`flex-1 py-2 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
-                        aidForm.damageType === p
-                          ? p === 'Major' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-[#003399] bg-blue-50 text-[#002060]'
-                          : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
-                      }`}>{p}</button>
+              <section className="rounded-xl border border-slate-200 p-4 md:col-span-2">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Supporting Attachments</p>
+                <div className="mt-3 space-y-2">
+                  {selectedAidApplication.attachments.length === 0 ? (
+                    <p className="text-sm text-slate-500">No attachments uploaded.</p>
+                  ) : selectedAidApplication.attachments.map((attachment) => (
+                    <div key={attachment.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">{attachment.fileName}</p>
+                        <p className="text-[11px] text-slate-500">Uploaded: {new Date(attachment.uploadedAt).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a href={attachment.publicUrl} target="_blank" rel="noopener noreferrer" className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:border-[#002060] hover:text-[#002060] inline-flex items-center gap-1"><Eye className="w-3 h-3" />View</a>
+                        <a href={attachment.publicUrl} download={attachment.fileName} className="rounded-md bg-[#002060] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#003399] inline-flex items-center gap-1"><Download className="w-3 h-3" />Download</a>
+                      </div>
+                    </div>
                   ))}
                 </div>
-              </div>
+              </section>
 
-              {/* Department + Island */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Department</label>
-                  <select value={aidForm.department} onChange={e => setAidForm(p => ({ ...p, department: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
-                    {['AI Operations', 'GIS & Remote Sensing', 'Valuation Services', 'Real Estate Analytics', 'Data Engineering', 'QC & Audit', 'Solutions Group', 'Infrastructure Management', 'People Operations', 'Finance', 'Security', 'Field Services'].map(d => (
-                      <option key={d}>{d}</option>
-                    ))}
-                  </select>
+              <section className="rounded-xl border border-slate-200 p-4">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Manager Review</p>
+                <div className="mt-3 text-sm text-slate-700 space-y-1">
+                  <p><span className="font-semibold">Decision:</span> {selectedAidApplication.managerReview?.decision || 'Pending'}</p>
+                  <p><span className="font-semibold">Remarks:</span> {selectedAidApplication.managerReview?.remarks || '—'}</p>
+                  <p><span className="font-semibold">Reviewed By:</span> {selectedAidApplication.managerReview?.reviewedBy || '—'}</p>
+                  <p><span className="font-semibold">Reviewed Date:</span> {selectedAidApplication.managerReview?.reviewedDate || '—'}</p>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Island Group</label>
-                  <div className="flex gap-1.5">
-                    {(['Luzon', 'Visayas', 'Mindanao'] as const).map(ig => (
-                      <button key={ig} type="button" onClick={() => setAidForm(p => ({ ...p, islandGroup: ig }))}
-                        className={`flex-1 py-2 rounded-lg border text-[11px] font-bold transition-all cursor-pointer ${
-                          aidForm.islandGroup === ig ? 'border-[#002060] bg-blue-50 text-[#002060]' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
-                        }`}>{ig}</button>
-                    ))}
-                  </div>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 p-4">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Admin/CSR Review</p>
+                <div className="mt-3 text-sm text-slate-700 space-y-1">
+                  <p><span className="font-semibold">Decision:</span> {selectedAidApplication.adminReview?.decision || 'Pending'}</p>
+                  <p><span className="font-semibold">Remarks:</span> {selectedAidApplication.adminReview?.remarks || '—'}</p>
+                  <p><span className="font-semibold">Reviewed By:</span> {selectedAidApplication.adminReview?.reviewedBy || '—'}</p>
+                  <p><span className="font-semibold">Reviewed Date:</span> {selectedAidApplication.adminReview?.reviewedDate || '—'}</p>
                 </div>
-              </div>
+              </section>
 
-              {/* Description */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Damage / Situation Description *</label>
-                <textarea required rows={3} placeholder="Describe the damage or situation requiring aid..."
-                  value={aidForm.description} onChange={e => setAidForm(p => ({ ...p, description: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-              </div>
-
-              <div className="flex gap-3 pt-1">
-                <button type="button" onClick={() => setShowAidModal(false)}
-                  className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-lg text-xs transition cursor-pointer">
-                  Cancel
-                </button>
-                <button type="submit"
-                  className="flex-1 bg-[#002060] hover:bg-[#003399] text-white font-bold py-2.5 rounded-lg text-xs transition cursor-pointer active:scale-95">
-                  Submit Application
-                </button>
-              </div>
-            </form>
+              <section className="rounded-xl border border-slate-200 p-4 md:col-span-2">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Approval Timeline</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-bold">
+                  <span className="px-2.5 py-1 rounded-full border bg-slate-100 text-slate-700 border-slate-300">Submitted</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                  <span className={`px-2.5 py-1 rounded-full border ${selectedAidApplication.status === 'Pending Manager Review' ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-emerald-100 text-emerald-700 border-emerald-300'}`}>Pending Manager Review</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                  <span className={`px-2.5 py-1 rounded-full border ${selectedAidApplication.status === 'Pending Admin Review' ? 'bg-amber-100 text-amber-800 border-amber-300' : (selectedAidApplication.status === 'Approved' || selectedAidApplication.status === 'Rejected by Admin/CSR') ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>Pending Admin Review</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                  <span className={`px-2.5 py-1 rounded-full border ${selectedAidApplication.status === 'Approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : (selectedAidApplication.status === 'Rejected by Manager' || selectedAidApplication.status === 'Rejected by Admin/CSR') ? 'bg-rose-100 text-rose-700 border-rose-300' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>{selectedAidApplication.status === 'Approved' ? 'Approved' : selectedAidApplication.status.includes('Rejected') ? 'Rejected' : 'Final Decision Pending'}</span>
+                </div>
+              </section>
+            </div>
           </div>
         </div>
       )}

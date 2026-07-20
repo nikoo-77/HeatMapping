@@ -378,7 +378,7 @@ export async function updateEmployeeProfile(empId: string, payload: { contactNum
     return { updated: false };
   }
 
-  const { error } = await supabase
+  const { error } = await (supabase as any)
     .from('Employee Details')
     .update(dbUpdate)
     .eq('Employee ID', empId);

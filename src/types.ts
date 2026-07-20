@@ -2,20 +2,38 @@ export type Carrier = 'Globe' | 'Smart' | 'DITO';
 
 export interface AidApplication {
   id: string;
+  requestCode: string;
   employeeId: string;
   employeeName: string;
+  position?: string;
   incidentId: string;
   incidentName: string;
   aidType: 'Cash' | 'Relief Goods' | 'Both';
   description: string;
-  status: 'Submitted' | 'Under Review' | 'Manager Forwarded' | 'Approved' | 'Disbursed' | 'Rejected';
+  status: 'Pending Manager Review' | 'Rejected by Manager' | 'Pending Admin Review' | 'Rejected by Admin/CSR' | 'Approved';
   damageType: 'Major' | 'Minor';
   filedDate: string;
-  approver?: string;
-  approvedDate?: string;
   department: string;
   islandGroup: string;
-  proofAttachmentName?: string;
+  managerReview?: {
+    decision: 'Approved' | 'Rejected' | 'Pending';
+    remarks?: string;
+    reviewedBy?: string;
+    reviewedDate?: string;
+  };
+  adminReview?: {
+    decision: 'Approved' | 'Rejected' | 'Pending';
+    remarks?: string;
+    reviewedBy?: string;
+    reviewedDate?: string;
+  };
+  attachments: {
+    id: string;
+    fileName: string;
+    filePath: string;
+    publicUrl: string;
+    uploadedAt: string;
+  }[];
 }
 export type SafetyStatus = 'Green' | 'Yellow' | 'Red';
 export type TowerStatus = 'ONLINE' | 'CONGESTED' | 'OFFLINE';

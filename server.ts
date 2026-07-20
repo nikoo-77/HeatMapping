@@ -3,6 +3,8 @@ dotenv.config({ path: '.env.local' });
 dotenv.config(); // fallback to .env if present
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
+import multer from 'multer';
+import { extname } from 'path';
 import { resolveEmployeeRegion } from './lib/regionResolver.js';
 
 const app = express();
@@ -74,6 +76,64 @@ interface SupabaseEmployeeRow {
   role?: string | null;
   'Manager\'s Name'?: string | null;
 }
+
+type AidStatus =
+  | 'Pending Manager Review'
+  | 'Rejected by Manager'
+  | 'Pending Admin Review'
+  | 'Rejected by Admin/CSR'
+  | 'Approved';
+
+interface AidAssistanceRequestRow {
+  id: string;
+  request_code: string;
+  employee_id: string;
+  employee_name: string;
+  department: string;
+  position: string | null;
+  manager_id: string | null;
+  manager_name: string | null;
+  aid_type: 'Cash' | 'Relief Goods' | 'Both';
+  damage_type: 'Major' | 'Minor';
+  incident_name: string;
+  reason: string;
+  status: AidStatus;
+  submitted_at: string;
+  manager_decision: 'Approved' | 'Rejected' | null;
+  manager_remarks: string | null;
+  manager_reviewed_by: string | null;
+  manager_reviewed_at: string | null;
+  admin_decision: 'Approved' | 'Rejected' | null;
+  admin_remarks: string | null;
+  admin_reviewed_by: string | null;
+  admin_reviewed_at: string | null;
+}
+
+interface AidAttachmentRow {
+  id: string;
+  aid_assistance_id: string;
+  employee_id: string;
+  file_name: string;
+  file_path: string;
+  public_url: string;
+  uploaded_at: string;
+}
+
+const AID_ATTACHMENT_BUCKET = process.env.SUPABASE_AID_ATTACHMENT_BUCKET || 'aid-assistance-attachments';
+const ALLOWED_ATTACHMENT_MIME = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+]);
+const ALLOWED_ATTACHMENT_EXT = new Set(['.pdf', '.jpg', '.jpeg', '.png']);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 10,
+  },
+});
 
 // ── Utility helpers ───────────────────────────────────────────────────────────
 function hashString(str: string): number {
@@ -417,6 +477,58 @@ function readManagerFromRequest(req: express.Request): { name: string; id?: stri
   return { name: name.trim(), id };
 }
 
+function buildAidRequestCode(): string {
+  const ts = Date.now().toString();
+  return `AID-${ts.slice(-8)}`;
+}
+
+function mapAidRequestToResponse(row: AidAssistanceRequestRow, attachments: AidAttachmentRow[]) {
+  return {
+    id: row.id,
+    requestCode: row.request_code,
+    employeeId: row.employee_id,
+    employeeName: row.employee_name,
+    department: row.department,
+    position: row.position ?? undefined,
+    incidentId: '',
+    incidentName: row.incident_name,
+    aidType: row.aid_type,
+    description: row.reason,
+    status: row.status,
+    damageType: row.damage_type,
+    filedDate: new Date(row.submitted_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+    islandGroup: 'Luzon',
+    managerReview: {
+      decision: row.manager_decision ?? 'Pending',
+      remarks: row.manager_remarks ?? undefined,
+      reviewedBy: row.manager_reviewed_by ?? undefined,
+      reviewedDate: row.manager_reviewed_at
+        ? new Date(row.manager_reviewed_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+        : undefined,
+    },
+    adminReview: {
+      decision: row.admin_decision ?? 'Pending',
+      remarks: row.admin_remarks ?? undefined,
+      reviewedBy: row.admin_reviewed_by ?? undefined,
+      reviewedDate: row.admin_reviewed_at
+        ? new Date(row.admin_reviewed_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+        : undefined,
+    },
+    attachments: attachments.map((file) => ({
+      id: file.id,
+      fileName: file.file_name,
+      filePath: file.file_path,
+      publicUrl: file.public_url,
+      uploadedAt: file.uploaded_at,
+    })),
+  };
+}
+
+function isAllowedAttachment(file: Express.Multer.File): boolean {
+  const ext = extname(file.originalname || '').toLowerCase();
+  return ALLOWED_ATTACHMENT_MIME.has(file.mimetype) || ALLOWED_ATTACHMENT_EXT.has(ext);
+}
+
 // ── Bootstrap server ──────────────────────────────────────────────────────────
 loadEmployees()
   .then((employees) => {
@@ -437,6 +549,319 @@ loadEmployees()
         return res.json(scoped);
       }
       res.json(allEmployees);
+    });
+
+    app.get('/api/aid-assistance', async (req, res) => {
+      const viewerRole = String(req.query.viewerRole || '').trim();
+      const viewerEmployeeId = String(req.query.viewerEmployeeId || '').trim();
+      const managerName = String(req.query.managerName || '').trim();
+      const managerId = String(req.query.managerId || '').trim();
+
+      let query = supabase
+        .from('aid_assistance_requests')
+        .select('*')
+        .order('submitted_at', { ascending: false });
+
+      if (viewerRole === 'official') {
+        if (!viewerEmployeeId) {
+          return res.status(400).json({ message: 'Employee identity required.' });
+        }
+        query = query.eq('employee_id', viewerEmployeeId);
+      }
+
+      if (viewerRole === 'manager') {
+        if (!managerName) {
+          return res.status(401).json({ message: 'Manager identity required.' });
+        }
+        const resolvedManagerId = resolveManagerId(managerName, managerId || undefined);
+        const directReportIds = allEmployees
+          .filter((emp) => {
+            const nameMatch = emp.managerName?.trim().toLowerCase() === managerName.toLowerCase();
+            const idMatch = !!resolvedManagerId && emp.managerId === resolvedManagerId;
+            return nameMatch || idMatch;
+          })
+          .map((emp) => emp.id);
+        if (directReportIds.length === 0) {
+          return res.json([]);
+        }
+        query = query.in('employee_id', directReportIds);
+      }
+
+      if (viewerRole === 'admin') {
+        query = query.in('status', ['Pending Admin Review', 'Rejected by Admin/CSR', 'Approved']);
+      }
+
+      const { data: requests, error } = await query;
+      if (error) {
+        return res.status(500).json({ message: 'Failed to load aid assistance requests.', detail: error.message });
+      }
+
+      const requestRows = (requests ?? []) as AidAssistanceRequestRow[];
+      if (requestRows.length === 0) {
+        return res.json([]);
+      }
+
+      const requestIds = requestRows.map((row) => row.id);
+      const { data: attachmentRows, error: attachmentError } = await supabase
+        .from('aid_assistance_attachments')
+        .select('*')
+        .in('aid_assistance_id', requestIds)
+        .order('uploaded_at', { ascending: false });
+
+      if (attachmentError) {
+        return res.status(500).json({ message: 'Failed to load aid assistance attachments.', detail: attachmentError.message });
+      }
+
+      const grouped = new Map<string, AidAttachmentRow[]>();
+      ((attachmentRows ?? []) as AidAttachmentRow[]).forEach((file) => {
+        const list = grouped.get(file.aid_assistance_id) ?? [];
+        list.push(file);
+        grouped.set(file.aid_assistance_id, list);
+      });
+
+      const response = requestRows.map((row) => {
+        const employee = allEmployees.find((emp) => emp.id === row.employee_id);
+        const mapped = mapAidRequestToResponse(row, grouped.get(row.id) ?? []);
+        return {
+          ...mapped,
+          islandGroup: employee?.islandGroup ?? 'Luzon',
+        };
+      });
+
+      return res.json(response);
+    });
+
+    app.post('/api/aid-assistance', upload.array('attachments', 10), async (req, res) => {
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      const {
+        employeeId,
+        aidType,
+        damageType,
+        incidentName,
+        description,
+      } = req.body as {
+        employeeId?: string;
+        aidType?: 'Cash' | 'Relief Goods' | 'Both';
+        damageType?: 'Major' | 'Minor';
+        incidentName?: string;
+        description?: string;
+      };
+
+      if (!employeeId || !aidType || !damageType || !description) {
+        return res.status(400).json({ message: 'Missing required aid assistance fields.' });
+      }
+
+      const employee = allEmployees.find((emp) => emp.id === employeeId);
+      if (!employee) {
+        return res.status(404).json({ message: 'Employee not found.' });
+      }
+
+      for (const file of files) {
+        if (!isAllowedAttachment(file)) {
+          return res.status(400).json({ message: `Unsupported file type: ${file.originalname}` });
+        }
+      }
+
+      const requestCode = buildAidRequestCode();
+      const managerName = employee.managerName ?? null;
+      const managerId = employee.managerId ?? null;
+
+      const { data: insertedRows, error: insertError } = await supabase
+        .from('aid_assistance_requests')
+        .insert({
+          request_code: requestCode,
+          employee_id: employee.id,
+          employee_name: employee.name,
+          department: employee.department,
+          position: employee.role,
+          manager_id: managerId,
+          manager_name: managerName,
+          aid_type: aidType,
+          damage_type: damageType,
+          incident_name: incidentName?.trim() || 'Self-Reported Local Calamity',
+          reason: description.trim(),
+          status: 'Pending Manager Review',
+        })
+        .select('*')
+        .limit(1);
+
+      if (insertError || !insertedRows || insertedRows.length === 0) {
+        return res.status(500).json({ message: 'Failed to create aid assistance request.', detail: insertError?.message });
+      }
+
+      const requestRow = insertedRows[0] as AidAssistanceRequestRow;
+      const savedAttachments: AidAttachmentRow[] = [];
+
+      for (const file of files) {
+        const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const storagePath = `${employee.id}/${requestRow.id}/${Date.now()}-${safeName}`;
+        const { error: uploadError } = await supabase.storage
+          .from(AID_ATTACHMENT_BUCKET)
+          .upload(storagePath, file.buffer, {
+            contentType: file.mimetype,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          return res.status(500).json({ message: 'Failed to upload attachment.', detail: uploadError.message });
+        }
+
+        const { data: publicData } = supabase.storage.from(AID_ATTACHMENT_BUCKET).getPublicUrl(storagePath);
+
+        const { data: insertedAttachmentRows, error: attachmentInsertError } = await supabase
+          .from('aid_assistance_attachments')
+          .insert({
+            aid_assistance_id: requestRow.id,
+            employee_id: employee.id,
+            file_name: file.originalname,
+            file_path: storagePath,
+            public_url: publicData.publicUrl,
+          })
+          .select('*')
+          .limit(1);
+
+        if (attachmentInsertError || !insertedAttachmentRows || insertedAttachmentRows.length === 0) {
+          return res.status(500).json({ message: 'Failed to save attachment metadata.', detail: attachmentInsertError?.message });
+        }
+
+        savedAttachments.push(insertedAttachmentRows[0] as AidAttachmentRow);
+      }
+
+      return res.status(201).json(mapAidRequestToResponse(requestRow, savedAttachments));
+    });
+
+    app.patch('/api/aid-assistance/:id/manager-review', async (req, res) => {
+      const { id } = req.params;
+      const {
+        managerName,
+        managerId,
+        decision,
+        remarks,
+      } = req.body as {
+        managerName?: string;
+        managerId?: string;
+        decision?: 'approve' | 'reject';
+        remarks?: string;
+      };
+
+      if (!managerName) {
+        return res.status(401).json({ message: 'Manager identity required.' });
+      }
+      if (!decision || !['approve', 'reject'].includes(decision)) {
+        return res.status(400).json({ message: 'Invalid manager decision.' });
+      }
+
+      const { data: rows, error } = await supabase
+        .from('aid_assistance_requests')
+        .select('*')
+        .eq('id', id)
+        .limit(1);
+
+      if (error || !rows || rows.length === 0) {
+        return res.status(404).json({ message: 'Aid assistance request not found.' });
+      }
+
+      const row = rows[0] as AidAssistanceRequestRow;
+      const denied = enforceManagerAccess(row.employee_id, managerName, managerId);
+      if (denied) {
+        return res.status(denied.status).json({ message: denied.message });
+      }
+      if (row.status !== 'Pending Manager Review') {
+        return res.status(400).json({ message: 'Only pending manager review requests can be actioned.' });
+      }
+
+      const nextStatus: AidStatus = decision === 'approve' ? 'Pending Admin Review' : 'Rejected by Manager';
+      const managerDecision = decision === 'approve' ? 'Approved' : 'Rejected';
+
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('aid_assistance_requests')
+        .update({
+          status: nextStatus,
+          manager_decision: managerDecision,
+          manager_remarks: remarks?.trim() || null,
+          manager_reviewed_by: managerName,
+          manager_reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select('*')
+        .limit(1);
+
+      if (updateError || !updatedRows || updatedRows.length === 0) {
+        return res.status(500).json({ message: 'Failed to update manager review.', detail: updateError?.message });
+      }
+
+      const updated = updatedRows[0] as AidAssistanceRequestRow;
+      const { data: attachmentRows } = await supabase
+        .from('aid_assistance_attachments')
+        .select('*')
+        .eq('aid_assistance_id', id)
+        .order('uploaded_at', { ascending: false });
+
+      return res.json(mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[]));
+    });
+
+    app.patch('/api/aid-assistance/:id/admin-review', async (req, res) => {
+      const { id } = req.params;
+      const {
+        reviewerName,
+        decision,
+        remarks,
+      } = req.body as {
+        reviewerName?: string;
+        decision?: 'approve' | 'reject';
+        remarks?: string;
+      };
+
+      if (!reviewerName) {
+        return res.status(401).json({ message: 'Reviewer identity required.' });
+      }
+      if (!decision || !['approve', 'reject'].includes(decision)) {
+        return res.status(400).json({ message: 'Invalid admin decision.' });
+      }
+
+      const { data: rows, error } = await supabase
+        .from('aid_assistance_requests')
+        .select('*')
+        .eq('id', id)
+        .limit(1);
+
+      if (error || !rows || rows.length === 0) {
+        return res.status(404).json({ message: 'Aid assistance request not found.' });
+      }
+
+      const row = rows[0] as AidAssistanceRequestRow;
+      if (row.status !== 'Pending Admin Review') {
+        return res.status(400).json({ message: 'Only pending admin review requests can be actioned.' });
+      }
+
+      const nextStatus: AidStatus = decision === 'approve' ? 'Approved' : 'Rejected by Admin/CSR';
+      const adminDecision = decision === 'approve' ? 'Approved' : 'Rejected';
+
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('aid_assistance_requests')
+        .update({
+          status: nextStatus,
+          admin_decision: adminDecision,
+          admin_remarks: remarks?.trim() || null,
+          admin_reviewed_by: reviewerName,
+          admin_reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select('*')
+        .limit(1);
+
+      if (updateError || !updatedRows || updatedRows.length === 0) {
+        return res.status(500).json({ message: 'Failed to update admin review.', detail: updateError?.message });
+      }
+
+      const updated = updatedRows[0] as AidAssistanceRequestRow;
+      const { data: attachmentRows } = await supabase
+        .from('aid_assistance_attachments')
+        .select('*')
+        .eq('aid_assistance_id', id)
+        .order('uploaded_at', { ascending: false });
+
+      return res.json(mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[]));
     });
 
     // Manager-scoped check-in (write). Rejects with 403 if target isn't a direct report.
