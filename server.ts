@@ -795,6 +795,9 @@ app.post('/api/login', async (req, res) => {
       role: account.access_role,
       employeeId: account.employee_id ?? employee?.id ?? null,
       displayName: account.display_name ?? employee?.name ?? account.username,
+      // Prompt employees still on the seeded default to change password after login.
+      mustChangePassword:
+        account.access_role === 'official' && verifyPassword('123456', account.password_hash),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Login failed.';
@@ -804,6 +807,49 @@ app.post('/api/login', async (req, res) => {
         'Login service unavailable. Ensure the accounts table exists (run 20260721_accounts.sql).',
       detail: message,
     });
+  }
+});
+
+/** Change password for an authenticated account (persists hash to public.accounts). */
+app.post('/api/change-password', async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier ?? req.body?.username ?? '').trim();
+    const currentPassword = String(req.body?.currentPassword ?? '');
+    const newPassword = String(req.body?.newPassword ?? '');
+
+    if (!identifier || !currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current and new password are required.' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters.' });
+    }
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ message: 'New password must be different from the current password.' });
+    }
+
+    const account = await findAccountByUsername(identifier);
+    if (!account || !account.is_active || !verifyPassword(currentPassword, account.password_hash)) {
+      return res.status(401).json({ message: 'Current password is incorrect.' });
+    }
+
+    const { error } = await supabase
+      .from('accounts')
+      .update({
+        password_hash: hashPassword(newPassword),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('employee_id', account.employee_id);
+
+    if (error) {
+      console.error('Password update failed:', error.message);
+      return res.status(500).json({ message: 'Failed to update password in the database.' });
+    }
+
+    return res.json({ message: 'Password updated successfully.', username: account.username });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Password change failed.';
+    console.error('Change password error:', message);
+    return res.status(500).json({ message: 'Password change failed.', detail: message });
   }
 });
 

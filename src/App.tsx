@@ -7,12 +7,13 @@ import RiskMap from './components/RiskMap';
 import EmployeeRollCall from './components/EmployeeRollCall';
 import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
 import LoginPage from './components/LoginPage';
+import ChangePasswordModal from './components/ChangePasswordModal';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
   AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
   FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2,
   HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap, Layers,
-  Paperclip, Eye, Download
+  Paperclip, Eye, Download, KeyRound
 } from 'lucide-react';
 
 // ── Government Calamity Links Footer ─────────────────────────────────────────
@@ -343,6 +344,8 @@ export default function App() {
   const [editProfileSaving, setEditProfileSaving] = useState(false);
   const [editProfileError, setEditProfileError] = useState('');
   const [editProfileSuccess, setEditProfileSuccess] = useState(false);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
 
   // ── Page navigation ─────────────────────────────────────────────────────
   const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'manager-aid' | 'executive' | 'risk-map' | 'team-overview'>('dashboard');
@@ -1677,6 +1680,8 @@ export default function App() {
         role,
       });
       setIsAuthenticated(true);
+      setShowPasswordPrompt(role === 'official' && body.mustChangePassword === true);
+      setShowChangePasswordModal(false);
     } catch (error) {
       const message =
         error instanceof TypeError
@@ -1694,6 +1699,8 @@ export default function App() {
     setIsAuthenticated(false);
     setAuthError('');
     setCurrentUser({ username: '', role: 'official' });
+    setShowPasswordPrompt(false);
+    setShowChangePasswordModal(false);
   };
 
   const managerTeamMemberIds = ['T8U', 'T8S'];
@@ -2653,6 +2660,49 @@ export default function App() {
                       </div>
                     </section>
 
+                    <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+                      <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f] flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-white font-black text-lg tracking-[0.06em]">Account Settings</p>
+                          <p className="text-slate-300 text-sm mt-1">
+                            Manage your login credentials. Password changes are saved to the accounts database.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowPasswordPrompt(false);
+                            setShowChangePasswordModal(true);
+                          }}
+                          className="flex items-center gap-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2 text-sm font-semibold text-white transition-all duration-150 active:scale-95"
+                        >
+                          <KeyRound className="w-4 h-4" />
+                          Change Password
+                        </button>
+                      </div>
+                      <div className="p-7">
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Login username</p>
+                            <p className="mt-2 text-sm font-semibold text-slate-900">{currentUser.username}</p>
+                            <p className="mt-2 text-sm text-slate-600">
+                              Use a strong password you do not share. You can update it anytime from this page.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowPasswordPrompt(false);
+                              setShowChangePasswordModal(true);
+                            }}
+                            className="rounded-xl bg-[#001f4b] hover:bg-[#00172f] px-5 py-2.5 text-sm font-semibold text-white transition-all active:scale-95 shrink-0"
+                          >
+                            Update password
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+
                     {/* Edit Profile Modal */}
                     {showEditProfileModal && (
                       <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,15,40,0.55)', backdropFilter: 'blur(6px)' }}>
@@ -2938,6 +2988,26 @@ export default function App() {
             </main>
           </div>
         </div>
+        <ChangePasswordModal
+          open={showPasswordPrompt}
+          username={currentUser.username}
+          promptMode
+          onClose={() => setShowPasswordPrompt(false)}
+          onSkip={() => setShowPasswordPrompt(false)}
+          onSuccess={() => {
+            setShowPasswordPrompt(false);
+            setEmployeePortalMessage('Password updated successfully and saved to your account.');
+          }}
+        />
+        <ChangePasswordModal
+          open={showChangePasswordModal}
+          username={currentUser.username}
+          onClose={() => setShowChangePasswordModal(false)}
+          onSuccess={() => {
+            setShowChangePasswordModal(false);
+            setEmployeePortalMessage('Password updated successfully and saved to your account.');
+          }}
+        />
         {/* Government Links Footer — Employee Portal */}
         <GovernmentLinksFooter />
       </div>

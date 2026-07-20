@@ -82,6 +82,8 @@ export default async function handler(req: any, res: any) {
       role: account.access_role,
       employeeId: account.employee_id,
       displayName: account.display_name ?? account.username,
+      mustChangePassword:
+        account.access_role === 'official' && verifyPassword('123456', account.password_hash),
     });
   } catch (error: any) {
     return res.status(500).json({
