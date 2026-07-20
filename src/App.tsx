@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees, PHILIPPINE_REGIONS, ALL_ISLAND_LOCATIONS, REGION_BY_CODE } from './data_islands';
 import { resolveEmployeeRegion, getRegionLabel } from './utils/resolveRegion';
-import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam, AidApplication } from './types';
+import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam, AidApplication, AidType, AID_TYPE_OPTIONS, formatAidTypeLabel, parseAidTypes } from './types';
 import InteractiveMap from './components/InteractiveMap';
 import RiskMap from './components/RiskMap';
 import EmployeeRollCall from './components/EmployeeRollCall';
@@ -299,7 +299,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<{ username: string; role: 'official' | 'admin' | 'manager' }>({ username: '', role: 'official' });
   const [officialAccountEmails, setOfficialAccountEmails] = useState<string[]>([]);
   const [employeeAidForm, setEmployeeAidForm] = useState({
-    aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
+    aidTypes: ['Cash'] as AidType[],
     damageType: 'Major' as 'Major' | 'Minor',
     description: '',
     incidentName: '',
@@ -318,7 +318,7 @@ export default function App() {
   const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'alerts' | 'aid' | 'profile' | 'contacts' | 'notifications'>('dashboard');
   const [managerAidForm, setManagerAidForm] = useState({
     employeeName: '',
-    aidType: 'Cash' as 'Cash' | 'Relief Goods' | 'Both',
+    aidType: 'Cash' as AidType,
     damageType: 'Major' as 'Major' | 'Minor',
     description: '',
     incidentName: '',
@@ -1856,6 +1856,11 @@ export default function App() {
       return;
     }
 
+    if (!employeeAidForm.aidTypes.length) {
+      setEmployeePortalMessage('Please select at least one aid type before submitting.');
+      return;
+    }
+
     if (!employeeAidForm.description.trim()) {
       setEmployeePortalMessage('Please describe your aid request before submitting.');
       return;
@@ -1865,7 +1870,7 @@ export default function App() {
       setEmployeeAidSubmitting(true);
       const formData = new FormData();
       formData.append('employeeId', currentEmployee.id);
-      formData.append('aidType', employeeAidForm.aidType);
+      formData.append('aidType', employeeAidForm.aidTypes.join(', '));
       formData.append('damageType', employeeAidForm.damageType);
       formData.append('incidentName', employeeAidForm.incidentName.trim());
       formData.append('description', employeeAidForm.description.trim());
@@ -1883,7 +1888,7 @@ export default function App() {
         throw new Error((body?.message || 'Failed to submit aid request.') + detail);
       }
 
-      setEmployeeAidForm({ aidType: 'Cash', damageType: 'Major', description: '', incidentName: '' });
+      setEmployeeAidForm({ aidTypes: ['Cash'], damageType: 'Major', description: '', incidentName: '' });
       setEmployeeAidAttachments([]);
       setEmployeeAidAttachmentError('');
       setEmployeePortalMessage('Your aid request has been submitted and is pending manager review.');
@@ -2805,18 +2810,36 @@ export default function App() {
                           </div>
                         )}
                         <div className="grid gap-4 md:grid-cols-2">
-                          <label className="text-sm font-semibold text-slate-700">
-                            <span className="mb-2 block">Aid type</span>
-                            <select
-                              value={employeeAidForm.aidType}
-                              onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, aidType: event.target.value as 'Cash' | 'Relief Goods' | 'Both' }))}
-                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                            >
-                              <option value="Cash">Cash</option>
-                              <option value="Relief Goods">Relief Goods</option>
-                              <option value="Both">Cash and Relief Goods</option>
-                            </select>
-                         </label>
+                          <fieldset className="text-sm font-semibold text-slate-700">
+                            <legend className="mb-2 block">Aid type</legend>
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 flex flex-col gap-2">
+                              {AID_TYPE_OPTIONS.map((option) => {
+                                const checked = employeeAidForm.aidTypes.includes(option.value);
+                                return (
+                                  <label
+                                    key={option.value}
+                                    className="flex items-start gap-2.5 cursor-pointer text-sm font-medium text-slate-700"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => {
+                                        setEmployeeAidForm((prev) => {
+                                          const next = checked
+                                            ? prev.aidTypes.filter((t) => t !== option.value)
+                                            : [...prev.aidTypes, option.value];
+                                          return { ...prev, aidTypes: next };
+                                        });
+                                      }}
+                                      className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-[#002060] cursor-pointer"
+                                    />
+                                    <span>{option.label}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <p className="mt-1.5 text-[11px] font-medium text-slate-400">Select all that apply.</p>
+                          </fieldset>
                          <label className="text-sm font-semibold text-slate-700">
                            <span className="mb-2 block">Type of Damage</span>
                            <select
@@ -2911,7 +2934,7 @@ export default function App() {
                                   {application.status}
                                 </span>
                               </div>
-                              <p className="mt-3 text-sm text-slate-500">{application.aidType === 'Both' ? 'Cash and Relief Goods' : application.aidType} · {application.damageType}</p>
+                              <p className="mt-3 text-sm text-slate-500">{formatAidTypeLabel(application.aidType)} · {application.damageType}</p>
                               <div className="mt-3 flex items-center justify-between gap-3">
                                 <span className="text-xs text-slate-500">Attachments: {application.attachments.length}</span>
                                 <button
@@ -4849,11 +4872,25 @@ export default function App() {
                                 <span className="text-slate-700 font-medium block truncate text-[11px]">{app.incidentName}</span>
                               </td>
                               <td className="px-4 py-3">
-                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                                   app.aidType === 'Cash' ? 'bg-blue-50 border-blue-200 text-blue-700' :
-                                   app.aidType === 'Relief Goods' ? 'bg-amber-50 border-amber-200 text-amber-700' :
-                                   'bg-purple-50 border-purple-200 text-purple-700'
-                                 }`}>{app.aidType === 'Both' ? 'Cash and Relief Goods' : app.aidType}</span>
+                                 <div className="flex flex-wrap gap-1">
+                                   {parseAidTypes(app.aidType).map((type) => (
+                                     <span
+                                       key={type}
+                                       className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                         type === 'Cash' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                                         type === 'Relief Goods' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                                         'bg-teal-50 border-teal-200 text-teal-700'
+                                       }`}
+                                     >
+                                       {formatAidTypeLabel(type)}
+                                     </span>
+                                   ))}
+                                   {parseAidTypes(app.aidType).length === 0 && (
+                                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full border bg-slate-50 border-slate-200 text-slate-600">
+                                       {formatAidTypeLabel(app.aidType)}
+                                     </span>
+                                   )}
+                                 </div>
                               </td>
                               <td className="px-4 py-3">
                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
@@ -4973,7 +5010,7 @@ export default function App() {
                                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sc.dot}`} />{application.status}
                               </span>
                             </div>
-                            <p className="text-slate-500 text-xs mt-1">{application.incidentName} · {application.aidType === 'Both' ? 'Cash and Relief Goods' : application.aidType} · {application.damageType}</p>
+                            <p className="text-slate-500 text-xs mt-1">{application.incidentName} · {formatAidTypeLabel(application.aidType)} · {application.damageType}</p>
                             <p className="text-slate-600 text-xs mt-1.5">{application.description}</p>
                             {application.status === 'Pending Manager Review' && (
                               <p className="text-amber-700 text-xs mt-2">Awaiting your review. Approve to forward this request to admin.</p>
@@ -5727,7 +5764,7 @@ export default function App() {
               <section className="rounded-xl border border-slate-200 p-4">
                 <p className="text-xs font-black uppercase tracking-widest text-slate-500">Aid Assistance Details</p>
                 <div className="mt-3 text-sm text-slate-700 space-y-1">
-                  <p><span className="font-semibold">Aid Type:</span> {selectedAidApplication.aidType === 'Both' ? 'Cash and Relief Goods' : selectedAidApplication.aidType}</p>
+                  <p><span className="font-semibold">Aid Type:</span> {formatAidTypeLabel(selectedAidApplication.aidType)}</p>
                   <p><span className="font-semibold">Type of Damage:</span> {selectedAidApplication.damageType}</p>
                   <p><span className="font-semibold">Incident / Event Name:</span> {selectedAidApplication.incidentName}</p>
                   <p><span className="font-semibold">Why Do You Need Aid?:</span> {selectedAidApplication.description}</p>

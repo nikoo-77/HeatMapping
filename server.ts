@@ -93,7 +93,7 @@ interface AidAssistanceRequestRow {
   position: string | null;
   manager_id: string | null;
   manager_name: string | null;
-  aid_type: 'Cash' | 'Relief Goods' | 'Both';
+  aid_type: string;
   damage_type: 'Major' | 'Minor';
   incident_name: string;
   reason: string;
@@ -641,7 +641,7 @@ loadEmployees()
         description,
       } = req.body as {
         employeeId?: string;
-        aidType?: 'Cash' | 'Relief Goods' | 'Both';
+        aidType?: string;
         damageType?: 'Major' | 'Minor';
         incidentName?: string;
         description?: string;

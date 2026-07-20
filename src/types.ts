@@ -1,5 +1,37 @@
 export type Carrier = 'Globe' | 'Smart' | 'DITO';
 
+export type AidType = 'Cash' | 'Relief Goods' | 'Psychological Support';
+
+export const AID_TYPE_OPTIONS: { value: AidType; label: string }[] = [
+  { value: 'Cash', label: 'Cash' },
+  { value: 'Relief Goods', label: 'Relief Goods' },
+  { value: 'Psychological Support', label: 'Emotional / Psychological Support' },
+];
+
+export function formatAidTypeLabel(aidType: AidType | string): string {
+  // Legacy single-value "Both" and multi-select joined strings
+  if (aidType === 'Both') return 'Cash and Relief Goods';
+  return aidType
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (part === 'Both') return 'Cash and Relief Goods';
+      if (part === 'Psychological Support') return 'Emotional / Psychological Support';
+      return part;
+    })
+    .join(' · ');
+}
+
+export function parseAidTypes(aidType: AidType | string): AidType[] {
+  if (aidType === 'Both') return ['Cash', 'Relief Goods'];
+  const allowed = new Set<string>(AID_TYPE_OPTIONS.map((o) => o.value));
+  return aidType
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part): part is AidType => allowed.has(part));
+}
+
 export interface AidApplication {
   id: string;
   requestCode: string;
@@ -8,7 +40,8 @@ export interface AidApplication {
   position?: string;
   incidentId: string;
   incidentName: string;
-  aidType: 'Cash' | 'Relief Goods' | 'Both';
+  /** Single type or comma-separated list when multiple were selected */
+  aidType: string;
   description: string;
   status: 'Pending Manager Review' | 'Rejected by Manager' | 'Pending Admin Review' | 'Rejected by Admin/CSR' | 'Approved';
   damageType: 'Major' | 'Minor';
