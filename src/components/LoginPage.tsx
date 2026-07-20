@@ -46,15 +46,19 @@ export default function LoginPage({ onLogin, error, isSubmitting, officialEmailH
 
             <div className="mt-8 space-y-3 text-sm text-blue-100/90">
               <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
-                <p className="font-semibold text-white">Official access</p>
-                <p>Use an official email from Supabase · Password: 123456</p>
+                <p className="font-semibold text-white">Accounts are saved in the database</p>
+                <p className="text-blue-100/80 mt-1">Logins are verified against the Supabase <span className="font-mono text-blue-50">accounts</span> table.</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
-                <p className="font-semibold text-white">Manager access</p>
+                <p className="font-semibold text-white">Official / employee</p>
+                <p>Official email (or Employee ID) · Default password: 123456</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
+                <p className="font-semibold text-white">Manager</p>
                 <p>Username: manager · Password: manager123</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
-                <p className="font-semibold text-white">Administrator access</p>
+                <p className="font-semibold text-white">Administrator</p>
                 <p>Username: admin · Password: admin123</p>
               </div>
             </div>
@@ -71,15 +75,15 @@ export default function LoginPage({ onLogin, error, isSubmitting, officialEmailH
 
             <form className="space-y-5" onSubmit={handleSubmit}>
               <label className="block text-sm font-semibold text-slate-700">
-                <span className="mb-2 block">Official email</span>
+                <span className="mb-2 block">Email or username</span>
                 <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus-within:border-[#002060] focus-within:bg-white focus-within:ring-2 focus-within:ring-[#002060]/20">
                   <UserRound className="h-4 w-4 text-slate-400" />
                   <input
                     value={identifier}
                     onChange={(event) => setIdentifier(event.target.value)}
                     className="w-full border-none bg-transparent text-sm text-slate-700 outline-none"
-                    placeholder="name@company.com"
-                    autoComplete="email"
+                    placeholder={officialEmailHint || 'admin / manager / official email'}
+                    autoComplete="username"
                     required
                   />
                 </div>

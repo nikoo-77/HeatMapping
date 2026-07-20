@@ -1652,60 +1652,42 @@ export default function App() {
     return counts;
   }, [employees]);
 
-  const handleLogin = (identifier: string, password: string) => {
+  const handleLogin = async (identifier: string, password: string) => {
     setIsSubmittingLogin(true);
     setAuthError('');
 
-    const officialPassword = '123456';
-    const adminUsername = 'admin';
-    const adminPassword = 'admin123';
-    const normalizedIdentifier = identifier.trim().toLowerCase();
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.message || 'Invalid username or password.');
+      }
 
-    if (normalizedIdentifier === adminUsername && password === adminPassword) {
-      window.setTimeout(() => {
-        setCurrentUser({
-          username: 'admin',
-          role: 'admin',
-        });
-        setIsAuthenticated(true);
-        setIsSubmittingLogin(false);
-      }, 350);
-      return;
-    }
+      const role = body.role as 'admin' | 'manager' | 'official';
+      if (!role || !body.username) {
+        throw new Error('Login response was incomplete.');
+      }
 
-    const managerUsername = 'manager';
-    const managerPassword = 'manager123';
-    if (normalizedIdentifier === managerUsername && password === managerPassword) {
-      window.setTimeout(() => {
-        setCurrentUser({
-          username: managerUsername,
-          role: 'manager',
-        });
-        setIsAuthenticated(true);
-        setIsSubmittingLogin(false);
-      }, 350);
-      return;
-    }
-
-    const matchedEmployee = employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedIdentifier);
-    const isOfficialEmail = officialAccountEmails.includes(normalizedIdentifier);
-    if ((isOfficialEmail || matchedEmployee) && password === officialPassword) {
-      const isManager = matchedEmployee?.accessRole === 'manager';
-      window.setTimeout(() => {
-        setCurrentUser({
-          username: normalizedIdentifier,
-          role: isManager ? 'manager' : 'official',
-        });
-        setIsAuthenticated(true);
-        setIsSubmittingLogin(false);
-      }, 350);
-      return;
-    }
-
-    window.setTimeout(() => {
-      setAuthError('Invalid email or password. Use an official email from Supabase or the admin account shown on the screen.');
+      setCurrentUser({
+        username: String(body.username).trim().toLowerCase(),
+        role,
+      });
+      setIsAuthenticated(true);
+    } catch (error) {
+      const message =
+        error instanceof TypeError
+          ? 'Cannot reach login API. Start the app with npm run dev (API must be on port 5000).'
+          : error instanceof Error
+            ? error.message
+            : 'Login failed.';
+      setAuthError(message);
+    } finally {
       setIsSubmittingLogin(false);
-    }, 350);
+    }
   };
 
   const handleLogout = () => {

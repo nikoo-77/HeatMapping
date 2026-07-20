@@ -5,6 +5,7 @@ import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
 import { extname } from 'path';
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { resolveEmployeeRegion } from './lib/regionResolver.js';
 
 const app = express();
@@ -529,10 +530,289 @@ function isAllowedAttachment(file: Express.Multer.File): boolean {
   return ALLOWED_ATTACHMENT_MIME.has(file.mimetype) || ALLOWED_ATTACHMENT_EXT.has(ext);
 }
 
+// ── Accounts / login (persisted in Supabase `accounts`) ───────────────────────
+type AccountRole = 'admin' | 'manager' | 'official';
+
+const SYSTEM_ACCOUNT_IDS = {
+  admin: 'ADMIN',
+  manager: 'MANAGER',
+} as const;
+
+interface AccountRow {
+  employee_id: string;
+  username: string;
+  password_hash: string;
+  access_role: AccountRole;
+  display_name: string | null;
+  is_active: boolean;
+}
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString('hex');
+  const hash = scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+  const [salt, hash] = stored.split(':');
+  if (!salt || !hash) return false;
+  try {
+    const expected = Buffer.from(hash, 'hex');
+    const actual = scryptSync(password, salt, expected.length);
+    if (expected.length !== actual.length) return false;
+    return timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
+}
+
+async function upsertAccount(input: {
+  username: string;
+  password: string;
+  accessRole: AccountRole;
+  employeeId: string;
+  displayName?: string | null;
+  /** When false, do not overwrite an existing password hash */
+  overwritePassword?: boolean;
+}): Promise<void> {
+  const username = input.username.trim().toLowerCase();
+  const employeeId = input.employeeId.trim();
+  if (!username || !employeeId) return;
+
+  const { data: existing, error: findError } = await supabase
+    .from('accounts')
+    .select('employee_id, password_hash')
+    .eq('employee_id', employeeId)
+    .maybeSingle();
+
+  if (findError) {
+    throw new Error(findError.message);
+  }
+
+  if (existing?.employee_id) {
+    const patch: Record<string, unknown> = {
+      username,
+      access_role: input.accessRole,
+      display_name: input.displayName ?? null,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    };
+    if (input.overwritePassword) {
+      patch.password_hash = hashPassword(input.password);
+    }
+    const { error } = await supabase
+      .from('accounts')
+      .update(patch)
+      .eq('employee_id', existing.employee_id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await supabase.from('accounts').insert({
+    employee_id: employeeId,
+    username,
+    password_hash: hashPassword(input.password),
+    access_role: input.accessRole,
+    display_name: input.displayName ?? null,
+    is_active: true,
+  });
+  if (error) throw new Error(error.message);
+}
+
+function accountUsernameForEmployee(emp: Employee): string | null {
+  const email = emp.email?.trim().toLowerCase();
+  if (email) return email;
+  const id = emp.id?.trim().toLowerCase();
+  return id || null;
+}
+
+async function loadExistingAccountKeys(): Promise<{ usernames: Set<string>; employeeIds: Set<string> }> {
+  const usernames = new Set<string>();
+  const employeeIds = new Set<string>();
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from('accounts')
+      .select('username, employee_id')
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+    for (const row of data) {
+      const u = String((row as { username?: string }).username || '')
+        .trim()
+        .toLowerCase();
+      const eid = String((row as { employee_id?: string }).employee_id || '').trim();
+      if (u) usernames.add(u);
+      if (eid) employeeIds.add(eid);
+    }
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return { usernames, employeeIds };
+}
+
+/** Seed system + employee accounts so logins are saved in the database. */
+async function syncAccountsFromEmployees(employees: Employee[]): Promise<void> {
+  try {
+    // Always ensure system accounts exist (does not overwrite passwords).
+    await upsertAccount({
+      username: 'admin',
+      password: 'admin123',
+      accessRole: 'admin',
+      employeeId: SYSTEM_ACCOUNT_IDS.admin,
+      displayName: 'System Administrator',
+      overwritePassword: false,
+    });
+    await upsertAccount({
+      username: 'manager',
+      password: 'manager123',
+      accessRole: 'manager',
+      employeeId: SYSTEM_ACCOUNT_IDS.manager,
+      displayName: 'Area Manager',
+      overwritePassword: false,
+    });
+
+    const existing = await loadExistingAccountKeys();
+    existing.usernames.add('admin');
+    existing.usernames.add('manager');
+    existing.employeeIds.add(SYSTEM_ACCOUNT_IDS.admin);
+    existing.employeeIds.add(SYSTEM_ACCOUNT_IDS.manager);
+
+    const defaultHash = hashPassword('123456');
+    const toInsert: Array<{
+      employee_id: string;
+      username: string;
+      password_hash: string;
+      access_role: AccountRole;
+      display_name: string | null;
+      is_active: boolean;
+    }> = [];
+
+    for (const emp of employees) {
+      const employeeId = emp.id?.trim();
+      const username = accountUsernameForEmployee(emp);
+      if (!employeeId || !username) continue;
+      if (existing.employeeIds.has(employeeId) || existing.usernames.has(username)) continue;
+      existing.employeeIds.add(employeeId);
+      existing.usernames.add(username);
+      const role: AccountRole = emp.accessRole === 'manager' ? 'manager' : 'official';
+      toInsert.push({
+        employee_id: employeeId,
+        username,
+        password_hash: defaultHash,
+        access_role: role,
+        display_name: emp.name,
+        is_active: true,
+      });
+    }
+
+    let inserted = 0;
+    const chunkSize = 100;
+    for (let i = 0; i < toInsert.length; i += chunkSize) {
+      const chunk = toInsert.slice(i, i + chunkSize);
+      const { error } = await supabase.from('accounts').upsert(chunk, {
+        onConflict: 'employee_id',
+        ignoreDuplicates: true,
+      });
+      if (error) {
+        console.warn('Account batch upsert warning:', error.message);
+        for (const row of chunk) {
+          const { error: rowErr } = await supabase.from('accounts').upsert(row, {
+            onConflict: 'employee_id',
+            ignoreDuplicates: true,
+          });
+          if (!rowErr) inserted += 1;
+        }
+        continue;
+      }
+      inserted += chunk.length;
+    }
+
+    console.log(
+      `Accounts synced (existing ${existing.employeeIds.size - inserted}, inserted ${inserted}; ` +
+        `${employees.length} employees considered).`
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      'Failed to sync accounts table. Run supabase/migrations/20260721_accounts.sql in Supabase first.',
+      message
+    );
+  }
+}
+
+async function findAccountByUsername(username: string): Promise<AccountRow | null> {
+  const normalized = username.trim().toLowerCase();
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('employee_id, username, password_hash, access_role, display_name, is_active')
+    .eq('username', normalized)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (data) return data as AccountRow;
+
+  // Allow login with employee ID when username was not an email match.
+  const empId = username.trim();
+  const { data: byEmp, error: empError } = await supabase
+    .from('accounts')
+    .select('employee_id, username, password_hash, access_role, display_name, is_active')
+    .eq('employee_id', empId)
+    .maybeSingle();
+
+  if (empError) {
+    throw new Error(empError.message);
+  }
+  return (byEmp as AccountRow | null) ?? null;
+}
+
+// Login is registered immediately so auth works even while employee sync runs.
+app.post('/api/login', async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier ?? req.body?.username ?? '').trim();
+    const password = String(req.body?.password ?? '');
+    if (!identifier || !password) {
+      return res.status(400).json({ message: 'Username and password are required.' });
+    }
+
+    const account = await findAccountByUsername(identifier);
+    if (!account || !account.is_active || !verifyPassword(password, account.password_hash)) {
+      return res.status(401).json({ message: 'Invalid username or password.' });
+    }
+
+    const employee =
+      (account.employee_id
+        ? allEmployees.find((e) => e.id === account.employee_id)
+        : null) ??
+      allEmployees.find((e) => e.email?.trim().toLowerCase() === account.username) ??
+      null;
+
+    return res.json({
+      username: account.username,
+      role: account.access_role,
+      employeeId: account.employee_id ?? employee?.id ?? null,
+      displayName: account.display_name ?? employee?.name ?? account.username,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Login failed.';
+    console.error('Login error:', message);
+    return res.status(500).json({
+      message:
+        'Login service unavailable. Ensure the accounts table exists (run 20260721_accounts.sql).',
+      detail: message,
+    });
+  }
+});
+
 // ── Bootstrap server ──────────────────────────────────────────────────────────
 loadEmployees()
-  .then((employees) => {
+  .then(async (employees) => {
     allEmployees = employees;
+    // Do not block API startup on account seeding (was causing login failures).
+    void syncAccountsFromEmployees(employees);
 
     // Manager-scoped read. When a manager is supplied, only their direct reports
     // are returned (server-side authorization — never trust the client filter).
@@ -940,22 +1220,19 @@ loadEmployees()
       res.json({ message: 'Employee updated.', employeeId: req.params.id });
     });
 
-    const startServer = (port: number) => {
-      app.listen(port, () => {
-        console.log(`Server listening on port ${port}`);
-        console.log(`Loaded ${employees.length} employees from Supabase.`);
-      }).on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EADDRINUSE') {
-          console.warn(`Port ${port} is busy, trying ${port + 1}`);
-          startServer(port + 1);
-        } else {
-          console.error('Failed to start server:', err);
-          process.exit(1);
-        }
-      });
-    };
-
-    startServer(PORT);
+    app.listen(PORT, () => {
+      console.log(`Server listening on port ${PORT}`);
+      console.log(`Loaded ${employees.length} employees from Supabase.`);
+    }).on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(
+          `Port ${PORT} is already in use. Stop the other process (Vite proxies /api to localhost:${PORT}).`
+        );
+      } else {
+        console.error('Failed to start server:', err);
+      }
+      process.exit(1);
+    });
   })
   .catch((err) => {
     console.error('Failed to load employees from Supabase:', err);
