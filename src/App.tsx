@@ -1788,6 +1788,14 @@ export default function App() {
     }
   }, [isManagerUser, activePage]);
 
+  // Managers use team selection instead of org-wide location filters.
+  React.useEffect(() => {
+    if (!isManagerUser) return;
+    setSelectedCity(null);
+    setSelectedRegion(null);
+    setSelectedIslandGroup(null);
+  }, [isManagerUser]);
+
   useEffect(() => {
     if (currentEmployee) {
       setLocationUpdate(currentEmployee.address ?? '');
@@ -3103,9 +3111,86 @@ export default function App() {
       {/* Main Corporate Workspace */}
       <main className="flex-1 max-w-[1550px] w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
 
-        {/* Left Column: Region / Island Group Filter Panel */}
+        {/* Left Column: Team list for managers, Location Filter for admin/CSR */}
         <section className="lg:col-span-3 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col max-h-[750px]">
 
+          {isManagerUser ? (
+            <>
+              <div className="bg-[#002060] px-4 py-2.5 border-b border-[#001848] flex items-center justify-between">
+                <span className="text-white font-extrabold text-sm tracking-wide flex items-center gap-2">
+                  <Users className="w-4 h-4 text-blue-300" />
+                  My Team
+                </span>
+                <span className="text-blue-300 font-mono text-[10px] font-bold">{directReports.length} FTE</span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto">
+                {directReports.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-slate-500 text-xs">
+                    No team members assigned to you yet.
+                  </div>
+                ) : (
+                  directReports.map((emp) => {
+                    const isSelected = selectedEmployee?.id === emp.id;
+                    const statusStyles =
+                      emp.status === 'Green'
+                        ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                        : emp.status === 'Yellow'
+                        ? 'bg-amber-100 text-amber-700 border-amber-200'
+                        : 'bg-rose-100 text-rose-700 border-rose-200';
+                    return (
+                      <button
+                        key={emp.id}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedEmployee(null);
+                            pushLog(`Cleared map focus on ${emp.name}.`, 'info');
+                            return;
+                          }
+                          setSelectedCity(null);
+                          setSelectedRegion(null);
+                          setSelectedIslandGroup(null);
+                          setSelectedEmployee(emp);
+                          pushLog(`Focused map on ${emp.name} — ${emp.address ?? 'location on file'}.`, 'info');
+                        }}
+                        className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-colors cursor-pointer border-b border-slate-100 ${
+                          isSelected
+                            ? 'bg-[#d9e1f2] border-l-4 border-l-[#002060]'
+                            : 'hover:bg-[#ebf1fc]'
+                        }`}
+                      >
+                        <span className="w-8 h-8 rounded-full bg-[#002060] text-white text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">
+                          {emp.avatar}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-extrabold text-[#002060] text-sm truncate">{emp.name}</span>
+                            <span className={`text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded border shrink-0 ${statusStyles}`}>
+                              {emp.status}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 truncate mt-0.5">{emp.department} · {emp.role}</p>
+                          <p className="text-[10px] text-slate-400 truncate mt-1 flex items-center gap-1">
+                            <MapPin className="w-3 h-3 shrink-0 text-slate-400" />
+                            <span className="truncate">{emp.address ?? 'No address on file'}</span>
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="bg-slate-50 p-3 border-t border-slate-200 text-[10px] font-mono text-slate-500 font-bold text-center flex flex-col gap-0.5">
+                <span>TEAM HEADCOUNT: {directReports.length}</span>
+                {selectedEmployee && (
+                  <span className="text-[#002060] font-black">Viewing: {selectedEmployee.name}</span>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
           {/* Panel header */}
           <div className="bg-[#002060] px-4 py-2.5 border-b border-[#001848] flex flex-col gap-2">
             <div className="flex items-center justify-between">
@@ -3415,6 +3500,8 @@ export default function App() {
               </span>
             )}
           </div>
+            </>
+          )}
         </section>
 
         <section className="lg:col-span-6 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col h-full min-h-[500px]">
@@ -3424,7 +3511,9 @@ export default function App() {
             {/* Left: live indicator + title */}
             <span className="font-extrabold uppercase text-slate-800 text-xs flex items-center gap-1.5 font-mono shrink-0">
               <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
-              {selectedCity
+              {isManagerUser
+                ? (selectedEmployee ? `${selectedEmployee.name} — Location` : 'My Team — Overview')
+                : selectedCity
                 ? `${selectedCity} — Local View`
                 : selectedRegion
                 ? `Region ${selectedRegion} — ${PHILIPPINE_REGIONS.find(r => r.code === selectedRegion)?.name ?? selectedRegion}`
@@ -3472,9 +3561,10 @@ export default function App() {
               activeDisaster={activeDisaster}
               mapView={mapView}
               simulationActive={simulationActive}
-              selectedCity={selectedCity}
-              selectedIslandGroup={selectedIslandGroup}
-              selectedRegion={selectedRegion}
+              selectedCity={isManagerUser ? null : selectedCity}
+              selectedIslandGroup={isManagerUser ? null : selectedIslandGroup}
+              selectedRegion={isManagerUser ? null : selectedRegion}
+              teamFocusMode={isManagerUser}
             />
 
             {/* Static Overlay Card inside Metro Cebu Map View */}

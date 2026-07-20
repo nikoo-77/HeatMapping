@@ -107,6 +107,8 @@ interface InteractiveMapProps {
   selectedCity?: string | null;
   selectedIslandGroup?: 'Luzon' | 'Visayas' | 'Mindanao' | null;
   selectedRegion?: string | null;
+  /** When true (manager view), pins appear from team member selection instead of location filters. */
+  teamFocusMode?: boolean;
 }
 
 export default function InteractiveMap({
@@ -122,6 +124,7 @@ export default function InteractiveMap({
   selectedCity = null,
   selectedIslandGroup = null,
   selectedRegion = null,
+  teamFocusMode = false,
 }: InteractiveMapProps) {
   const mockMapRef = useRef<SVGSVGElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -265,6 +268,13 @@ export default function InteractiveMap({
       animate: true,
       duration: 1.0
     });
+    // Refresh markers after fly so the selected pin renders at the new zoom
+    setTimeout(() => {
+      const z = map.getZoom();
+      zoomLevelRef.current = z;
+      setCurrentZoom(z);
+      setMapViewportVersion((prev) => prev + 1);
+    }, 1200);
   }, [selectedEmployee, mapType]);
 
   // Automatically pan/zoom to a selected city and refresh employee markers
@@ -445,7 +455,7 @@ export default function InteractiveMap({
     }
   }, [mapType, activeLayers, mapView, simulationActive, epicenter, activeDisaster, selectedIslandGroup, selectedCity]);
 
-  // Employee markers — shown for focused selections and disaster simulation
+  // Employee markers — shown for focused selections, selected team member, and disaster simulation
   useEffect(() => {
     if (!mapInstanceRef.current || !employeeLayerRef.current || mapType === 'mock') return;
 
@@ -455,8 +465,9 @@ export default function InteractiveMap({
       empLayer.clearLayers();
 
       const isFocusedSelection = Boolean(selectedCity || selectedRegion || selectedIslandGroup);
-      if (!isFocusedSelection && !simulationActive) return;
-      if (currentZoom < (isFocusedSelection ? 6 : 9)) return;
+      const isTeamMemberFocus = teamFocusMode && Boolean(selectedEmployee);
+      if (!isFocusedSelection && !simulationActive && !isTeamMemberFocus) return;
+      if (currentZoom < (isFocusedSelection || isTeamMemberFocus ? 6 : 9)) return;
 
       const bounds = map.getBounds();
       const sw = bounds.getSouthWest();
@@ -465,6 +476,11 @@ export default function InteractiveMap({
       let rendered = 0;
 
       const visibleEmployees = employees.filter((emp) => {
+        // Manager team mode: only show the selected team member's pin
+        if (isTeamMemberFocus && !isFocusedSelection) {
+          return emp.id === selectedEmployee!.id;
+        }
+
         const selectedCityText = normalizeText(selectedCity ?? '');
         const cityName = normalizeText(getEmployeeCity(emp) ?? '');
         const addressText = normalizeText(emp.address ?? '');
@@ -553,7 +569,7 @@ export default function InteractiveMap({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity, selectedRegion]);
+  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity, selectedRegion, teamFocusMode]);
 
   // --- MOCK SVG CHOP MAP HANDLERS (As secondary fallback diagram mode) ---
   const handleMapClickOnMock = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -655,18 +671,32 @@ export default function InteractiveMap({
       {/* Map Main display wrapper */}
       <div className="relative flex-1 select-none overflow-hidden h-full min-h-[400px]">
 
-        {/* Hint badge: shown when no city is selected and no simulation is active */}
-        {!selectedCity && !simulationActive && mapType !== 'mock' && (
+        {/* Hint badge: shown when nothing is focused and no simulation is active */}
+        {!selectedCity && !selectedEmployee && !simulationActive && mapType !== 'mock' && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[500] pointer-events-none">
             <div className="flex items-center gap-2 bg-[#002060]/90 text-white text-[10px] font-bold px-3.5 py-2 rounded-full shadow-xl border border-white/10 backdrop-blur-sm tracking-wide uppercase whitespace-nowrap animate-pulse">
               <span className="text-base leading-none">📍</span>
-              <span>Select a location from the panel to view employee pins</span>
+              <span>
+                {teamFocusMode
+                  ? 'Select a team member to view their location pin'
+                  : 'Select a location from the panel to view employee pins'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Selected team member badge (manager view) */}
+        {teamFocusMode && selectedEmployee && !simulationActive && mapType !== 'mock' && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[500] pointer-events-none">
+            <div className="flex items-center gap-2 bg-emerald-700/90 text-white text-[10px] font-bold px-3.5 py-2 rounded-full shadow-xl border border-emerald-500/30 backdrop-blur-sm tracking-wide uppercase whitespace-nowrap">
+              <span className="text-base leading-none">🗺️</span>
+              <span>Showing pin for {selectedEmployee.name}</span>
             </div>
           </div>
         )}
 
         {/* City pin count badge: shown when a city is selected */}
-        {selectedCity && !simulationActive && mapType !== 'mock' && (
+        {!teamFocusMode && selectedCity && !simulationActive && mapType !== 'mock' && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[500] pointer-events-none">
             <div className="flex items-center gap-2 bg-emerald-700/90 text-white text-[10px] font-bold px-3.5 py-2 rounded-full shadow-xl border border-emerald-500/30 backdrop-blur-sm tracking-wide uppercase whitespace-nowrap">
               <span className="text-base leading-none">🗺️</span>
