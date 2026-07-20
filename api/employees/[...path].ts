@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { resolveEmployeeRegion } from '../../lib/regionResolver';
 
 type AccessRole = 'employee' | 'manager';
 type IslandGroup = 'Luzon' | 'Visayas' | 'Mindanao';
@@ -58,14 +57,22 @@ interface SupabaseEmployeeRow {
   role?: string | null;
 }
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
+let supabaseClient: ReturnType<typeof createClient> | null = null;
 
-if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
-  throw new Error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY in environment variables.');
+function getSupabaseClient() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+
+  if (!supabaseUrl || !supabaseSecretKey) {
+    throw new Error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY in environment variables.');
+  }
+
+  if (!supabaseClient) {
+    supabaseClient = createClient(supabaseUrl, supabaseSecretKey);
+  }
+
+  return supabaseClient;
 }
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY);
 
 let cache: { data: Employee[]; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -124,6 +131,91 @@ const PROVINCE_COORDS: Record<string, { lat: number; lng: number }> = {
   'South Cotabato': { lat: 6.1128, lng: 125.1717 },
   'Lanao del Norte': { lat: 8.2281, lng: 124.2452 },
   'Agusan del Norte': { lat: 8.9480, lng: 125.5436 },
+};
+
+const PROVINCE_TO_REGION: Record<string, string> = {
+  'metro manila': 'NCR',
+  ncr: 'NCR',
+  pampanga: 'III',
+  bulacan: 'III',
+  tarlac: 'III',
+  'nueva ecija': 'III',
+  aurora: 'III',
+  zambales: 'III',
+  bataan: 'III',
+  laguna: 'IV-A',
+  cavite: 'IV-A',
+  batangas: 'IV-A',
+  rizal: 'IV-A',
+  quezon: 'IV-A',
+  palawan: 'IV-B',
+  marinduque: 'IV-B',
+  romblon: 'IV-B',
+  'occidental mindoro': 'IV-B',
+  'oriental mindoro': 'IV-B',
+  albay: 'V',
+  'camarines norte': 'V',
+  'camarines sur': 'V',
+  sorsogon: 'V',
+  catanduanes: 'V',
+  masbate: 'V',
+  iloilo: 'VI',
+  'negros occidental': 'VI',
+  capiz: 'VI',
+  aklan: 'VI',
+  antique: 'VI',
+  guimaras: 'VI',
+  cebu: 'VII',
+  bohol: 'VII',
+  'negros oriental': 'VII',
+  siquijor: 'VII',
+  leyte: 'VIII',
+  samar: 'VIII',
+  'eastern samar': 'VIII',
+  'northern samar': 'VIII',
+  'southern leyte': 'VIII',
+  biliran: 'VIII',
+  'zamboanga del sur': 'IX',
+  'zamboanga del norte': 'IX',
+  'zamboanga sibugay': 'IX',
+  'misamis oriental': 'X',
+  'misamis occidental': 'X',
+  bukidnon: 'X',
+  camiguin: 'X',
+  'lanao del norte': 'X',
+  'davao del sur': 'XI',
+  'davao del norte': 'XI',
+  'davao de oro': 'XI',
+  'davao oriental': 'XI',
+  'davao occidental': 'XI',
+  'south cotabato': 'XII',
+  cotabato: 'XII',
+  'sultan kudarat': 'XII',
+  sarangani: 'XII',
+  'agusan del norte': 'XIII',
+  'agusan del sur': 'XIII',
+  'surigao del norte': 'XIII',
+  'surigao del sur': 'XIII',
+  maguindanao: 'BARMM',
+  'lanao del sur': 'BARMM',
+  basilan: 'BARMM',
+  sulu: 'BARMM',
+  'tawi-tawi': 'BARMM',
+  benguet: 'CAR',
+  ifugao: 'CAR',
+  'mountain province': 'CAR',
+  kalinga: 'CAR',
+  abra: 'CAR',
+  apayao: 'CAR',
+  'ilocos norte': 'I',
+  'ilocos sur': 'I',
+  'la union': 'I',
+  pangasinan: 'I',
+  cagayan: 'II',
+  isabela: 'II',
+  'nueva vizcaya': 'II',
+  quirino: 'II',
+  batanes: 'II',
 };
 
 function getGpsForCity(city: string, province: string): { lat: number; lng: number } {
@@ -226,6 +318,30 @@ function parseRegionLabel(label: string): string | null {
   return null;
 }
 
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function resolveEmployeeRegionFallback(options: {
+  city?: string;
+  province?: string;
+  facility?: string;
+}): string | undefined {
+  const { city, province, facility } = options;
+
+  const candidates = [facility, province, city]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .map((value) => normalize(value));
+
+  for (const candidate of candidates) {
+    for (const [key, code] of Object.entries(PROVINCE_TO_REGION)) {
+      if (candidate.includes(key) || key.includes(candidate)) return code;
+    }
+  }
+
+  return undefined;
+}
+
 function resolveManagerId(employees: Employee[], managerName: string, managerId?: string): string | undefined {
   if (managerId) return managerId;
   const found = employees.find(
@@ -248,6 +364,7 @@ function readManagerFromRequest(req: any): { name: string; id?: string } {
 }
 
 async function queryAllRows(): Promise<SupabaseEmployeeRow[]> {
+  const supabase = getSupabaseClient();
   const allRows: SupabaseEmployeeRow[] = [];
   let from = 0;
   const pageSize = 1000;
@@ -319,12 +436,10 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
       region = 'NEEDS_UPDATE';
     } else {
       const regionFromDb = parseRegionLabel(regionLabel);
-      region = regionFromDb ?? resolveEmployeeRegion({
+      region = regionFromDb ?? resolveEmployeeRegionFallback({
         city,
         province,
         facility: row['Facility'] ?? undefined,
-        gpsLat,
-        gpsLng,
       });
     }
 
@@ -423,6 +538,14 @@ export default async function handler(req: any, res: any) {
     const method = String(req.method || 'GET').toUpperCase();
     const pathParts = getPathParts(req);
 
+    if (method === 'GET' && pathParts.length === 1 && pathParts[0] === 'health') {
+      return res.status(200).json({
+        ok: true,
+        hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
+        hasSupabaseSecretKey: Boolean(process.env.SUPABASE_SECRET_KEY),
+      });
+    }
+
     if (method === 'GET' && pathParts.length === 0) {
       const employees = await getEmployees();
       const { name } = readManagerFromRequest(req);
@@ -468,6 +591,7 @@ export default async function handler(req: any, res: any) {
       if (typeof address === 'string') dbUpdate['COMPLETE ADDRESS'] = address.trim();
 
       if (Object.keys(dbUpdate).length > 0) {
+        const supabase = getSupabaseClient();
         const { error } = await supabase
           .from('Employee Details')
           .update(dbUpdate)
