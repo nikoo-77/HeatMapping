@@ -5,7 +5,7 @@ type IslandGroup = 'Luzon' | 'Visayas' | 'Mindanao';
 type Carrier = 'Globe' | 'Smart' | 'DITO';
 type Status = 'Green' | 'Yellow' | 'Red';
 
-interface Employee {
+export interface Employee {
   id: string;
   name: string;
   role: string;
@@ -29,9 +29,6 @@ interface Employee {
   managerName?: string;
   team?: 'HR/CSR' | 'Manager';
   facility?: string;
-  contactNumber?: string;
-  gcashNumber?: string;
-  bankAccountDetails?: string;
 }
 
 interface SupabaseEmployeeRow {
@@ -58,6 +55,8 @@ interface SupabaseEmployeeRow {
 }
 
 let supabaseClient: ReturnType<typeof createClient> | null = null;
+let cache: { data: Employee[]; expiresAt: number } | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function getSupabaseClient() {
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -73,9 +72,6 @@ function getSupabaseClient() {
 
   return supabaseClient;
 }
-
-let cache: { data: Employee[]; expiresAt: number } | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function hashString(str: string): number {
   let hash = 0;
@@ -133,91 +129,6 @@ const PROVINCE_COORDS: Record<string, { lat: number; lng: number }> = {
   'Agusan del Norte': { lat: 8.9480, lng: 125.5436 },
 };
 
-const PROVINCE_TO_REGION: Record<string, string> = {
-  'metro manila': 'NCR',
-  ncr: 'NCR',
-  pampanga: 'III',
-  bulacan: 'III',
-  tarlac: 'III',
-  'nueva ecija': 'III',
-  aurora: 'III',
-  zambales: 'III',
-  bataan: 'III',
-  laguna: 'IV-A',
-  cavite: 'IV-A',
-  batangas: 'IV-A',
-  rizal: 'IV-A',
-  quezon: 'IV-A',
-  palawan: 'IV-B',
-  marinduque: 'IV-B',
-  romblon: 'IV-B',
-  'occidental mindoro': 'IV-B',
-  'oriental mindoro': 'IV-B',
-  albay: 'V',
-  'camarines norte': 'V',
-  'camarines sur': 'V',
-  sorsogon: 'V',
-  catanduanes: 'V',
-  masbate: 'V',
-  iloilo: 'VI',
-  'negros occidental': 'VI',
-  capiz: 'VI',
-  aklan: 'VI',
-  antique: 'VI',
-  guimaras: 'VI',
-  cebu: 'VII',
-  bohol: 'VII',
-  'negros oriental': 'VII',
-  siquijor: 'VII',
-  leyte: 'VIII',
-  samar: 'VIII',
-  'eastern samar': 'VIII',
-  'northern samar': 'VIII',
-  'southern leyte': 'VIII',
-  biliran: 'VIII',
-  'zamboanga del sur': 'IX',
-  'zamboanga del norte': 'IX',
-  'zamboanga sibugay': 'IX',
-  'misamis oriental': 'X',
-  'misamis occidental': 'X',
-  bukidnon: 'X',
-  camiguin: 'X',
-  'lanao del norte': 'X',
-  'davao del sur': 'XI',
-  'davao del norte': 'XI',
-  'davao de oro': 'XI',
-  'davao oriental': 'XI',
-  'davao occidental': 'XI',
-  'south cotabato': 'XII',
-  cotabato: 'XII',
-  'sultan kudarat': 'XII',
-  sarangani: 'XII',
-  'agusan del norte': 'XIII',
-  'agusan del sur': 'XIII',
-  'surigao del norte': 'XIII',
-  'surigao del sur': 'XIII',
-  maguindanao: 'BARMM',
-  'lanao del sur': 'BARMM',
-  basilan: 'BARMM',
-  sulu: 'BARMM',
-  'tawi-tawi': 'BARMM',
-  benguet: 'CAR',
-  ifugao: 'CAR',
-  'mountain province': 'CAR',
-  kalinga: 'CAR',
-  abra: 'CAR',
-  apayao: 'CAR',
-  'ilocos norte': 'I',
-  'ilocos sur': 'I',
-  'la union': 'I',
-  pangasinan: 'I',
-  cagayan: 'II',
-  isabela: 'II',
-  'nueva vizcaya': 'II',
-  quirino: 'II',
-  batanes: 'II',
-};
-
 function getGpsForCity(city: string, province: string): { lat: number; lng: number } {
   const lowerCity = city.toLowerCase();
   for (const [key, coords] of Object.entries(CITY_COORDS)) {
@@ -243,18 +154,14 @@ function getIslandGroup(city: string, province: string): IslandGroup {
   const c = city.toLowerCase();
 
   if (p.includes('ncr') || p.includes('national capital') || p.includes('metro manila')) return 'Luzon';
-  if (
-    p.includes('region i') ||
-    p.includes('region ii') ||
-    p.includes('region iii') ||
-    p.includes('region iv-a') ||
-    p.includes('region iv-b') ||
-    p.includes('region v') ||
-    p.includes('car') ||
-    p.includes('cordillera')
-  ) {
-    return 'Luzon';
-  }
+  if (p.includes('region x') || p.includes('region xi') || p.includes('region xii') || p.includes('region xiii') || p.includes('bangsamoro') || p.includes('caraga')) return 'Mindanao';
+
+  const mindanaoProvinces = [
+    'davao', 'misamis', 'zamboanga', 'cotabato', 'sultan kudarat', 'maguindanao',
+    'lanao', 'agusan', 'surigao', 'camiguin', 'bukidnon', 'north cotabato',
+    'sarangani', 'south cotabato', 'compostela',
+  ];
+  if (mindanaoProvinces.some((mp) => p.includes(mp) || c.includes(mp))) return 'Mindanao';
 
   const luzonProvinces = [
     'metro manila', 'pampanga', 'laguna', 'bulacan', 'rizal', 'cavite', 'batangas',
@@ -264,103 +171,37 @@ function getIslandGroup(city: string, province: string): IslandGroup {
   ];
   if (luzonProvinces.some((lp) => p.includes(lp) || c.includes(lp))) return 'Luzon';
 
-  if (
-    p.includes('region x') ||
-    p.includes('region xi') ||
-    p.includes('region xii') ||
-    p.includes('region xiii') ||
-    p.includes('bangsamoro') ||
-    p.includes('caraga')
-  ) {
-    return 'Mindanao';
-  }
-
-  const mindanaoProvinces = [
-    'davao', 'misamis', 'zamboanga', 'cotabato', 'sultan kudarat', 'maguindanao',
-    'lanao', 'agusan', 'surigao', 'camiguin', 'bukidnon', 'north cotabato',
-    'sarangani', 'south cotabato', 'compostela',
-  ];
-  if (mindanaoProvinces.some((mp) => p.includes(mp) || c.includes(mp))) return 'Mindanao';
-
   return 'Visayas';
 }
 
 function parseRegionLabel(label: string): string | null {
   if (!label) return null;
   const t = label.trim().toUpperCase();
-
   const directCodes: Record<string, string> = {
     'NCR': 'NCR', 'NATIONAL CAPITAL REGION': 'NCR',
-    'CAR': 'CAR', 'CORDILLERA': 'CAR',
-    'I': 'I', 'REGION I': 'I', 'REGION 1': 'I', 'ILOCOS': 'I',
-    'II': 'II', 'REGION II': 'II', 'REGION 2': 'II', 'CAGAYAN VALLEY': 'II',
-    'III': 'III', 'REGION III': 'III', 'REGION 3': 'III', 'CENTRAL LUZON': 'III',
-    'IV-A': 'IV-A', 'REGION IV-A': 'IV-A', 'REGION 4A': 'IV-A', 'CALABARZON': 'IV-A',
-    'IV-B': 'IV-B', 'REGION IV-B': 'IV-B', 'REGION 4B': 'IV-B', 'MIMAROPA': 'IV-B',
-    'V': 'V', 'REGION V': 'V', 'REGION 5': 'V', 'BICOL': 'V',
-    'VI': 'VI', 'REGION VI': 'VI', 'REGION 6': 'VI', 'WESTERN VISAYAS': 'VI',
-    'VII': 'VII', 'REGION VII': 'VII', 'REGION 7': 'VII', 'CENTRAL VISAYAS': 'VII',
-    'VIII': 'VIII', 'REGION VIII': 'VIII', 'REGION 8': 'VIII', 'EASTERN VISAYAS': 'VIII',
-    'IX': 'IX', 'REGION IX': 'IX', 'REGION 9': 'IX', 'ZAMBOANGA': 'IX',
-    'X': 'X', 'REGION X': 'X', 'REGION 10': 'X', 'NORTHERN MINDANAO': 'X',
-    'XI': 'XI', 'REGION XI': 'XI', 'REGION 11': 'XI', 'DAVAO': 'XI',
-    'XII': 'XII', 'REGION XII': 'XII', 'REGION 12': 'XII', 'SOCCSKSARGEN': 'XII',
-    'XIII': 'XIII', 'REGION XIII': 'XIII', 'REGION 13': 'XIII', 'CARAGA': 'XIII',
+    'CAR': 'CAR',
+    'I': 'I', 'REGION I': 'I', 'REGION 1': 'I',
+    'II': 'II', 'REGION II': 'II', 'REGION 2': 'II',
+    'III': 'III', 'REGION III': 'III', 'REGION 3': 'III',
+    'IV-A': 'IV-A', 'REGION IV-A': 'IV-A', 'REGION 4A': 'IV-A',
+    'IV-B': 'IV-B', 'REGION IV-B': 'IV-B', 'REGION 4B': 'IV-B',
+    'V': 'V', 'REGION V': 'V', 'REGION 5': 'V',
+    'VI': 'VI', 'REGION VI': 'VI', 'REGION 6': 'VI',
+    'VII': 'VII', 'REGION VII': 'VII', 'REGION 7': 'VII',
+    'VIII': 'VIII', 'REGION VIII': 'VIII', 'REGION 8': 'VIII',
+    'IX': 'IX', 'REGION IX': 'IX', 'REGION 9': 'IX',
+    'X': 'X', 'REGION X': 'X', 'REGION 10': 'X',
+    'XI': 'XI', 'REGION XI': 'XI', 'REGION 11': 'XI',
+    'XII': 'XII', 'REGION XII': 'XII', 'REGION 12': 'XII',
+    'XIII': 'XIII', 'REGION XIII': 'XIII', 'REGION 13': 'XIII',
     'BARMM': 'BARMM', 'BANGSAMORO': 'BARMM', 'ARMM': 'BARMM',
   };
 
   if (directCodes[t]) return directCodes[t];
-
   for (const [key, code] of Object.entries(directCodes)) {
     if (t.includes(key)) return code;
   }
-
   return null;
-}
-
-function normalize(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function resolveEmployeeRegionFallback(options: {
-  city?: string;
-  province?: string;
-  facility?: string;
-}): string | undefined {
-  const { city, province, facility } = options;
-
-  const candidates = [facility, province, city]
-    .filter((value): value is string => Boolean(value && value.trim()))
-    .map((value) => normalize(value));
-
-  for (const candidate of candidates) {
-    for (const [key, code] of Object.entries(PROVINCE_TO_REGION)) {
-      if (candidate.includes(key) || key.includes(candidate)) return code;
-    }
-  }
-
-  return undefined;
-}
-
-function resolveManagerId(employees: Employee[], managerName: string, managerId?: string): string | undefined {
-  if (managerId) return managerId;
-  const found = employees.find(
-    (e) => e.name.toLowerCase() === managerName.trim().toLowerCase(),
-  );
-  return found?.id;
-}
-
-function readManagerFromRequest(req: any): { name: string; id?: string } {
-  const name =
-    (req.query?.manager as string) ||
-    (req.headers?.['x-manager-name'] as string) ||
-    '';
-  const id =
-    (req.query?.managerId as string) ||
-    (req.headers?.['x-manager-id'] as string) ||
-    undefined;
-
-  return { name: name.trim(), id };
 }
 
 async function queryAllRows(): Promise<SupabaseEmployeeRow[]> {
@@ -403,11 +244,8 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
     const regionLabel = (row['PERMANENT - REGION'] ?? '').trim();
 
     const hasLocationData = !!(city || province || regionLabel || completeAddress || houseNo || street || barangay);
-
     const addressParts = [houseNo, street, barangay, city, province].filter(Boolean);
-    const address = hasLocationData
-      ? (completeAddress || addressParts.join(', ') || `${city}, ${province}`)
-      : 'Needs Update';
+    const address = hasLocationData ? (completeAddress || addressParts.join(', ') || `${city}, ${province}`) : 'Needs Update';
 
     let gpsLat: number | undefined;
     let gpsLng: number | undefined;
@@ -430,18 +268,7 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
     }
 
     const islandGroup = hasLocationData ? getIslandGroup(city, province || regionLabel) : undefined;
-
-    let region: string | undefined;
-    if (!hasLocationData) {
-      region = 'NEEDS_UPDATE';
-    } else {
-      const regionFromDb = parseRegionLabel(regionLabel);
-      region = regionFromDb ?? resolveEmployeeRegionFallback({
-        city,
-        province,
-        facility: row['Facility'] ?? undefined,
-      });
-    }
+    const region = !hasLocationData ? 'NEEDS_UPDATE' : (parseRegionLabel(regionLabel) ?? undefined);
 
     const nameParts = fullName.split(' ').filter(Boolean);
     const avatar = nameParts.length >= 2
@@ -499,30 +326,37 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
   return employees;
 }
 
-async function getEmployees(forceRefresh = false): Promise<Employee[]> {
+export async function getEmployees(forceRefresh = false): Promise<Employee[]> {
   if (!forceRefresh && cache && Date.now() < cache.expiresAt) {
     return cache.data;
   }
 
   const rows = await queryAllRows();
   const data = mapRowsToEmployees(rows);
-
-  cache = {
-    data,
-    expiresAt: Date.now() + CACHE_TTL_MS,
-  };
-
+  cache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
   return data;
 }
 
-function getPathParts(req: any): string[] {
-  const raw = req.query?.path;
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'string' && raw.length > 0) return [raw];
-  return [];
+export function readManagerFromRequest(req: any): { name: string; id?: string } {
+  const name =
+    (req.query?.manager as string) ||
+    (req.headers?.['x-manager-name'] as string) ||
+    '';
+  const id =
+    (req.query?.managerId as string) ||
+    (req.headers?.['x-manager-id'] as string) ||
+    undefined;
+
+  return { name: name.trim(), id };
 }
 
-function parseRequestBody(req: any): Record<string, any> {
+export function resolveManagerId(employees: Employee[], managerName: string, managerId?: string): string | undefined {
+  if (managerId) return managerId;
+  const found = employees.find((e) => e.name.toLowerCase() === managerName.trim().toLowerCase());
+  return found?.id;
+}
+
+export function parseRequestBody(req: any): Record<string, any> {
   if (typeof req.body === 'string') {
     try {
       return JSON.parse(req.body);
@@ -533,99 +367,32 @@ function parseRequestBody(req: any): Record<string, any> {
   return (req.body ?? {}) as Record<string, any>;
 }
 
-export default async function handler(req: any, res: any) {
-  try {
-    const method = String(req.method || 'GET').toUpperCase();
-    const pathParts = getPathParts(req);
+export async function updateEmployeeProfile(empId: string, payload: { contactNumber?: string; address?: string }) {
+  const supabase = getSupabaseClient();
+  const dbUpdate: Record<string, string> = {};
 
-    if (method === 'GET' && pathParts.length === 1 && pathParts[0] === 'health') {
-      return res.status(200).json({
-        ok: true,
-        hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
-        hasSupabaseSecretKey: Boolean(process.env.SUPABASE_SECRET_KEY),
-      });
-    }
+  if (typeof payload.contactNumber === 'string') dbUpdate['MOBILE NUMBER'] = payload.contactNumber.trim();
+  if (typeof payload.address === 'string') dbUpdate['COMPLETE ADDRESS'] = payload.address.trim();
 
-    if (method === 'GET' && pathParts.length === 0) {
-      const employees = await getEmployees();
-      const { name } = readManagerFromRequest(req);
-
-      if (!name) {
-        return res.status(200).json(employees);
-      }
-
-      const managerId = resolveManagerId(employees, name);
-      const scoped = employees.filter((emp) => {
-        const nameMatch = emp.managerName?.trim().toLowerCase() === name.toLowerCase();
-        const idMatch = !!managerId && emp.managerId === managerId;
-        return emp.id !== managerId && (nameMatch || idMatch);
-      });
-
-      return res.status(200).json(scoped);
-    }
-
-    // PATCH /api/employees/:id/profile
-    if (method === 'PATCH' && pathParts.length === 2 && pathParts[1] === 'profile') {
-      const empId = pathParts[0];
-      const body = parseRequestBody(req);
-      const {
-        contactNumber,
-        gcashNumber,
-        bankAccountDetails,
-        address,
-      } = body as {
-        contactNumber?: string;
-        gcashNumber?: string;
-        bankAccountDetails?: string;
-        address?: string;
-      };
-
-      const employees = await getEmployees();
-      const target = employees.find((e) => e.id === empId);
-      if (!target) {
-        return res.status(404).json({ message: 'Employee not found.' });
-      }
-
-      const dbUpdate: Record<string, string> = {};
-      if (typeof contactNumber === 'string') dbUpdate['MOBILE NUMBER'] = contactNumber.trim();
-      if (typeof address === 'string') dbUpdate['COMPLETE ADDRESS'] = address.trim();
-
-      if (Object.keys(dbUpdate).length > 0) {
-        const supabase = getSupabaseClient();
-        const { error } = await supabase
-          .from('Employee Details')
-          .update(dbUpdate)
-          .eq('Employee ID', empId);
-
-        if (error) {
-          return res.status(500).json({
-            message: 'Database update failed.',
-            detail: error.message,
-          });
-        }
-      }
-
-      // Refresh the cache so the next list fetch returns latest details.
-      await getEmployees(true);
-
-      return res.status(200).json({
-        message: 'Profile updated successfully.',
-        employeeId: empId,
-        updated: {
-          contactNumber: typeof contactNumber === 'string' ? contactNumber : undefined,
-          gcashNumber: typeof gcashNumber === 'string' ? gcashNumber : undefined,
-          bankAccountDetails: typeof bankAccountDetails === 'string' ? bankAccountDetails : undefined,
-          address: typeof address === 'string' ? address : undefined,
-        },
-      });
-    }
-
-    res.setHeader('Allow', 'GET, PATCH');
-    return res.status(405).json({ message: 'Method Not Allowed' });
-  } catch (error: any) {
-    return res.status(500).json({
-      message: 'Internal server error.',
-      detail: error?.message ?? String(error),
-    });
+  if (Object.keys(dbUpdate).length === 0) {
+    return { updated: false };
   }
+
+  const { error } = await supabase
+    .from('Employee Details')
+    .update(dbUpdate)
+    .eq('Employee ID', empId);
+
+  if (error) throw new Error(`Supabase update failed: ${error.message}`);
+
+  await getEmployees(true);
+  return { updated: true };
+}
+
+export function getHealth() {
+  return {
+    ok: true,
+    hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
+    hasSupabaseSecretKey: Boolean(process.env.SUPABASE_SECRET_KEY),
+  };
 }
