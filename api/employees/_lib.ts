@@ -22,6 +22,7 @@ export interface Employee {
   phone?: string;
   email: string;
   avatar: string;
+  profilePicture?: string | null;
   address: string;
   islandGroup?: IslandGroup;
   region?: string;
@@ -326,13 +327,46 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
   return employees;
 }
 
+/** Merge accounts.profile_picture onto employee records by employee_id. */
+async function attachProfilePictures(employees: Employee[]): Promise<Employee[]> {
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from('accounts')
+      .select('employee_id, profile_picture')
+      .not('profile_picture', 'is', null);
+
+    if (error || !data || data.length === 0) {
+      return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
+    }
+
+    const byId = new Map<string, string>();
+    for (const row of data) {
+      const id = String((row as { employee_id?: string }).employee_id ?? '').trim();
+      const url =
+        typeof (row as { profile_picture?: string | null }).profile_picture === 'string'
+          ? (row as { profile_picture: string }).profile_picture.trim()
+          : '';
+      if (id && url) byId.set(id, url);
+    }
+
+    return employees.map((emp) => ({
+      ...emp,
+      profilePicture: byId.get(emp.id) ?? null,
+    }));
+  } catch {
+    return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
+  }
+}
+
 export async function getEmployees(forceRefresh = false): Promise<Employee[]> {
   if (!forceRefresh && cache && Date.now() < cache.expiresAt) {
-    return cache.data;
+    // Still refresh photos so uploads appear without waiting for full cache expiry.
+    return attachProfilePictures(cache.data);
   }
 
   const rows = await queryAllRows();
-  const data = mapRowsToEmployees(rows);
+  const data = await attachProfilePictures(mapRowsToEmployees(rows));
   cache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
   return data;
 }

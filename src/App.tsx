@@ -10,6 +10,7 @@ import LoginPage from './components/LoginPage';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import UserAccountMenu from './components/UserAccountMenu';
 import ProfilePictureUploader from './components/ProfilePictureUploader';
+import PersonAvatar from './components/PersonAvatar';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
   AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
@@ -2715,16 +2716,13 @@ export default function App() {
                             </p>
                             {myDepartmentTeam.manager || currentEmployee.managerName ? (
                               <div className="rounded-2xl border border-[#002060]/20 bg-[#002060]/5 p-4 flex items-center gap-4">
-                                <div className="w-12 h-12 rounded-full bg-[#002060] text-white flex items-center justify-center text-sm font-black shrink-0">
-                                  {myDepartmentTeam.manager?.avatar ??
-                                    (currentEmployee.managerName || 'MG')
-                                      .split(' ')
-                                      .filter(Boolean)
-                                      .slice(0, 2)
-                                      .map((p) => p[0])
-                                      .join('')
-                                      .toUpperCase()}
-                                </div>
+                                <PersonAvatar
+                                  name={myDepartmentTeam.manager?.name ?? currentEmployee.managerName ?? 'Manager'}
+                                  avatarText={myDepartmentTeam.manager?.avatar}
+                                  profilePicture={myDepartmentTeam.manager?.profilePicture}
+                                  sizeClass="w-12 h-12"
+                                  textClass="text-sm"
+                                />
                                 <div className="min-w-0 flex-1">
                                   <p className="font-bold text-slate-900">
                                     {myDepartmentTeam.manager?.name ?? currentEmployee.managerName}
@@ -2779,9 +2777,14 @@ export default function App() {
                                         isYou ? 'bg-slate-50' : 'bg-white'
                                       }`}
                                     >
-                                      <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-black shrink-0">
-                                        {member.avatar || member.name.charAt(0)}
-                                      </div>
+                                      <PersonAvatar
+                                        name={member.name}
+                                        avatarText={member.avatar}
+                                        profilePicture={member.profilePicture}
+                                        sizeClass="w-10 h-10"
+                                        textClass="text-xs"
+                                        bgClass="bg-slate-200 text-slate-700"
+                                      />
                                       <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <p className="font-semibold text-slate-900 text-sm truncate">
@@ -2864,9 +2867,16 @@ export default function App() {
                             displayName={currentEmployee?.name ?? currentUser.username}
                             avatarText={currentEmployee?.avatar}
                             profilePicture={currentUser.profilePicture}
-                            onUpdated={(url) =>
-                              setCurrentUser((prev) => ({ ...prev, profilePicture: url }))
-                            }
+                            onUpdated={(url) => {
+                              setCurrentUser((prev) => ({ ...prev, profilePicture: url }));
+                              if (currentEmployee?.id) {
+                                setEmployees((prev) =>
+                                  prev.map((emp) =>
+                                    emp.id === currentEmployee.id ? { ...emp, profilePicture: url } : emp
+                                  )
+                                );
+                              }
+                            }}
                           />
                         </div>
                         <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
@@ -3429,9 +3439,14 @@ export default function App() {
                             : 'hover:bg-[#ebf1fc]'
                         }`}
                       >
-                        <span className="w-8 h-8 rounded-full bg-[#002060] text-white text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">
-                          {emp.avatar}
-                        </span>
+                        <PersonAvatar
+                          name={emp.name}
+                          avatarText={emp.avatar}
+                          profilePicture={emp.profilePicture}
+                          sizeClass="w-8 h-8"
+                          textClass="text-[10px]"
+                          className="mt-0.5"
+                        />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-extrabold text-[#002060] text-sm truncate">{emp.name}</span>
@@ -4016,9 +4031,18 @@ export default function App() {
                   {directReports.map((emp) => (
                     <div key={emp.id} className="rounded-3xl border border-slate-200 bg-white shadow-sm p-5">
                       <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{emp.name}</p>
-                          <p className="text-xs text-slate-500 mt-1">{emp.department} · {emp.role}</p>
+                        <div className="flex items-start gap-3 min-w-0">
+                          <PersonAvatar
+                            name={emp.name}
+                            avatarText={emp.avatar}
+                            profilePicture={emp.profilePicture}
+                            sizeClass="w-11 h-11"
+                            textClass="text-sm"
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-900">{emp.name}</p>
+                            <p className="text-xs text-slate-500 mt-1">{emp.department} · {emp.role}</p>
+                          </div>
                         </div>
                         <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black ${emp.status === 'Green' ? 'bg-emerald-100 text-emerald-700' : emp.status === 'Yellow' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
                           {emp.status}
@@ -4276,9 +4300,14 @@ export default function App() {
                           {/* Employee Info */}
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-[#002060] text-white text-[11px] font-black flex items-center justify-center shrink-0 shadow-sm">
-                                {emp.avatar}
-                              </div>
+                              <PersonAvatar
+                                name={emp.name}
+                                avatarText={emp.avatar}
+                                profilePicture={emp.profilePicture}
+                                sizeClass="w-8 h-8"
+                                textClass="text-[11px]"
+                                className="shadow-sm"
+                              />
                               <div>
                                 <p className="font-bold text-slate-800 leading-tight">{emp.name}</p>
                                 <p className="text-[10px] text-slate-400 font-mono mt-0.5">
@@ -4490,7 +4519,13 @@ export default function App() {
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
-                            <span className="w-4 h-4 rounded-full bg-[#002060] text-white text-[9px] font-black flex items-center justify-center shrink-0">{report.employeeAvatar}</span>
+                            <PersonAvatar
+                              name={report.employeeName}
+                              avatarText={report.employeeAvatar}
+                              profilePicture={employees.find((e) => e.id === report.employeeId)?.profilePicture}
+                              sizeClass="w-4 h-4"
+                              textClass="text-[9px]"
+                            />
                             <span className="text-xs text-slate-700 font-semibold">{report.employeeName}</span>
                             <span className="text-slate-400 text-xs">·</span>
                             <span className="text-slate-500 text-xs font-mono">{report.timestamp}</span>
@@ -4554,7 +4589,13 @@ export default function App() {
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
-                            <span className="w-4 h-4 rounded-full bg-[#002060] text-white text-[9px] font-black flex items-center justify-center shrink-0">{report.employeeAvatar}</span>
+                            <PersonAvatar
+                              name={report.employeeName}
+                              avatarText={report.employeeAvatar}
+                              profilePicture={employees.find((e) => e.id === report.employeeId)?.profilePicture}
+                              sizeClass="w-4 h-4"
+                              textClass="text-[9px]"
+                            />
                             <span className="text-xs text-slate-700 font-semibold">{report.employeeName}</span>
                             <span className="text-slate-400 text-xs">·</span>
                             <span className="text-slate-500 text-xs font-mono">{report.timestamp}</span>
@@ -4755,9 +4796,13 @@ export default function App() {
                                     <td className="px-4 py-3 text-slate-400 font-mono text-[10px]">{idx + 1}</td>
                                     <td className="px-4 py-3">
                                       <div className="flex items-center gap-2">
-                                        <div className="w-7 h-7 rounded-full bg-[#002060] text-white text-[10px] font-black flex items-center justify-center shrink-0">
-                                          {emp.avatar || emp.name.charAt(0)}
-                                        </div>
+                                        <PersonAvatar
+                                          name={emp.name}
+                                          avatarText={emp.avatar}
+                                          profilePicture={emp.profilePicture}
+                                          sizeClass="w-7 h-7"
+                                          textClass="text-[10px]"
+                                        />
                                         <span className="font-bold text-slate-800">{emp.name}</span>
                                       </div>
                                     </td>
@@ -4927,7 +4972,13 @@ export default function App() {
                           <td className="px-4 py-3 text-slate-400 font-mono text-[10px]">{idx + 1}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-full bg-[#002060] text-white text-[11px] font-black flex items-center justify-center shrink-0">{emp.avatar}</div>
+                              <PersonAvatar
+                                name={emp.name}
+                                avatarText={emp.avatar}
+                                profilePicture={emp.profilePicture}
+                                sizeClass="w-8 h-8"
+                                textClass="text-[11px]"
+                              />
                               <div>
                                 <p className="font-bold text-slate-800 leading-tight">{emp.name}</p>
                                 <p className="text-[10px] text-slate-400 font-mono">{emp.role}</p>
@@ -5094,9 +5145,18 @@ export default function App() {
                             <tr key={app.id} className={`border-t border-slate-100 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-[#f8fafc]'} hover:bg-blue-50/40`}>
                               <td className="px-4 py-3 font-mono font-black text-[#002060] text-[11px]">{app.requestCode}</td>
                               <td className="px-4 py-3">
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="font-bold text-slate-800">{app.employeeName}</span>
-                                  <span className="text-[10px] text-slate-400">{app.department} · {app.islandGroup}</span>
+                                <div className="flex items-center gap-2.5">
+                                  <PersonAvatar
+                                    name={app.employeeName}
+                                    avatarText={employees.find((e) => e.id === app.employeeId)?.avatar}
+                                    profilePicture={employees.find((e) => e.id === app.employeeId)?.profilePicture}
+                                    sizeClass="w-8 h-8"
+                                    textClass="text-[10px]"
+                                  />
+                                  <div className="flex flex-col gap-0.5 min-w-0">
+                                    <span className="font-bold text-slate-800">{app.employeeName}</span>
+                                    <span className="text-[10px] text-slate-400">{app.department} · {app.islandGroup}</span>
+                                  </div>
                                 </div>
                               </td>
                               <td className="px-4 py-3 max-w-[180px]">
@@ -5399,6 +5459,13 @@ export default function App() {
                       const sc = managerAidStatusCfgMap[application.status] || managerAidStatusCfgMap['Pending Manager Review'];
                       return (
                         <div key={application.id} className="px-6 py-4 flex items-start gap-4">
+                          <PersonAvatar
+                            name={application.employeeName}
+                            avatarText={employees.find((e) => e.id === application.employeeId)?.avatar}
+                            profilePicture={employees.find((e) => e.id === application.employeeId)?.profilePicture}
+                            sizeClass="w-10 h-10"
+                            textClass="text-xs"
+                          />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className="font-bold text-slate-800 text-sm">{application.employeeName}</p>
@@ -5473,9 +5540,16 @@ export default function App() {
                   displayName={currentEmployee?.name ?? currentUser.username}
                   avatarText={currentEmployee?.avatar}
                   profilePicture={currentUser.profilePicture}
-                  onUpdated={(url) =>
-                    setCurrentUser((prev) => ({ ...prev, profilePicture: url }))
-                  }
+                  onUpdated={(url) => {
+                    setCurrentUser((prev) => ({ ...prev, profilePicture: url }));
+                    if (currentEmployee?.id) {
+                      setEmployees((prev) =>
+                        prev.map((emp) =>
+                          emp.id === currentEmployee.id ? { ...emp, profilePicture: url } : emp
+                        )
+                      );
+                    }
+                  }}
                 />
                 <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
                   <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Display name</p>
@@ -6205,11 +6279,20 @@ export default function App() {
             <div className="p-6 grid gap-6 md:grid-cols-2">
               <section className="rounded-xl border border-slate-200 p-4">
                 <p className="text-xs font-black uppercase tracking-widest text-slate-500">Employee Information</p>
-                <div className="mt-3 text-sm text-slate-700 space-y-1">
-                  <p><span className="font-semibold">Employee ID:</span> {selectedAidApplication.employeeId}</p>
-                  <p><span className="font-semibold">Employee Name:</span> {selectedAidApplication.employeeName}</p>
-                  <p><span className="font-semibold">Department:</span> {selectedAidApplication.department}</p>
-                  <p><span className="font-semibold">Position:</span> {selectedAidApplication.position || '—'}</p>
+                <div className="mt-3 flex items-start gap-3">
+                  <PersonAvatar
+                    name={selectedAidApplication.employeeName}
+                    avatarText={employees.find((e) => e.id === selectedAidApplication.employeeId)?.avatar}
+                    profilePicture={employees.find((e) => e.id === selectedAidApplication.employeeId)?.profilePicture}
+                    sizeClass="w-12 h-12"
+                    textClass="text-sm"
+                  />
+                  <div className="text-sm text-slate-700 space-y-1 min-w-0">
+                    <p><span className="font-semibold">Employee ID:</span> {selectedAidApplication.employeeId}</p>
+                    <p><span className="font-semibold">Employee Name:</span> {selectedAidApplication.employeeName}</p>
+                    <p><span className="font-semibold">Department:</span> {selectedAidApplication.department}</p>
+                    <p><span className="font-semibold">Position:</span> {selectedAidApplication.position || '—'}</p>
+                  </div>
                 </div>
               </section>
 

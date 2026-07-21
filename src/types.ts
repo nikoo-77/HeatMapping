@@ -92,6 +92,8 @@ export interface Employee {
   lastResponseRecv?: string;
   safetyMessage?: string;
   avatar: string;
+  /** Public URL from accounts.profile_picture when set. */
+  profilePicture?: string | null;
   userId?: string;
   contactNumber?: string;
   gcashNumber?: string;

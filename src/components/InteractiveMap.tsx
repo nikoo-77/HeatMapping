@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Employee, DisasterConfig } from '../types';
 import { ALL_ISLAND_LOCATIONS, PHILIPPINE_REGIONS } from '../data_islands';
+import PersonAvatar from './PersonAvatar';
 import { Flame, MapPin, Search, Users, ShieldAlert, Crosshair, HelpCircle, Signal, Battery, Home, Info, Compass, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import L from 'leaflet';
@@ -807,13 +808,22 @@ export default function InteractiveMap({
               className="flex-1 flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full"
             >
               <div className="flex items-start gap-3.5">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black font-sans text-xs shrink-0 border shadow-sm
-                  ${selectedEmployee.status === 'Green' ? 'bg-emerald-100 text-emerald-850 border-emerald-300' : ''}
-                  ${selectedEmployee.status === 'Yellow' ? 'bg-amber-100 text-amber-850 border-amber-300 animate-pulse' : ''}
-                  ${selectedEmployee.status === 'Red' ? 'bg-rose-100 text-[#71091e] border-rose-300' : ''}
-                `}>
-                  {selectedEmployee.avatar}
-                </div>
+                <PersonAvatar
+                  name={selectedEmployee.name}
+                  avatarText={selectedEmployee.avatar}
+                  profilePicture={selectedEmployee.profilePicture}
+                  sizeClass="w-10 h-10"
+                  textClass="text-xs"
+                  roundedClass="rounded-lg"
+                  className="border shadow-sm"
+                  bgClass={
+                    selectedEmployee.status === 'Green'
+                      ? 'bg-emerald-100 text-emerald-850 border-emerald-300'
+                      : selectedEmployee.status === 'Yellow'
+                      ? 'bg-amber-100 text-amber-850 border-amber-300 animate-pulse'
+                      : 'bg-rose-100 text-[#71091e] border-rose-300'
+                  }
+                />
 
                 <div>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">

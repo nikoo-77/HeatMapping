@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Employee, SafetyStatus } from '../types';
+import PersonAvatar from './PersonAvatar';
 import { 
   Search, Users, AlertCircle, CheckCircle, HelpCircle, 
   Send, Mail, AlertTriangle, Shield, Check, Volume2, Landmark, Phone, X
@@ -370,10 +371,14 @@ export default function EmployeeRollCall({
                 {/* upper content block */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    {/* Circle Initials Avatar */}
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs select-none shrink-0 ${avatarClass}`}>
-                      {emp.avatar || emp.name.split(' ').map(n => n[0]).join('')}
-                    </div>
+                    <PersonAvatar
+                      name={emp.name}
+                      avatarText={emp.avatar}
+                      profilePicture={emp.profilePicture}
+                      sizeClass="w-9 h-9"
+                      textClass="text-xs"
+                      bgClass={avatarClass}
+                    />
 
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">

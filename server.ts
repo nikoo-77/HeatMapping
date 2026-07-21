@@ -41,6 +41,7 @@ interface Employee {
   phone?: string;
   email: string;
   avatar: string;
+  profilePicture?: string | null;
   address?: string;
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
   region?: string;
@@ -473,6 +474,42 @@ async function loadEmployees(): Promise<Employee[]> {
 
 // ── In-memory cache of loaded employees (service-role key bypasses Supabase RLS) ──
 let allEmployees: Employee[] = [];
+
+/** Merge accounts.profile_picture onto employee records by employee_id. */
+async function attachProfilePictures(employees: Employee[]): Promise<Employee[]> {
+  try {
+    const { data, error } = await supabase
+      .from('accounts')
+      .select('employee_id, profile_picture')
+      .not('profile_picture', 'is', null);
+
+    if (error || !data?.length) {
+      return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
+    }
+
+    const byId = new Map<string, string>();
+    for (const row of data) {
+      const id = String(row.employee_id ?? '').trim();
+      const url = typeof row.profile_picture === 'string' ? row.profile_picture.trim() : '';
+      if (id && url) byId.set(id, url);
+    }
+
+    return employees.map((emp) => ({
+      ...emp,
+      profilePicture: byId.get(emp.id) ?? null,
+    }));
+  } catch (err) {
+    console.warn('Could not attach profile pictures:', err instanceof Error ? err.message : err);
+    return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
+  }
+}
+
+function setEmployeeProfilePicture(employeeId: string, profilePicture: string | null) {
+  const idx = allEmployees.findIndex((e) => e.id === employeeId);
+  if (idx >= 0) {
+    allEmployees[idx] = { ...allEmployees[idx], profilePicture };
+  }
+}
 
 // Resolve a manager's employee id from their name (used for id-based matching).
 function resolveManagerId(managerName: string, managerId?: string): string | undefined {
@@ -944,6 +981,8 @@ app.post('/api/account/profile-picture', profileUpload.single('profilePicture'),
       });
     }
 
+    setEmployeeProfilePicture(account.employee_id, profilePictureUrl);
+
     return res.json({
       message: 'Profile picture updated.',
       profilePicture: profilePictureUrl,
@@ -980,6 +1019,8 @@ app.delete('/api/account/profile-picture', async (req, res) => {
     if (error) {
       return res.status(500).json({ message: 'Failed to remove profile picture.', detail: error.message });
     }
+
+    setEmployeeProfilePicture(account.employee_id, null);
 
     return res.json({ message: 'Profile picture removed.', profilePicture: null, username: account.username });
   } catch (err) {
@@ -1034,25 +1075,32 @@ app.post('/api/change-password', async (req, res) => {
 // ── Bootstrap server ──────────────────────────────────────────────────────────
 loadEmployees()
   .then(async (employees) => {
-    allEmployees = employees;
+    allEmployees = await attachProfilePictures(employees);
     // Do not block API startup on account seeding (was causing login failures).
     void syncAccountsFromEmployees(employees);
 
     // Manager-scoped read. When a manager is supplied, only their direct reports
     // are returned (server-side authorization — never trust the client filter).
-    app.get('/api/employees', (req, res) => {
-      const { name } = readManagerFromRequest(req);
-      if (name) {
-        const mgrId = resolveManagerId(name);
-        const scoped = allEmployees.filter((emp) => {
-          const nameMatch =
-            emp.managerName?.trim().toLowerCase() === name.toLowerCase();
-          const idMatch = !!mgrId && emp.managerId === mgrId;
-          return emp.id !== mgrId && (nameMatch || idMatch);
-        });
-        return res.json(scoped);
+    app.get('/api/employees', async (req, res) => {
+      try {
+        // Refresh photos without reloading the full employee dataset each time.
+        allEmployees = await attachProfilePictures(allEmployees);
+        const { name } = readManagerFromRequest(req);
+        if (name) {
+          const mgrId = resolveManagerId(name);
+          const scoped = allEmployees.filter((emp) => {
+            const nameMatch =
+              emp.managerName?.trim().toLowerCase() === name.toLowerCase();
+            const idMatch = !!mgrId && emp.managerId === mgrId;
+            return emp.id !== mgrId && (nameMatch || idMatch);
+          });
+          return res.json(scoped);
+        }
+        res.json(allEmployees);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.status(500).json({ message: 'Failed to load employees.', detail: message });
       }
-      res.json(allEmployees);
     });
 
     app.get('/api/aid-assistance', async (req, res) => {
