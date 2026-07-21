@@ -136,6 +136,80 @@ interface IncidentSnapshotRow {
   updated_at: string;
 }
 
+type IncidentWorkflowStatus = 'pending_manager_review' | 'manager_approved' | 'approved' | 'closed' | 'reopened';
+
+type IncidentParticipantStatus = 'self_reported' | 'pending_manager_review' | 'manager_verified' | 'approved' | 'rejected';
+
+interface CalamityIncidentRow {
+  id: string;
+  incident_key: string;
+  source_report_id: string | null;
+  incident_type: string;
+  incident_name: string;
+  location_label: string;
+  lat: number;
+  lng: number;
+  radius_km: number;
+  description: string;
+  status: IncidentWorkflowStatus;
+  created_by_employee_id: string | null;
+  created_by_employee_name: string | null;
+  created_by_role: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  closed_at: string | null;
+  join_deadline_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CalamityIncidentPersonRow {
+  id: string;
+  incident_id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_avatar: string | null;
+  employee_role: string | null;
+  relation_status: IncidentParticipantStatus;
+  joined_at: string;
+  joined_source: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  notes: string | null;
+}
+
+interface IncidentReportLike {
+  id: string;
+  timestamp: string;
+  type: string;
+  incidentName: string;
+  locationLabel: string;
+  lat: number;
+  lng: number;
+  radiusKm: number;
+  affectedCount: number;
+  affectedEmployeeIds: string[];
+  magnitude?: string;
+  signalLevel?: string;
+  description: string;
+}
+
+interface PendingEmployeeReportLike {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeAvatar: string;
+  timestamp: string;
+  type: string;
+  incidentName: string;
+  locationLabel: string;
+  lat: number;
+  lng: number;
+  description: string;
+  status: 'Pending' | 'ManagerApproved' | 'Approved' | 'Rejected';
+  routedTo: string;
+}
+
 const AID_ATTACHMENT_BUCKET = process.env.SUPABASE_AID_ATTACHMENT_BUCKET || 'aid-assistance-attachments';
 const PROFILE_PICTURE_BUCKET = process.env.SUPABASE_PROFILE_PICTURE_BUCKET || 'profile-pictures';
 const ALLOWED_ATTACHMENT_MIME = new Set([
@@ -556,6 +630,392 @@ function normalizeIncidentSnapshotPayload(value: unknown): IncidentSnapshotPaylo
     },
     activeDisaster,
   };
+}
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function roundTo(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function buildIncidentKey(input: {
+  type: string;
+  incidentName: string;
+  locationLabel: string;
+  lat: number;
+  lng: number;
+  radiusKm: number;
+}): string {
+  const typeKey = normalizeText(input.type);
+  const locationKey = normalizeText(input.locationLabel || input.incidentName);
+  return [typeKey, locationKey, roundTo(input.lat, 3), roundTo(input.lng, 3), roundTo(input.radiusKm, 1)].join('|');
+}
+
+function incidentStatusFromReport(status?: string): IncidentWorkflowStatus {
+  if (status === 'Approved') return 'approved';
+  if (status === 'Rejected') return 'closed';
+  if (status === 'ManagerApproved') return 'manager_approved';
+  return 'pending_manager_review';
+}
+
+function participantStatusFromReport(status?: string): IncidentParticipantStatus {
+  if (status === 'Approved') return 'approved';
+  if (status === 'Rejected') return 'rejected';
+  if (status === 'ManagerApproved') return 'manager_verified';
+  return 'pending_manager_review';
+}
+
+function buildDisasterTemplates(type: string): { id: string; name: string; subName: string; icon: string; color: string; colorClass: string; hexColor: string; greenTemplates: string[]; replyTemplates: string[] } {
+  if (normalizeText(type).includes('earthquake')) {
+    return {
+      id: 'earthquake',
+      name: 'Earthquake Incident',
+      subName: 'Seismic event',
+      icon: 'earthquake',
+      color: 'red',
+      colorClass: 'text-rose-700 bg-rose-50 border-rose-200',
+      hexColor: '#f43f5e',
+      greenTemplates: ['Safe and accounted for.', 'No injuries reported.', 'Evacuated to safer ground.'],
+      replyTemplates: ['Need first aid support.', 'Walls cracked, requesting assistance.', 'Trapped indoors, need help.'],
+    };
+  }
+
+  if (normalizeText(type).includes('typhoon') || normalizeText(type).includes('flood')) {
+    return {
+      id: 'typhoon',
+      name: 'Typhoon Incident',
+      subName: 'Weather event',
+      icon: 'typhoon',
+      color: 'cyan',
+      colorClass: 'text-cyan-700 bg-cyan-50 border-cyan-200',
+      hexColor: '#06b6d4',
+      greenTemplates: ['Sheltered and safe.', 'Power out but family is okay.', 'Standing by evacuation center.'],
+      replyTemplates: ['Flooding nearby, need relief goods.', 'Roof damaged, please send assistance.', 'Stranded due to floodwaters.'],
+    };
+  }
+
+  return {
+    id: 'fire',
+    name: 'Fire Incident',
+    subName: 'Localized emergency',
+    icon: 'fire',
+    color: 'orange',
+    colorClass: 'text-orange-700 bg-orange-50 border-orange-200',
+    hexColor: '#f97316',
+    greenTemplates: ['Evacuated safely.', 'Fire is under control.', 'Safe and waiting for clearance.'],
+    replyTemplates: ['Smoke nearby, requesting help.', 'Need medical support and evacuation.', 'Power cut off, seeking assistance.'],
+  };
+}
+
+function buildSnapshotReportFromIncident(incident: CalamityIncidentRow, people: CalamityIncidentPersonRow[]): IncidentReportLike {
+  const affectedEmployeeIds = people
+    .filter((person) => person.relation_status !== 'rejected')
+    .map((person) => person.employee_id);
+
+  return {
+    id: incident.id,
+    timestamp: new Date(incident.created_at || incident.updated_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+    type: incident.incident_type,
+    incidentName: incident.incident_name,
+    locationLabel: incident.location_label,
+    lat: incident.lat,
+    lng: incident.lng,
+    radiusKm: incident.radius_km,
+    affectedCount: affectedEmployeeIds.length,
+    affectedEmployeeIds,
+    description: incident.description,
+  };
+}
+
+function buildPendingReportFromPerson(incident: CalamityIncidentRow, person: CalamityIncidentPersonRow): PendingEmployeeReportLike {
+  const statusMap: Record<IncidentParticipantStatus, PendingEmployeeReportLike['status']> = {
+    self_reported: 'Pending',
+    pending_manager_review: 'Pending',
+    manager_verified: 'ManagerApproved',
+    approved: 'Approved',
+    rejected: 'Rejected',
+  };
+
+  return {
+    id: `${incident.id}-${person.employee_id}`,
+    employeeId: person.employee_id,
+    employeeName: person.employee_name,
+    employeeAvatar: person.employee_avatar ?? person.employee_name.charAt(0),
+    timestamp: new Date(person.joined_at || incident.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+    type: incident.incident_type,
+    incidentName: incident.incident_name,
+    locationLabel: incident.location_label,
+    lat: incident.lat,
+    lng: incident.lng,
+    description: incident.description,
+    status: statusMap[person.relation_status] ?? 'Pending',
+    routedTo: incident.created_by_employee_id || '',
+  };
+}
+
+function isIncidentReportLike(value: unknown): value is IncidentReportLike {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.type === 'string'
+    && typeof value.incidentName === 'string'
+    && typeof value.locationLabel === 'string'
+    && typeof value.lat === 'number'
+    && typeof value.lng === 'number'
+    && typeof value.radiusKm === 'number'
+    && typeof value.description === 'string'
+    && Array.isArray(value.affectedEmployeeIds);
+}
+
+function isPendingReportLike(value: unknown): value is PendingEmployeeReportLike {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.employeeId === 'string'
+    && typeof value.employeeName === 'string'
+    && typeof value.employeeAvatar === 'string'
+    && typeof value.timestamp === 'string'
+    && typeof value.type === 'string'
+    && typeof value.incidentName === 'string'
+    && typeof value.locationLabel === 'string'
+    && typeof value.lat === 'number'
+    && typeof value.lng === 'number'
+    && typeof value.description === 'string'
+    && typeof value.status === 'string'
+    && typeof value.routedTo === 'string';
+}
+
+async function loadIncidentSnapshotFromNormalizedTables(): Promise<IncidentSnapshotPayload | null> {
+  const { data: incidents, error: incidentError } = await supabase
+    .from('calamity_incidents')
+    .select('*')
+    .order('updated_at', { ascending: false });
+
+  if (incidentError) {
+    throw new Error(incidentError.message);
+  }
+
+  if (!incidents || incidents.length === 0) {
+    return null;
+  }
+
+  const incidentRows = incidents as CalamityIncidentRow[];
+  const incidentIds = incidentRows.map((incident) => incident.id);
+
+  const { data: people, error: peopleError } = await supabase
+    .from('calamity_incident_people')
+    .select('*')
+    .in('incident_id', incidentIds)
+    .order('joined_at', { ascending: true });
+
+  if (peopleError) {
+    throw new Error(peopleError.message);
+  }
+
+  const groupedPeople = new Map<string, CalamityIncidentPersonRow[]>();
+  ((people ?? []) as CalamityIncidentPersonRow[]).forEach((person) => {
+    const list = groupedPeople.get(person.incident_id) ?? [];
+    list.push(person);
+    groupedPeople.set(person.incident_id, list);
+  });
+
+  const calamityReports = incidentRows.map((incident) => buildSnapshotReportFromIncident(incident, groupedPeople.get(incident.id) ?? []));
+  const pendingEmployeeReports = incidentRows.flatMap((incident) => {
+    const peopleForIncident = groupedPeople.get(incident.id) ?? [];
+    return peopleForIncident
+      .filter((person) => person.relation_status !== 'approved')
+      .map((person) => buildPendingReportFromPerson(incident, person));
+  });
+
+  const latestIncident = incidentRows[0];
+  const disaster = buildDisasterTemplates(latestIncident.incident_type);
+
+  return {
+    calamityReports,
+    pendingEmployeeReports,
+    resolvedReports: Object.fromEntries(incidentRows.map((incident) => [incident.id, incident.status === 'closed'])),
+    simulationActive: incidentRows.some((incident) => incident.status !== 'closed'),
+    epicenter: {
+      lat: latestIncident.lat,
+      lng: latestIncident.lng,
+      radiusKm: latestIncident.radius_km,
+    },
+    activeDisaster: {
+      ...disaster,
+      defaultX: latestIncident.lat,
+      defaultY: latestIncident.lng,
+      defaultRadius: latestIncident.radius_km,
+      locationName: latestIncident.location_label,
+      description: latestIncident.description,
+    },
+  };
+}
+
+async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshotPayload): Promise<void> {
+  const incidentMap = new Map<string, {
+    incident: Partial<CalamityIncidentRow>;
+    people: CalamityIncidentPersonRow[];
+  }>();
+
+  const addIncident = (input: {
+    sourceReportId: string;
+    incidentType: string;
+    incidentName: string;
+    locationLabel: string;
+    lat: number;
+    lng: number;
+    radiusKm: number;
+    description: string;
+    status: IncidentWorkflowStatus;
+    createdByEmployeeId?: string | null;
+    createdByEmployeeName?: string | null;
+    createdByRole?: string | null;
+    people: CalamityIncidentPersonRow[];
+  }) => {
+    const incidentKey = buildIncidentKey({
+      type: input.incidentType,
+      incidentName: input.incidentName,
+      locationLabel: input.locationLabel,
+      lat: input.lat,
+      lng: input.lng,
+      radiusKm: input.radiusKm,
+    });
+
+    const existing = incidentMap.get(incidentKey);
+    const nextStatus = existing
+      ? (existing.incident.status === 'approved' || input.status === 'approved'
+          ? 'approved'
+          : existing.incident.status === 'manager_approved' || input.status === 'manager_approved'
+            ? 'manager_approved'
+            : input.status)
+      : input.status;
+
+    const incident: Partial<CalamityIncidentRow> = {
+      ...(existing?.incident ?? {}),
+      incident_key: incidentKey,
+      source_report_id: existing?.incident.source_report_id ?? input.sourceReportId,
+      incident_type: input.incidentType,
+      incident_name: input.incidentName,
+      location_label: input.locationLabel,
+      lat: input.lat,
+      lng: input.lng,
+      radius_km: input.radiusKm,
+      description: input.description,
+      status: nextStatus,
+      created_by_employee_id: input.createdByEmployeeId ?? existing?.incident.created_by_employee_id ?? null,
+      created_by_employee_name: input.createdByEmployeeName ?? existing?.incident.created_by_employee_name ?? null,
+      created_by_role: input.createdByRole ?? existing?.incident.created_by_role ?? null,
+      approved_by: existing?.incident.approved_by ?? null,
+      approved_at: existing?.incident.approved_at ?? null,
+      closed_at: existing?.incident.closed_at ?? null,
+      join_deadline_at: existing?.incident.join_deadline_at ?? null,
+    };
+
+    const people = [...(existing?.people ?? []), ...input.people];
+    incidentMap.set(incidentKey, { incident, people });
+  };
+
+  for (const report of snapshot.calamityReports) {
+    if (!isIncidentReportLike(report)) continue;
+    addIncident({
+      sourceReportId: report.id,
+      incidentType: report.type,
+      incidentName: report.incidentName,
+      locationLabel: report.locationLabel,
+      lat: report.lat,
+      lng: report.lng,
+      radiusKm: report.radiusKm,
+      description: report.description,
+      status: 'approved',
+      people: report.affectedEmployeeIds.map((employeeId) => {
+        const employee = allEmployees.find((entry) => entry.id === employeeId);
+        return {
+          id: `${report.id}-${employeeId}`,
+          incident_id: '',
+          employee_id: employeeId,
+          employee_name: employee?.name ?? employeeId,
+          employee_avatar: employee?.avatar ?? null,
+          employee_role: employee?.role ?? null,
+          relation_status: 'approved',
+          joined_at: new Date(report.timestamp || Date.now()).toISOString(),
+          joined_source: 'calamity_report',
+          verified_by: null,
+          verified_at: null,
+          notes: null,
+        };
+      }),
+    });
+  }
+
+  for (const report of snapshot.pendingEmployeeReports) {
+    if (!isPendingReportLike(report)) continue;
+    addIncident({
+      sourceReportId: report.id,
+      incidentType: report.type,
+      incidentName: report.incidentName,
+      locationLabel: report.locationLabel,
+      lat: report.lat,
+      lng: report.lng,
+      radiusKm: 1,
+      description: report.description,
+      status: incidentStatusFromReport(report.status),
+      createdByEmployeeId: report.employeeId,
+      createdByEmployeeName: report.employeeName,
+      createdByRole: 'employee',
+      people: [{
+        id: report.id,
+        incident_id: '',
+        employee_id: report.employeeId,
+        employee_name: report.employeeName,
+        employee_avatar: report.employeeAvatar,
+        employee_role: null,
+        relation_status: participantStatusFromReport(report.status),
+        joined_at: new Date(report.timestamp || Date.now()).toISOString(),
+        joined_source: 'employee_report',
+        verified_by: null,
+        verified_at: null,
+        notes: null,
+      }],
+    });
+  }
+
+  const incidentRows = Array.from(incidentMap.values()).map((entry) => entry.incident);
+  if (incidentRows.length > 0) {
+    const { data: savedIncidents, error: saveError } = await supabase
+      .from('calamity_incidents')
+      .upsert(incidentRows, { onConflict: 'incident_key' })
+      .select('*');
+
+    if (saveError) {
+      throw new Error(saveError.message);
+    }
+
+    const savedRows = (savedIncidents ?? []) as CalamityIncidentRow[];
+    const idByKey = new Map(savedRows.map((row) => [row.incident_key, row.id]));
+    const personRows: Record<string, unknown>[] = [];
+
+    for (const [incidentKey, entry] of incidentMap.entries()) {
+      const incidentId = idByKey.get(incidentKey);
+      if (!incidentId) continue;
+      for (const person of entry.people) {
+        personRows.push({
+          ...person,
+          incident_id: incidentId,
+        });
+      }
+    }
+
+    if (personRows.length > 0) {
+      const { error: personError } = await supabase
+        .from('calamity_incident_people')
+        .upsert(personRows, { onConflict: 'incident_id,employee_id' });
+
+      if (personError) {
+        throw new Error(personError.message);
+      }
+    }
+  }
 }
 
 // Resolve a manager's employee id from their name (used for id-based matching).
@@ -1150,28 +1610,48 @@ loadEmployees()
       }
     });
 
+    app.get('/api/incidents', async (_req, res) => {
+      try {
+        const snapshot = await loadIncidentSnapshotFromNormalizedTables();
+        return res.json(snapshot ?? { calamityReports: [], pendingEmployeeReports: [], resolvedReports: {}, simulationActive: false, epicenter: null, activeDisaster: null });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return res.status(500).json({ message: 'Failed to load incidents.', detail: message });
+      }
+    });
+
     app.get('/api/incidents/active', async (_req, res) => {
-      const { data, error } = await supabase
-        .from('active_incident_state')
-        .select('*')
-        .eq('id', 'global')
-        .limit(1);
+      try {
+        const snapshot = await loadIncidentSnapshotFromNormalizedTables();
+        if (snapshot) {
+          return res.json({ snapshot, updatedAt: new Date().toISOString() });
+        }
 
-      if (error) {
-        return res.status(500).json({ message: 'Failed to load active incident.', detail: error.message });
+        const { data, error } = await supabase
+          .from('active_incident_state')
+          .select('*')
+          .eq('id', 'global')
+          .limit(1);
+
+        if (error) {
+          return res.status(500).json({ message: 'Failed to load active incident.', detail: error.message });
+        }
+
+        const row = (data ?? [])[0] as IncidentSnapshotRow | undefined;
+        if (!row) {
+          return res.json({ snapshot: null });
+        }
+
+        const legacySnapshot = normalizeIncidentSnapshotPayload(row.snapshot);
+        if (!legacySnapshot) {
+          return res.status(500).json({ message: 'Stored active incident is invalid.' });
+        }
+
+        return res.json({ snapshot: legacySnapshot, updatedAt: row.updated_at });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return res.status(500).json({ message: 'Failed to load active incident.', detail: message });
       }
-
-      const row = (data ?? [])[0] as IncidentSnapshotRow | undefined;
-      if (!row) {
-        return res.json({ snapshot: null });
-      }
-
-      const snapshot = normalizeIncidentSnapshotPayload(row.snapshot);
-      if (!snapshot) {
-        return res.status(500).json({ message: 'Stored active incident is invalid.' });
-      }
-
-      return res.json({ snapshot, updatedAt: row.updated_at });
     });
 
     app.put('/api/incidents/active', async (req, res) => {
@@ -1180,32 +1660,48 @@ loadEmployees()
         return res.status(400).json({ message: 'Invalid active incident snapshot.' });
       }
 
-      const { error } = await supabase
-        .from('active_incident_state')
-        .upsert({
-          id: 'global',
-          snapshot,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'id' });
+      try {
+        await syncIncidentSnapshotToNormalizedTables(snapshot);
 
-      if (error) {
-        return res.status(500).json({ message: 'Failed to save active incident.', detail: error.message });
+        const { error } = await supabase
+          .from('active_incident_state')
+          .upsert({
+            id: 'global',
+            snapshot,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'id' });
+
+        if (error) {
+          return res.status(500).json({ message: 'Failed to save active incident.', detail: error.message });
+        }
+
+        const persisted = await loadIncidentSnapshotFromNormalizedTables();
+        return res.json({ message: 'Active incident saved.', snapshot: persisted ?? snapshot });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return res.status(500).json({ message: 'Failed to save active incident.', detail: message });
       }
-
-      return res.json({ message: 'Active incident saved.', snapshot });
     });
 
     app.delete('/api/incidents/active', async (_req, res) => {
-      const { error } = await supabase
-        .from('active_incident_state')
-        .delete()
-        .eq('id', 'global');
+      try {
+        await supabase.from('calamity_incident_people').delete().gte('joined_at', '1900-01-01');
+        await supabase.from('calamity_incidents').delete().gte('created_at', '1900-01-01');
 
-      if (error) {
-        return res.status(500).json({ message: 'Failed to clear active incident.', detail: error.message });
+        const { error } = await supabase
+          .from('active_incident_state')
+          .delete()
+          .eq('id', 'global');
+
+        if (error) {
+          return res.status(500).json({ message: 'Failed to clear active incident.', detail: error.message });
+        }
+
+        return res.json({ message: 'Active incident cleared.' });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return res.status(500).json({ message: 'Failed to clear active incident.', detail: message });
       }
-
-      return res.json({ message: 'Active incident cleared.' });
     });
 
     app.get('/api/aid-assistance', async (req, res) => {

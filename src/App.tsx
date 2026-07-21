@@ -183,6 +183,7 @@ type PendingEmployeeReportRecord = {
   description: string;
   status: 'Pending' | 'ManagerApproved' | 'Approved' | 'Rejected';
   routedTo: string;
+  incidentReportId?: string;
 };
 
 type AppNotification = {
@@ -235,7 +236,7 @@ function readCalamityReportsFromStorage(): CalamityReportRecord[] {
 function readPendingReportsFromStorage(): PendingEmployeeReportRecord[] {
   const parsed = readJsonStorage<unknown>(INCIDENT_STORAGE_KEYS.pendingReports, []);
   const reports = Array.isArray(parsed) ? (parsed as PendingEmployeeReportRecord[]) : [];
-  return reports.map(r => ({ ...r, routedTo: r.routedTo ?? '' }));
+  return reports.map(r => ({ ...r, routedTo: r.routedTo ?? '', incidentReportId: r.incidentReportId }));
 }
 
 function getManagerForEmployee(emp: Employee, allEmployees: Employee[]): string {
@@ -1427,9 +1428,17 @@ export default function App() {
       })
       .map(emp => emp.id);
 
+    const existingIncident = findMatchingIncident({
+      type,
+      incidentName: fullName,
+      locationLabel,
+      lat,
+      lng,
+      radiusKm,
+    });
+
     handleTriggerSimulation(fullName, lat, lng, radiusKm, desc);
     setSimulationActive(true);
-    // Save to reports history
     const newReport = {
       id: `${Date.now()}`,
       timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
@@ -1445,7 +1454,29 @@ export default function App() {
       signalLevel: type === 'Typhoon' ? signalLevel : undefined,
       description: desc,
     };
-    setCalamityReports(prev => [newReport, ...prev]);
+    setCalamityReports((prev) => {
+      if (existingIncident) {
+        return prev.map((report) => (
+          report.id === existingIncident.id
+            ? {
+                ...report,
+                type,
+                incidentName: fullName,
+                locationLabel,
+                lat,
+                lng,
+                radiusKm,
+                affectedEmployeeIds: Array.from(new Set([...report.affectedEmployeeIds, ...affectedEmployeeIds])),
+                affectedCount: Array.from(new Set([...report.affectedEmployeeIds, ...affectedEmployeeIds])).length,
+                magnitude: (type === 'Earthquake' && magnitude.trim()) ? magnitude.trim() : report.magnitude,
+                signalLevel: type === 'Typhoon' ? signalLevel : report.signalLevel,
+                description: desc,
+              }
+            : report
+        ));
+      }
+      return [newReport, ...prev];
+    });
     pushLog(`📋 CALAMITY REPORT FILED: "${fullName}" by HR/Manager. ${calamityAffectedCount} personnel in ${radiusKm} km zone.`, 'err');
     setShowCalamityModal(false);
     setCalamityForm(prev => ({ ...prev, locationPinned: false, description: '', locationLabel: '', hazardName: '', magnitude: '' }));
@@ -1624,6 +1655,7 @@ export default function App() {
     const incidentName = employeeIncidentForm.incidentName.trim() ||
       (employeeIncidentForm.type + ' — ' + (employeeIncidentForm.locationLabel.trim() || 'My Location'));
     const routedTo = getManagerForEmployee(currentEmployee, employees);
+    const incidentReportId = 'EMP-INC-' + Date.now();
     const pendingReport = {
       id: 'EMP-RPT-' + Date.now(),
       employeeId: currentEmployee.id,
@@ -1638,7 +1670,44 @@ export default function App() {
       description: employeeIncidentForm.description.trim(),
       status: 'Pending' as const,
       routedTo,
+      incidentReportId,
     };
+
+    const matchingIncident = findMatchingIncident({
+      type: employeeIncidentForm.type,
+      incidentName,
+      locationLabel: employeeIncidentForm.locationLabel.trim() || currentEmployee.address || 'My Location',
+      lat: employeeIncidentForm.lat,
+      lng: employeeIncidentForm.lng,
+      radiusKm: 1,
+    });
+
+    if (matchingIncident) {
+      handleJoinExistingIncident(matchingIncident.id, currentEmployee);
+      setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '', lat: 0, lng: 0, locationPinned: false, iAmVictim: true });
+      if (empCalamityLeafletRef.current) { empCalamityLeafletRef.current.remove(); empCalamityLeafletRef.current = null; empCalamityMarkerRef.current = null; }
+      setEmployeePortalMessage('You were added to an existing calamity incident instead of creating a duplicate report.');
+      pushLog(`Matched employee report to existing incident "${matchingIncident.incidentName}" for ${currentEmployee.name}.`, 'success');
+      return;
+    }
+
+    const visibleIncident = {
+      id: incidentReportId,
+      timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+      type: employeeIncidentForm.type,
+      incidentName,
+      locationLabel: employeeIncidentForm.locationLabel.trim() || currentEmployee.address || 'My Location',
+      lat: employeeIncidentForm.lat,
+      lng: employeeIncidentForm.lng,
+      radiusKm: 1,
+      affectedCount: 1,
+      affectedEmployeeIds: [currentEmployee.id],
+      description: employeeIncidentForm.description.trim(),
+    };
+
+    setCalamityReports(prev => [visibleIncident, ...prev]);
+    setSimulationActive(true);
+
     setPendingEmployeeReports(prev => [pendingReport, ...prev]);
     if (employeeIncidentForm.iAmVictim) {
       setEmployees(prev => prev.map(emp =>
@@ -1670,6 +1739,9 @@ export default function App() {
       return;
     }
     setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'Rejected' as const } : r));
+    if (report.incidentReportId) {
+      setCalamityReports(prev => prev.filter(r => r.id !== report.incidentReportId));
+    }
     setEmployees(prev => prev.map(emp =>
       emp.id === report.employeeId ? { ...emp, status: 'Green' as SafetyStatus } : emp
     ));
@@ -1683,14 +1755,29 @@ export default function App() {
       pushLog('ACCESS DENIED: CSR/Admin action required. Managers cannot approve at this stage.', 'err');
       return;
     }
-    const newReport = {
-      id: 'APPROVED-' + reportId,
-      timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
-      type: report.type, incidentName: report.incidentName, locationLabel: report.locationLabel,
-      lat: report.lat, lng: report.lng, radiusKm: 1, affectedCount: 1,
-      affectedEmployeeIds: [report.employeeId], description: report.description,
-    };
-    setCalamityReports(prev => [newReport, ...prev]);
+    const linkedIncidentId = report.incidentReportId;
+    setCalamityReports(prev => {
+      if (linkedIncidentId && prev.some(r => r.id === linkedIncidentId)) {
+        return prev.map(r => r.id === linkedIncidentId
+          ? {
+              ...r,
+              affectedEmployeeIds: Array.from(new Set([...r.affectedEmployeeIds, report.employeeId])),
+              affectedCount: Array.from(new Set([...r.affectedEmployeeIds, report.employeeId])).length,
+              description: report.description || r.description,
+            }
+          : r
+        );
+      }
+
+      const newReport = {
+        id: linkedIncidentId || ('APPROVED-' + reportId),
+        timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
+        type: report.type, incidentName: report.incidentName, locationLabel: report.locationLabel,
+        lat: report.lat, lng: report.lng, radiusKm: 1, affectedCount: 1,
+        affectedEmployeeIds: [report.employeeId], description: report.description,
+      };
+      return [newReport, ...prev];
+    });
     setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'Approved' as const } : r));
     setSimulationActive(true);
     pushLog('CSR/ADMIN APPROVED: Calamity report by ' + report.employeeName + ' added to Active Incidents.', 'success');
@@ -1704,6 +1791,9 @@ export default function App() {
       return;
     }
     setPendingEmployeeReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'Rejected' as const } : r));
+    if (report.incidentReportId) {
+      setCalamityReports(prev => prev.filter(r => r.id !== report.incidentReportId));
+    }
     setEmployees(prev => prev.map(emp =>
       emp.id === report.employeeId ? { ...emp, status: 'Green' as SafetyStatus } : emp
     ));
@@ -1955,6 +2045,59 @@ export default function App() {
     return employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedEmail) ?? null;
   }, [currentUser.username, currentUser.role, employees]);
 
+  function findMatchingIncident(params: {
+    type: string;
+    incidentName: string;
+    locationLabel: string;
+    lat: number;
+    lng: number;
+    radiusKm: number;
+  }) {
+    const typeText = normalizeText(params.type);
+    const locationText = normalizeText(params.locationLabel);
+
+    return calamityReports.find((report) => {
+      if (normalizeText(report.type) !== typeText) return false;
+      const reportLocationText = normalizeText(report.locationLabel);
+      const locationMatches = reportLocationText && locationText && (reportLocationText === locationText || reportLocationText.includes(locationText) || locationText.includes(reportLocationText));
+      const coordinateMatches = haversineKm(report.lat, report.lng, params.lat, params.lng) <= Math.max(report.radiusKm, params.radiusKm) + 0.5;
+      return locationMatches || coordinateMatches;
+    }) ?? null;
+  }
+
+  function handleJoinExistingIncident(reportId: string, employee?: Employee | null) {
+    const targetEmployee = employee ?? currentEmployee;
+    if (!targetEmployee) {
+      setEmployeePortalMessage('Your employee profile could not be found.');
+      return;
+    }
+
+    const report = calamityReports.find((entry) => entry.id === reportId);
+    if (!report) {
+      setEmployeePortalMessage('That incident could not be found.');
+      return;
+    }
+
+    if (report.affectedEmployeeIds.includes(targetEmployee.id)) {
+      setEmployeePortalMessage('You are already linked to this incident.');
+      return;
+    }
+
+    const nextAffectedIds = Array.from(new Set([...report.affectedEmployeeIds, targetEmployee.id]));
+    setCalamityReports((prev) => prev.map((entry) => (
+      entry.id === reportId
+        ? { ...entry, affectedEmployeeIds: nextAffectedIds, affectedCount: nextAffectedIds.length }
+        : entry
+    )));
+    setEmployees((prev) => prev.map((emp) => (
+      emp.id === targetEmployee.id
+        ? { ...emp, status: 'Yellow' as SafetyStatus, contacted: true, unresponsive: false, safetyMessage: 'Joined an existing calamity incident.', lastResponseRecv: new Date().toLocaleTimeString() }
+        : emp
+    )));
+    setEmployeePortalMessage('You have been added to the existing incident.');
+    pushLog(`${targetEmployee.name} joined incident "${report.incidentName}".`, 'warn');
+  }
+
   const isManagerUser = currentUser.role === 'manager';
 
   const directReports = useMemo(() => {
@@ -2148,6 +2291,23 @@ export default function App() {
     }
 
     const incidentName = employeeIncidentForm.incidentName.trim() || employeeIncidentForm.locationLabel.trim() || 'Self-Reported Incident';
+    const matchingIncident = findMatchingIncident({
+      type: employeeIncidentForm.type,
+      incidentName,
+      locationLabel: employeeIncidentForm.locationLabel.trim() || currentEmployee.address || 'My Location',
+      lat: employeeIncidentForm.lat || currentEmployee.gpsLat || 0,
+      lng: employeeIncidentForm.lng || currentEmployee.gpsLng || 0,
+      radiusKm: 1,
+    });
+
+    if (matchingIncident) {
+      handleJoinExistingIncident(matchingIncident.id, currentEmployee);
+      setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '', lat: 0, lng: 0, locationPinned: false, iAmVictim: true });
+      setEmployeePortalMessage('You were added to an existing calamity incident instead of creating a duplicate report.');
+      pushLog(`Matched self-reported incident to existing incident "${matchingIncident.incidentName}" for ${currentEmployee.name}.`, 'success');
+      return;
+    }
+
     const newReport = {
       id: `SELF-${Date.now()}`,
       timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
@@ -2624,6 +2784,57 @@ export default function App() {
                     </div>
 
                     {/* My Submitted Reports */}
+                    {calamityReports.length > 0 && (
+                      <section className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
+                        <div className="px-6 py-4 bg-gradient-to-r from-[#002060] to-[#0055cc] flex items-center justify-between">
+                          <div>
+                            <p className="text-white font-black text-base tracking-wide">Active Incidents Near You</p>
+                            <p className="text-blue-300 text-xs mt-0.5">Open an incident and mark yourself as affected instead of filing a duplicate report</p>
+                          </div>
+                          <span className="bg-white/10 border border-white/20 text-white text-[11px] font-black px-3 py-1 rounded-full">
+                            {calamityReports.length} Visible
+                          </span>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                          {calamityReports.map((report) => {
+                            const alreadyJoined = report.affectedEmployeeIds.includes(currentEmployee?.id ?? '');
+                            return (
+                              <div key={report.id} className="px-6 py-4 flex items-start gap-4">
+                                <div className="text-2xl shrink-0 mt-0.5">{({ Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' } as Record<string, string>)[report.type] ?? '⚠️'}</div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-bold text-slate-800 text-sm">{report.incidentName}</p>
+                                    <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full border bg-slate-100 text-slate-700 border-slate-200">
+                                      {report.type}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-500 text-xs mt-0.5">{report.locationLabel}</p>
+                                  <p className="text-slate-400 text-xs mt-1 font-mono">{report.timestamp}</p>
+                                </div>
+                                <div className="shrink-0 flex items-center gap-2">
+                                  <span className="text-[10px] font-black px-2.5 py-1 rounded-full border bg-slate-50 text-slate-600 border-slate-200">
+                                    {report.affectedCount} affected
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={alreadyJoined}
+                                    onClick={() => handleJoinExistingIncident(report.id)}
+                                    className={`px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide border transition-all ${
+                                      alreadyJoined
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default'
+                                        : 'bg-[#002060] hover:bg-[#003399] border-[#001848] text-white cursor-pointer active:scale-95'
+                                    }`}
+                                  >
+                                    {alreadyJoined ? 'Marked as Affected' : 'Mark as Affected'}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    )}
+
                     {pendingEmployeeReports.filter(r => r.employeeId === currentEmployee?.id).length > 0 && (
                       <section className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
                         <div className="px-6 py-4 bg-gradient-to-r from-[#001f4b] to-[#00255a] flex items-center justify-between">
