@@ -478,6 +478,26 @@ function readManagerFromRequest(req: express.Request): { name: string; id?: stri
   return { name: name.trim(), id };
 }
 
+/** Demo manager login (username `manager`) uses a fixed sample team. */
+const DEMO_MANAGER_TEAM_IDS = ['T8U', 'T8S'];
+
+function getManagerDirectReportIds(managerName: string, managerId?: string): string[] {
+  const resolvedManagerId = resolveManagerId(managerName, managerId);
+  const ids = allEmployees
+    .filter((emp) => {
+      const nameMatch =
+        emp.managerName?.trim().toLowerCase() === managerName.trim().toLowerCase();
+      const idMatch = !!resolvedManagerId && emp.managerId === resolvedManagerId;
+      return nameMatch || idMatch;
+    })
+    .map((emp) => emp.id);
+
+  if (ids.length === 0 && managerName.trim().toLowerCase() === 'manager') {
+    return DEMO_MANAGER_TEAM_IDS.filter((id) => allEmployees.some((emp) => emp.id === id));
+  }
+  return ids;
+}
+
 function buildAidRequestCode(): string {
   const ts = Date.now().toString();
   return `AID-${ts.slice(-8)}`;
@@ -899,14 +919,7 @@ loadEmployees()
         if (!managerName) {
           return res.status(401).json({ message: 'Manager identity required.' });
         }
-        const resolvedManagerId = resolveManagerId(managerName, managerId || undefined);
-        const directReportIds = allEmployees
-          .filter((emp) => {
-            const nameMatch = emp.managerName?.trim().toLowerCase() === managerName.toLowerCase();
-            const idMatch = !!resolvedManagerId && emp.managerId === resolvedManagerId;
-            return nameMatch || idMatch;
-          })
-          .map((emp) => emp.id);
+        const directReportIds = getManagerDirectReportIds(managerName, managerId || undefined);
         if (directReportIds.length === 0) {
           return res.json([]);
         }
@@ -965,12 +978,18 @@ loadEmployees()
         damageType,
         incidentName,
         description,
+        submittedByManager,
+        managerName: bodyManagerName,
+        managerId: bodyManagerId,
       } = req.body as {
         employeeId?: string;
         aidType?: string;
         damageType?: 'Major' | 'Minor';
         incidentName?: string;
         description?: string;
+        submittedByManager?: string | boolean;
+        managerName?: string;
+        managerId?: string;
       };
 
       if (!employeeId || !aidType || !damageType || !description) {
@@ -982,6 +1001,44 @@ loadEmployees()
         return res.status(404).json({ message: 'Employee not found.' });
       }
 
+      const isManagerSubmission =
+        submittedByManager === true ||
+        String(submittedByManager || '').toLowerCase() === 'true' ||
+        String(submittedByManager || '') === '1';
+
+      let managerName = employee.managerName ?? null;
+      let managerId = employee.managerId ?? null;
+      let status: AidStatus = 'Pending Manager Review';
+      let managerDecision: 'Approved' | 'Rejected' | null = null;
+      let managerRemarks: string | null = null;
+      let managerReviewedBy: string | null = null;
+      let managerReviewedAt: string | null = null;
+
+      if (isManagerSubmission) {
+        const submittingManagerName = String(bodyManagerName || '').trim();
+        const submittingManagerId = String(bodyManagerId || '').trim() || undefined;
+        if (!submittingManagerName) {
+          return res.status(401).json({ message: 'Manager identity required to submit for a team member.' });
+        }
+
+        const allowedIds = getManagerDirectReportIds(submittingManagerName, submittingManagerId);
+        if (!allowedIds.includes(employee.id)) {
+          const denied = enforceManagerAccess(employee.id, submittingManagerName, submittingManagerId);
+          if (denied) {
+            return res.status(denied.status).json({ message: denied.message });
+          }
+        }
+
+        // Manager-filed requests are already endorsed and go straight to admin.
+        status = 'Pending Admin Review';
+        managerName = submittingManagerName;
+        managerId = submittingManagerId ?? managerId;
+        managerDecision = 'Approved';
+        managerRemarks = 'Submitted by manager on behalf of team member.';
+        managerReviewedBy = submittingManagerName;
+        managerReviewedAt = new Date().toISOString();
+      }
+
       for (const file of files) {
         if (!isAllowedAttachment(file)) {
           return res.status(400).json({ message: `Unsupported file type: ${file.originalname}` });
@@ -989,8 +1046,6 @@ loadEmployees()
       }
 
       const requestCode = buildAidRequestCode();
-      const managerName = employee.managerName ?? null;
-      const managerId = employee.managerId ?? null;
 
       const { data: insertedRows, error: insertError } = await supabase
         .from('aid_assistance_requests')
@@ -1006,7 +1061,11 @@ loadEmployees()
           damage_type: damageType,
           incident_name: incidentName?.trim() || 'Self-Reported Local Calamity',
           reason: description.trim(),
-          status: 'Pending Manager Review',
+          status,
+          manager_decision: managerDecision,
+          manager_remarks: managerRemarks,
+          manager_reviewed_by: managerReviewedBy,
+          manager_reviewed_at: managerReviewedAt,
         })
         .select('*')
         .limit(1);

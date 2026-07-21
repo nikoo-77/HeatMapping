@@ -318,13 +318,17 @@ export default function App() {
   const [employeePortalMessage, setEmployeePortalMessage] = useState('');
   const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'alerts' | 'aid' | 'profile' | 'contacts' | 'notifications'>('dashboard');
   const [managerAidForm, setManagerAidForm] = useState({
-    employeeName: '',
-    aidType: 'Cash' as AidType,
+    employeeId: '',
+    aidTypes: ['Cash'] as AidType[],
     damageType: 'Major' as 'Major' | 'Minor',
     description: '',
     incidentName: '',
   });
   const [managerAidMessage, setManagerAidMessage] = useState('');
+  const [managerAidSubmitting, setManagerAidSubmitting] = useState(false);
+  const [managerAidAttachments, setManagerAidAttachments] = useState<File[]>([]);
+  const [managerAidAttachmentError, setManagerAidAttachmentError] = useState('');
+  const managerAidFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [managerCheckInRequest, setManagerCheckInRequest] = useState({
     active: true,
     title: 'Your manager requested a quick safety check-in for your area.',
@@ -908,9 +912,97 @@ export default function App() {
     }
   };
 
-  const handleSubmitManagerAidApplication = (event: React.FormEvent) => {
+  const handleSubmitManagerAidApplication = async (event: React.FormEvent) => {
     event.preventDefault();
-    setManagerAidMessage('Employees must submit Aid Assistance requests directly from the employee portal.');
+    if (!isManagerUser || managerAidSubmitting) return;
+
+    const teamMember = directReports.find((emp) => emp.id === managerAidForm.employeeId);
+    if (!teamMember) {
+      setManagerAidMessage('Please select a team member before submitting.');
+      return;
+    }
+    if (!managerAidForm.aidTypes.length) {
+      setManagerAidMessage('Please select at least one aid type before submitting.');
+      return;
+    }
+    if (!managerAidForm.description.trim()) {
+      setManagerAidMessage('Please describe why aid is needed before submitting.');
+      return;
+    }
+
+    try {
+      setManagerAidSubmitting(true);
+      setManagerAidMessage('');
+      const formData = new FormData();
+      formData.append('employeeId', teamMember.id);
+      formData.append('aidType', managerAidForm.aidTypes.join(', '));
+      formData.append('damageType', managerAidForm.damageType);
+      formData.append('incidentName', managerAidForm.incidentName.trim());
+      formData.append('description', managerAidForm.description.trim());
+      formData.append('submittedByManager', 'true');
+      formData.append('managerName', currentEmployee?.name ?? currentUser.username);
+      if (currentEmployee?.id) {
+        formData.append('managerId', currentEmployee.id);
+      }
+      managerAidAttachments.forEach((file) => {
+        formData.append('attachments', file);
+      });
+
+      const res = await fetch('/api/aid-assistance', {
+        method: 'POST',
+        body: formData,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = body?.detail ? ` (${body.detail})` : '';
+        throw new Error((body?.message || 'Failed to submit aid request.') + detail);
+      }
+
+      setManagerAidForm({
+        employeeId: '',
+        aidTypes: ['Cash'],
+        damageType: 'Major',
+        description: '',
+        incidentName: '',
+      });
+      setManagerAidAttachments([]);
+      setManagerAidAttachmentError('');
+      setManagerAidMessage(
+        `Aid request ${body.requestCode ?? ''} for ${teamMember.name} was submitted to admin for final review.`
+      );
+      pushLog(`Manager submitted aid request for ${teamMember.name} (${body.requestCode ?? 'new'}).`, 'success');
+      pushNotification({
+        audience: 'admin',
+        title: 'Aid Request Pending Admin/CSR Review',
+        description: `${body.requestCode ?? 'A request'} for ${teamMember.name} was submitted by their manager and is ready for final review.`,
+      });
+      pushNotification({
+        audience: 'employee',
+        employeeId: teamMember.id,
+        title: 'Aid Request Submitted by Manager',
+        description: `${body.requestCode ?? 'A request'} was filed on your behalf and sent to Admin/CSR for review.`,
+      });
+      await loadAidApplications();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to submit aid request.';
+      setManagerAidMessage(message);
+      pushLog(`Manager aid submission failed: ${message}`, 'err');
+    } finally {
+      setManagerAidSubmitting(false);
+    }
+  };
+
+  const handleManagerAidAttachmentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    const validMime = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+    const invalid = files.find((file) => !validMime.has(file.type));
+    if (invalid) {
+      setManagerAidAttachmentError('Only PDF, JPG, JPEG, and PNG files are allowed.');
+      setManagerAidAttachments([]);
+      return;
+    }
+    setManagerAidAttachmentError('');
+    setManagerAidAttachments(files);
   };
 
   const handleSimulateReply = (employeeId: string, forcedStatus?: SafetyStatus) => {
@@ -5010,7 +5102,9 @@ export default function App() {
                   <h2 className="text-xl font-black text-[#002060] flex items-center gap-2">
                     <HeartHandshake className="w-5 h-5" /> Aid Assistance
                   </h2>
-                  <p className="text-xs text-slate-500 mt-1">Review Aid Assistance requests submitted by your direct reports.</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Submit aid requests for your team members and review employee-filed applications.
+                  </p>
                 </div>
               </div>
 
@@ -5027,15 +5121,177 @@ export default function App() {
                 <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${managerAidStatusCfgMap['Rejected by Manager'].bg}`}>Rejected</span>
               </div>
 
-              {/* Apply for Aid form */}
+              {/* Submit for team member */}
               <section className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
                 <div className="bg-[#002060] px-6 py-4 border-b border-[#001848]">
-                  <p className="text-white font-extrabold text-sm tracking-wide">Submission Policy</p>
-                  <p className="text-blue-300 text-[11px] mt-1">Aid Assistance requests are employee-initiated and routed to you for review.</p>
+                  <p className="text-white font-extrabold text-sm tracking-wide">Submit Aid for a Team Member</p>
+                  <p className="text-blue-300 text-[11px] mt-1">
+                    File an application on behalf of a direct report. It is saved to the database and sent straight to Admin/CSR for final review.
+                  </p>
                 </div>
-                <div className="p-6 text-sm text-slate-600">
-                  Employees submit requests from the Employee Portal. Your role here is to review, approve, or reject submissions from your direct reports.
-                </div>
+                <form className="p-6 space-y-4" onSubmit={handleSubmitManagerAidApplication}>
+                  {managerAidMessage && (
+                    <div
+                      className={`rounded-xl px-4 py-3 text-sm font-medium border ${
+                        managerAidMessage.toLowerCase().includes('submitted') ||
+                        managerAidMessage.toLowerCase().includes('admin')
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          : 'bg-rose-50 border-rose-200 text-rose-700'
+                      }`}
+                    >
+                      {managerAidMessage}
+                      <button type="button" onClick={() => setManagerAidMessage('')} className="ml-2 opacity-60 hover:opacity-100">
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  <label className="block text-sm font-semibold text-slate-700">
+                    <span className="mb-2 block">Team member</span>
+                    <select
+                      value={managerAidForm.employeeId}
+                      onChange={(event) =>
+                        setManagerAidForm((prev) => ({ ...prev, employeeId: event.target.value }))
+                      }
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                      required
+                    >
+                      <option value="">Select a direct report…</option>
+                      {directReports.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name} ({emp.id})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <fieldset className="text-sm font-semibold text-slate-700">
+                      <legend className="mb-2 block">Aid type</legend>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 flex flex-col gap-2">
+                        {AID_TYPE_OPTIONS.map((option) => {
+                          const checked = managerAidForm.aidTypes.includes(option.value);
+                          return (
+                            <label
+                              key={option.value}
+                              className="flex items-start gap-2.5 cursor-pointer text-sm font-medium text-slate-700"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setManagerAidForm((prev) => {
+                                    const next = checked
+                                      ? prev.aidTypes.filter((t) => t !== option.value)
+                                      : [...prev.aidTypes, option.value];
+                                    return { ...prev, aidTypes: next };
+                                  });
+                                }}
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-[#002060] cursor-pointer"
+                              />
+                              <span>{option.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-1.5 text-[11px] font-medium text-slate-400">Select all that apply.</p>
+                    </fieldset>
+                    <label className="text-sm font-semibold text-slate-700">
+                      <span className="mb-2 block">Type of Damage</span>
+                      <select
+                        value={managerAidForm.damageType}
+                        onChange={(event) =>
+                          setManagerAidForm((prev) => ({
+                            ...prev,
+                            damageType: event.target.value as 'Major' | 'Minor',
+                          }))
+                        }
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                      >
+                        <option value="Major">Major</option>
+                        <option value="Minor">Minor</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="block text-sm font-semibold text-slate-700">
+                    <span className="mb-2 block">Incident / event name</span>
+                    <input
+                      value={managerAidForm.incidentName}
+                      onChange={(event) =>
+                        setManagerAidForm((prev) => ({ ...prev, incidentName: event.target.value }))
+                      }
+                      placeholder="e.g. Typhoon Carina"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                    />
+                  </label>
+
+                  <label className="block text-sm font-semibold text-slate-700">
+                    <span className="mb-2 block">Why does this team member need aid?</span>
+                    <textarea
+                      value={managerAidForm.description}
+                      onChange={(event) =>
+                        setManagerAidForm((prev) => ({ ...prev, description: event.target.value }))
+                      }
+                      rows={4}
+                      placeholder="Describe the impact and support needed."
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                      required
+                    />
+                  </label>
+
+                  <label className="block text-sm font-semibold text-slate-700">
+                    <span className="mb-2 block">Supporting Attachment(s)</span>
+                    <input
+                      ref={managerAidFileInputRef}
+                      type="file"
+                      multiple
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      onChange={handleManagerAidAttachmentChange}
+                      className="hidden"
+                    />
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => managerAidFileInputRef.current?.click()}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[#002060] hover:text-[#002060] inline-flex items-center gap-2"
+                      >
+                        <Paperclip className="w-4 h-4" /> Upload Files
+                      </button>
+                      <span className="text-xs text-slate-500">
+                        {managerAidAttachments.length > 0
+                          ? `${managerAidAttachments.length} file(s) selected`
+                          : 'No files selected'}
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      readOnly
+                      value={managerAidAttachments.map((file) => file.name).join(', ')}
+                      placeholder="Selected file names will appear here"
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 outline-none"
+                    />
+                    <p className="mt-1 text-xs text-slate-500">Accepted formats: PDF, JPG, JPEG, PNG.</p>
+                    {managerAidAttachmentError && (
+                      <p className="mt-1 text-xs text-rose-600">{managerAidAttachmentError}</p>
+                    )}
+                  </label>
+
+                  <button
+                    type="submit"
+                    disabled={managerAidSubmitting || directReports.length === 0}
+                    className={`rounded-2xl px-4 py-2.5 text-sm font-semibold text-white transition ${
+                      managerAidSubmitting || directReports.length === 0
+                        ? 'bg-slate-400 cursor-not-allowed'
+                        : 'bg-[#002060] hover:bg-[#001848]'
+                    }`}
+                  >
+                    {managerAidSubmitting ? 'Submitting…' : 'Submit to Admin'}
+                  </button>
+                  {directReports.length === 0 && (
+                    <p className="text-xs text-amber-700">No direct reports found for your account.</p>
+                  )}
+                </form>
               </section>
 
               {/* Team Aid Applications */}
@@ -5043,7 +5299,9 @@ export default function App() {
                 <div className="px-6 py-4 bg-gradient-to-r from-[#001f4b] to-[#00255a] border-b border-[#00172f] flex items-center justify-between">
                   <div>
                     <p className="text-white font-black text-base tracking-wide">Team Aid Applications</p>
-                    <p className="text-blue-300 text-xs mt-0.5">Review direct-report submissions for manager approval or rejection</p>
+                    <p className="text-blue-300 text-xs mt-0.5">
+                      Review employee-filed requests and track applications you submitted for your team
+                    </p>
                   </div>
                 </div>
                 <div className="divide-y divide-slate-100">
