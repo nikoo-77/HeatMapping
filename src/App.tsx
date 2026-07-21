@@ -316,7 +316,7 @@ export default function App() {
     iAmVictim: true,
   });
   const [employeePortalMessage, setEmployeePortalMessage] = useState('');
-  const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'alerts' | 'aid' | 'profile' | 'contacts' | 'notifications'>('dashboard');
+  const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'aid' | 'profile' | 'team'>('dashboard');
   const [managerAidForm, setManagerAidForm] = useState({
     employeeId: '',
     aidTypes: ['Cash'] as AidType[],
@@ -1911,6 +1911,32 @@ export default function App() {
     [aidApplications, currentEmployee?.id]
   );
 
+  const myDepartmentTeam = useMemo(() => {
+    if (!currentEmployee?.department?.trim()) {
+      return { manager: null as Employee | null, members: [] as Employee[] };
+    }
+    const dept = currentEmployee.department.trim().toLowerCase();
+    const departmentMembers = employees
+      .filter((emp) => emp.department?.trim().toLowerCase() === dept)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const manager =
+      (currentEmployee.managerId
+        ? employees.find((emp) => emp.id === currentEmployee.managerId)
+        : null) ??
+      (currentEmployee.managerName
+        ? employees.find(
+            (emp) =>
+              emp.name.trim().toLowerCase() === currentEmployee.managerName!.trim().toLowerCase()
+          )
+        : null) ??
+      null;
+
+    const members = departmentMembers.filter((emp) => emp.id !== manager?.id);
+
+    return { manager, members };
+  }, [currentEmployee, employees]);
+
   const myIncidentReports = useMemo(
     () => calamityReports.filter((report) => report.affectedEmployeeIds.includes(currentEmployee?.id ?? '')),
     [calamityReports, currentEmployee?.id]
@@ -2227,11 +2253,9 @@ export default function App() {
               {[
                 { key: 'dashboard', label: 'My Dashboard', icon: LayoutDashboard },
                 { key: 'checkin', label: 'Calamity Report', icon: ShieldAlert },
-                { key: 'alerts', label: 'Alerts Near Me', icon: AlertTriangle },
                 { key: 'aid', label: 'Aid Assistance', icon: HeartHandshake },
+                { key: 'team', label: 'View My Team', icon: Users },
                 { key: 'profile', label: 'My Profile', icon: BookUser },
-                { key: 'contacts', label: 'Emergency Contacts', icon: HelpCircle },
-                { key: 'notifications', label: 'Notifications', icon: Clock },
               ].map((tab) => {
                 const isActive = employeePortalPage === tab.key;
                 const Icon = tab.icon;
@@ -2662,30 +2686,131 @@ export default function App() {
                   </div>
                 )}
 
-                {employeePortalPage === 'alerts' && (
+                {employeePortalPage === 'team' && (
                   <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                    <div className="px-6 py-5 bg-[#001f4b] border-b border-[#00172f]">
-                      <p className="text-white font-black text-lg tracking-[0.06em]">Alerts Near Me</p>
-                      <p className="text-slate-300 text-sm mt-1">Live risk information for your current location.</p>
+                    <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f]">
+                      <p className="text-white font-black text-lg tracking-[0.06em]">View My Team</p>
+                      <p className="text-slate-300 text-sm mt-1">
+                        People in your department
+                        {currentEmployee?.department ? ` · ${currentEmployee.department}` : ''} and your manager.
+                      </p>
                     </div>
-                    <div className="p-7 grid gap-4 md:grid-cols-2">
-                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-sm font-black uppercase tracking-[0.35em] text-slate-500">Active hazard</p>
-                        <p className="mt-4 text-lg font-semibold text-slate-900">{activeDisaster.name}</p>
-                        <p className="mt-2 text-sm text-slate-600">{activeDisaster.subName}</p>
-                        <p className="mt-3 text-sm text-slate-600">Located in {activeDisaster.locationName}. Radius: {epicenter.radiusKm} km.</p>
-                      </div>
-                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                        <p className="text-sm font-black uppercase tracking-[0.35em] text-slate-500">Your distance</p>
-                        <p className="mt-4 text-3xl font-black text-slate-900">{currentEmployee ? `${getDistance(currentEmployee).toFixed(1)} km` : 'Unknown'}</p>
-                        <p className="mt-2 text-sm text-slate-600">
-                          {currentEmployee
-                            ? getDistance(currentEmployee) <= epicenter.radiusKm
-                              ? 'You are inside the active hazard zone. Follow local guidance immediately.'
-                              : 'You are outside the active hazard zone. Monitor updates closely.'
-                            : 'Employee location not available.'}
-                        </p>
-                      </div>
+
+                    <div className="p-6 space-y-6">
+                      {!currentEmployee ? (
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+                          Your employee profile could not be found, so team members cannot be listed.
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-3">
+                              Your Manager
+                            </p>
+                            {myDepartmentTeam.manager || currentEmployee.managerName ? (
+                              <div className="rounded-2xl border border-[#002060]/20 bg-[#002060]/5 p-4 flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-full bg-[#002060] text-white flex items-center justify-center text-sm font-black shrink-0">
+                                  {myDepartmentTeam.manager?.avatar ??
+                                    (currentEmployee.managerName || 'MG')
+                                      .split(' ')
+                                      .filter(Boolean)
+                                      .slice(0, 2)
+                                      .map((p) => p[0])
+                                      .join('')
+                                      .toUpperCase()}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-bold text-slate-900">
+                                    {myDepartmentTeam.manager?.name ?? currentEmployee.managerName}
+                                  </p>
+                                  <p className="text-sm text-slate-600 mt-0.5">
+                                    {myDepartmentTeam.manager?.role ?? 'Manager'}
+                                    {myDepartmentTeam.manager?.department
+                                      ? ` · ${myDepartmentTeam.manager.department}`
+                                      : ''}
+                                  </p>
+                                  {(myDepartmentTeam.manager?.email || currentEmployee.managerId) && (
+                                    <p className="text-xs text-slate-500 mt-1 font-mono truncate">
+                                      {myDepartmentTeam.manager?.email ??
+                                        `ID: ${currentEmployee.managerId}`}
+                                    </p>
+                                  )}
+                                </div>
+                                <span className="rounded-full bg-[#002060] text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-1 shrink-0">
+                                  Manager
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                                No manager is assigned on your employee record.
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between gap-3 mb-3">
+                              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
+                                Department Members
+                              </p>
+                              <span className="text-xs font-semibold text-slate-500">
+                                {myDepartmentTeam.members.length} member
+                                {myDepartmentTeam.members.length === 1 ? '' : 's'}
+                              </span>
+                            </div>
+
+                            {myDepartmentTeam.members.length === 0 ? (
+                              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                                No other members found in {currentEmployee.department || 'your department'}.
+                              </div>
+                            ) : (
+                              <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 overflow-hidden">
+                                {myDepartmentTeam.members.map((member) => {
+                                  const isYou = member.id === currentEmployee.id;
+                                  return (
+                                    <div
+                                      key={member.id}
+                                      className={`px-4 py-3.5 flex items-center gap-3 ${
+                                        isYou ? 'bg-slate-50' : 'bg-white'
+                                      }`}
+                                    >
+                                      <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-black shrink-0">
+                                        {member.avatar || member.name.charAt(0)}
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <p className="font-semibold text-slate-900 text-sm truncate">
+                                            {member.name}
+                                          </p>
+                                          {isYou && (
+                                            <span className="rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black px-2 py-0.5">
+                                              You
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="text-xs text-slate-500 mt-0.5 truncate">
+                                          {member.role || 'Employee'}
+                                          {member.email ? ` · ${member.email}` : ` · ID ${member.id}`}
+                                        </p>
+                                      </div>
+                                      <div className="text-right shrink-0 hidden sm:block">
+                                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                                          Manager
+                                        </p>
+                                        <p className="text-xs font-semibold text-slate-700 mt-0.5 max-w-[140px] truncate">
+                                          {member.managerName ||
+                                            myDepartmentTeam.manager?.name ||
+                                            currentEmployee.managerName ||
+                                            '—'}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </section>
                 )}
@@ -2860,60 +2985,6 @@ export default function App() {
                     )}
                    </>
                   )}
-
-                {employeePortalPage === 'contacts' && (
-                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                    <div className="px-6 py-5 bg-[#001f4b] border-b border-[#00172f]">
-                      <p className="text-white font-black text-lg tracking-[0.06em]">Emergency Contacts</p>
-                      <p className="text-slate-300 text-sm mt-1">Quick access to your local emergency and response numbers.</p>
-                    </div>
-                    <div className="p-7 grid gap-4 sm:grid-cols-2">
-                      {[
-                        { label: 'Emergency Police', value: '117' },
-                        { label: 'Medical Rescue', value: '911' },
-                        { label: 'Barangay Hall', value: '0927-000-1234' },
-                        { label: 'Disaster Response Team', value: '0998-111-2222' },
-                      ].map((contact) => (
-                        <div key={contact.label} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                          <p className="text-sm font-semibold text-slate-900">{contact.label}</p>
-                          <p className="mt-2 text-lg font-black text-slate-900">{contact.value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                {employeePortalPage === 'notifications' && (
-                  <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                    <div className="px-6 py-5 bg-[#001f4b] border-b border-[#00172f]">
-                      <p className="text-white font-black text-lg tracking-[0.06em]">Notifications</p>
-                      <p className="text-slate-300 text-sm mt-1">Recent alerts and portal messages for your action.</p>
-                    </div>
-                    <div className="p-7 space-y-4">
-                      {appNotifications
-                        .filter((item) => {
-                          if (item.audience === 'all') return true;
-                          if (item.audience === 'employee') {
-                            return item.employeeId ? item.employeeId === currentEmployee?.id : true;
-                          }
-                          return false;
-                        })
-                        .map((item) => (
-                          <div key={item.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="font-semibold text-slate-900">{item.title}</p>
-                              <span className="text-[10px] text-slate-400 font-mono">{item.createdAt}</span>
-                            </div>
-                            <p className="mt-2 text-sm text-slate-600">{item.description}</p>
-                          </div>
-                        ))}
-                      <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                        <p className="font-semibold text-slate-900">Portal messages</p>
-                        <p className="mt-2 text-sm text-slate-600">{employeePortalMessage || 'No new personal notifications.'}</p>
-                      </div>
-                    </div>
-                  </section>
-                )}
 
                 {employeePortalPage === 'aid' && (
                   <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
