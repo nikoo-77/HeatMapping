@@ -11,6 +11,7 @@ create table if not exists public.accounts (
   password_hash text not null,
   access_role text not null,
   display_name text,
+  profile_picture text,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -65,3 +66,14 @@ comment on table public.accounts is
 
 comment on column public.accounts.employee_id is
   'Employee ID from Employee Details. System accounts use ADMIN / MANAGER.';
+
+-- Profile picture URL (public storage URL or other text reference)
+alter table public.accounts
+  add column if not exists profile_picture text;
+
+comment on column public.accounts.profile_picture is
+  'Public URL (or text reference) for the user profile picture.';
+
+insert into storage.buckets (id, name, public)
+values ('profile-pictures', 'profile-pictures', true)
+on conflict (id) do nothing;

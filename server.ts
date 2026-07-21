@@ -121,18 +121,58 @@ interface AidAttachmentRow {
 }
 
 const AID_ATTACHMENT_BUCKET = process.env.SUPABASE_AID_ATTACHMENT_BUCKET || 'aid-assistance-attachments';
+const PROFILE_PICTURE_BUCKET = process.env.SUPABASE_PROFILE_PICTURE_BUCKET || 'profile-pictures';
 const ALLOWED_ATTACHMENT_MIME = new Set([
   'application/pdf',
   'image/jpeg',
   'image/png',
 ]);
 const ALLOWED_ATTACHMENT_EXT = new Set(['.pdf', '.jpg', '.jpeg', '.png']);
+const ALLOWED_PROFILE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const ALLOWED_PROFILE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+
+let profileBucketReady: Promise<void> | null = null;
+
+async function ensureProfilePictureBucket(): Promise<void> {
+  if (!profileBucketReady) {
+    profileBucketReady = (async () => {
+      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+      if (listError) {
+        console.warn('Could not list storage buckets:', listError.message);
+      }
+      const exists = (buckets ?? []).some((b) => b.name === PROFILE_PICTURE_BUCKET || b.id === PROFILE_PICTURE_BUCKET);
+      if (exists) return;
+
+      const { error: createError } = await supabase.storage.createBucket(PROFILE_PICTURE_BUCKET, {
+        public: true,
+        fileSizeLimit: 5 * 1024 * 1024,
+        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+      });
+      if (createError && !/already exists|duplicate/i.test(createError.message)) {
+        throw new Error(createError.message);
+      }
+      console.log(`Storage bucket ready: ${PROFILE_PICTURE_BUCKET}`);
+    })().catch((err) => {
+      profileBucketReady = null;
+      throw err;
+    });
+  }
+  await profileBucketReady;
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 10 * 1024 * 1024,
     files: 10,
+  },
+});
+
+const profileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    files: 1,
   },
 });
 
@@ -564,6 +604,7 @@ interface AccountRow {
   password_hash: string;
   access_role: AccountRole;
   display_name: string | null;
+  profile_picture: string | null;
   is_active: boolean;
 }
 
@@ -766,7 +807,7 @@ async function findAccountByUsername(username: string): Promise<AccountRow | nul
   const normalized = username.trim().toLowerCase();
   const { data, error } = await supabase
     .from('accounts')
-    .select('employee_id, username, password_hash, access_role, display_name, is_active')
+    .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
     .eq('username', normalized)
     .maybeSingle();
 
@@ -779,7 +820,7 @@ async function findAccountByUsername(username: string): Promise<AccountRow | nul
   const empId = username.trim();
   const { data: byEmp, error: empError } = await supabase
     .from('accounts')
-    .select('employee_id, username, password_hash, access_role, display_name, is_active')
+    .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
     .eq('employee_id', empId)
     .maybeSingle();
 
@@ -815,6 +856,7 @@ app.post('/api/login', async (req, res) => {
       role: account.access_role,
       employeeId: account.employee_id ?? employee?.id ?? null,
       displayName: account.display_name ?? employee?.name ?? account.username,
+      profilePicture: account.profile_picture ?? null,
       // Prompt employees still on the seeded default to change password after login.
       mustChangePassword:
         account.access_role === 'official' && verifyPassword('123456', account.password_hash),
@@ -827,6 +869,122 @@ app.post('/api/login', async (req, res) => {
         'Login service unavailable. Ensure the accounts table exists (run 20260721_accounts.sql).',
       detail: message,
     });
+  }
+});
+
+/** Upload / replace profile picture; stores public URL in accounts.profile_picture. */
+app.post('/api/account/profile-picture', profileUpload.single('profilePicture'), async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier ?? req.body?.username ?? '').trim();
+    if (!identifier) {
+      return res.status(400).json({ message: 'Account identifier is required.' });
+    }
+
+    const account = await findAccountByUsername(identifier);
+    if (!account || !account.is_active) {
+      return res.status(401).json({ message: 'Account not found or inactive.' });
+    }
+
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) {
+      return res.status(400).json({ message: 'Profile picture file is required.' });
+    }
+
+    const ext = extname(file.originalname || '').toLowerCase();
+    if (!ALLOWED_PROFILE_MIME.has(file.mimetype) && !ALLOWED_PROFILE_EXT.has(ext)) {
+      return res.status(400).json({ message: 'Only JPG, PNG, and WEBP images are allowed.' });
+    }
+
+    const safeExt = ALLOWED_PROFILE_EXT.has(ext) ? ext : '.jpg';
+    const storagePath = `${account.employee_id}/${Date.now()}${safeExt}`;
+
+    try {
+      await ensureProfilePictureBucket();
+    } catch (bucketErr) {
+      const detail = bucketErr instanceof Error ? bucketErr.message : String(bucketErr);
+      console.error('Profile picture bucket setup failed:', detail);
+      return res.status(500).json({
+        message:
+          'Could not create the profile-pictures storage bucket. Create a public bucket named "profile-pictures" in Supabase Storage.',
+        detail,
+      });
+    }
+
+    const { error: uploadError } = await supabase.storage
+      .from(PROFILE_PICTURE_BUCKET)
+      .upload(storagePath, file.buffer, {
+        contentType: file.mimetype || 'image/jpeg',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error('Profile picture upload failed:', uploadError.message);
+      return res.status(500).json({
+        message: 'Failed to upload profile picture to storage.',
+        detail: uploadError.message,
+      });
+    }
+
+    const { data: publicData } = supabase.storage.from(PROFILE_PICTURE_BUCKET).getPublicUrl(storagePath);
+    const profilePictureUrl = publicData.publicUrl;
+
+    const { error: updateError } = await supabase
+      .from('accounts')
+      .update({
+        profile_picture: profilePictureUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('employee_id', account.employee_id);
+
+    if (updateError) {
+      console.error('Profile picture DB update failed:', updateError.message);
+      return res.status(500).json({
+        message: 'Failed to save profile picture URL to the accounts table.',
+        detail: updateError.message,
+      });
+    }
+
+    return res.json({
+      message: 'Profile picture updated.',
+      profilePicture: profilePictureUrl,
+      username: account.username,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Profile picture update failed.';
+    console.error('Profile picture error:', message);
+    return res.status(500).json({ message: 'Profile picture update failed.', detail: message });
+  }
+});
+
+/** Remove profile picture from accounts.profile_picture. */
+app.delete('/api/account/profile-picture', async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier ?? req.body?.username ?? req.query?.identifier ?? '').trim();
+    if (!identifier) {
+      return res.status(400).json({ message: 'Account identifier is required.' });
+    }
+
+    const account = await findAccountByUsername(identifier);
+    if (!account || !account.is_active) {
+      return res.status(401).json({ message: 'Account not found or inactive.' });
+    }
+
+    const { error } = await supabase
+      .from('accounts')
+      .update({
+        profile_picture: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('employee_id', account.employee_id);
+
+    if (error) {
+      return res.status(500).json({ message: 'Failed to remove profile picture.', detail: error.message });
+    }
+
+    return res.json({ message: 'Profile picture removed.', profilePicture: null, username: account.username });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Profile picture removal failed.';
+    return res.status(500).json({ message, detail: message });
   }
 });
 

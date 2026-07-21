@@ -9,6 +9,7 @@ interface AccountRow {
   password_hash: string;
   access_role: AccountRole;
   display_name: string | null;
+  profile_picture: string | null;
   is_active: boolean;
 }
 
@@ -51,14 +52,14 @@ export default async function handler(req: any, res: any) {
     const supabase = getSupabase();
     let { data, error } = await supabase
       .from('accounts')
-      .select('employee_id, username, password_hash, access_role, display_name, is_active')
+      .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
       .eq('username', identifier)
       .maybeSingle();
 
     if (!data && !error) {
       const byEmp = await supabase
         .from('accounts')
-        .select('employee_id, username, password_hash, access_role, display_name, is_active')
+        .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
         .eq('employee_id', String(req.body?.identifier ?? req.body?.username ?? '').trim())
         .maybeSingle();
       data = byEmp.data;
@@ -82,6 +83,7 @@ export default async function handler(req: any, res: any) {
       role: account.access_role,
       employeeId: account.employee_id,
       displayName: account.display_name ?? account.username,
+      profilePicture: account.profile_picture ?? null,
       mustChangePassword:
         account.access_role === 'official' && verifyPassword('123456', account.password_hash),
     });

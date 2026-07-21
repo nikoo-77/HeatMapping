@@ -8,6 +8,8 @@ import EmployeeRollCall from './components/EmployeeRollCall';
 import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
 import LoginPage from './components/LoginPage';
 import ChangePasswordModal from './components/ChangePasswordModal';
+import UserAccountMenu from './components/UserAccountMenu';
+import ProfilePictureUploader from './components/ProfilePictureUploader';
 import { 
   ShieldAlert, Activity, Send, CheckCircle, Info, RefreshCw,
   AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
@@ -297,7 +299,11 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState('');
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
-  const [currentUser, setCurrentUser] = useState<{ username: string; role: 'official' | 'admin' | 'manager' }>({ username: '', role: 'official' });
+  const [currentUser, setCurrentUser] = useState<{
+    username: string;
+    role: 'official' | 'admin' | 'manager';
+    profilePicture: string | null;
+  }>({ username: '', role: 'official', profilePicture: null });
   const [officialAccountEmails, setOfficialAccountEmails] = useState<string[]>([]);
   const [employeeAidForm, setEmployeeAidForm] = useState({
     aidTypes: ['Cash'] as AidType[],
@@ -316,7 +322,7 @@ export default function App() {
     iAmVictim: true,
   });
   const [employeePortalMessage, setEmployeePortalMessage] = useState('');
-  const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'aid' | 'profile' | 'team'>('dashboard');
+  const [employeePortalPage, setEmployeePortalPage] = useState<'dashboard' | 'checkin' | 'aid' | 'team' | 'settings'>('dashboard');
   const [managerAidForm, setManagerAidForm] = useState({
     employeeId: '',
     aidTypes: ['Cash'] as AidType[],
@@ -352,7 +358,7 @@ export default function App() {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
 
   // ── Page navigation ─────────────────────────────────────────────────────
-  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'manager-aid' | 'executive' | 'risk-map' | 'team-overview'>('dashboard');
+  const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'manager-aid' | 'executive' | 'risk-map' | 'team-overview' | 'account-settings'>('dashboard');
   // Employee Directory search/filter state
   const [dirSearch, setDirSearch] = useState('');
   const [dirDept,   setDirDept]   = useState('All Departments');
@@ -1770,6 +1776,7 @@ export default function App() {
       setCurrentUser({
         username: String(body.username).trim().toLowerCase(),
         role,
+        profilePicture: body.profilePicture ? String(body.profilePicture) : null,
       });
       setIsAuthenticated(true);
       setShowPasswordPrompt(role === 'official' && body.mustChangePassword === true);
@@ -1790,7 +1797,7 @@ export default function App() {
   const handleLogout = () => {
     setIsAuthenticated(false);
     setAuthError('');
-    setCurrentUser({ username: '', role: 'official' });
+    setCurrentUser({ username: '', role: 'official', profilePicture: null });
     setShowPasswordPrompt(false);
     setShowChangePasswordModal(false);
   };
@@ -2228,19 +2235,19 @@ export default function App() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0 bg-slate-50/80 px-3 py-2 rounded-lg border border-slate-200">
-            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left">
-              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">Signed in as</p>
-              <p className="text-sm font-semibold text-slate-900">{currentUser.username}</p>
-              <p className="text-[11px] capitalize text-slate-500">{currentUser.role}</p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-[#002060] hover:text-[#002060]"
-            >
-              Logout
-            </button>
-          </div>
+          <UserAccountMenu
+            displayName={currentEmployee?.name ?? currentUser.username}
+            username={currentUser.username}
+            roleLabel={currentUser.role}
+            avatarText={currentEmployee?.avatar}
+            avatarUrl={currentUser.profilePicture}
+            onAccountSettings={() => {
+              setShowPasswordPrompt(false);
+              setShowChangePasswordModal(false);
+              setEmployeePortalPage('settings');
+            }}
+            onLogout={handleLogout}
+          />
         </header>
 
         <div className="flex flex-1 min-h-0">
@@ -2255,7 +2262,6 @@ export default function App() {
                 { key: 'checkin', label: 'Calamity Report', icon: ShieldAlert },
                 { key: 'aid', label: 'Aid Assistance', icon: HeartHandshake },
                 { key: 'team', label: 'View My Team', icon: Users },
-                { key: 'profile', label: 'My Profile', icon: BookUser },
               ].map((tab) => {
                 const isActive = employeePortalPage === tab.key;
                 const Icon = tab.icon;
@@ -2815,8 +2821,14 @@ export default function App() {
                   </section>
                 )}
 
-                 {employeePortalPage === 'profile' && (
+                 {employeePortalPage === 'settings' && (
                    <>
+                    <div className="mb-2">
+                      <h1 className="text-3xl font-black text-slate-900">Account Settings</h1>
+                      <p className="text-slate-600 text-sm mt-1">
+                        View your profile details and manage your login credentials.
+                      </p>
+                    </div>
                     <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
                       <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f] flex items-center justify-between gap-4">
                         <div>
@@ -2846,17 +2858,28 @@ export default function App() {
                         </button>
                       </div>
                       <div className="p-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="md:col-span-2 xl:col-span-4">
+                          <ProfilePictureUploader
+                            username={currentUser.username}
+                            displayName={currentEmployee?.name ?? currentUser.username}
+                            avatarText={currentEmployee?.avatar}
+                            profilePicture={currentUser.profilePicture}
+                            onUpdated={(url) =>
+                              setCurrentUser((prev) => ({ ...prev, profilePicture: url }))
+                            }
+                          />
+                        </div>
                         <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
                           <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Name</p>
                           <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
                         </div>
                         <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
                           <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Department</p>
-                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.department ?? 'â€”'}</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.department ?? '—'}</p>
                         </div>
                         <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
                           <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">User ID</p>
-                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.userId ?? currentEmployee?.id ?? 'â€”'}</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.userId ?? currentEmployee?.id ?? '—'}</p>
                         </div>
                         <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
                           <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Contact Number</p>
@@ -2878,30 +2901,20 @@ export default function App() {
                     </section>
 
                     <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
-                      <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f] flex items-center justify-between gap-4">
-                        <div>
-                          <p className="text-white font-black text-lg tracking-[0.06em]">Account Settings</p>
-                          <p className="text-slate-300 text-sm mt-1">
-                            Manage your login credentials. Password changes are saved to the accounts database.
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowPasswordPrompt(false);
-                            setShowChangePasswordModal(true);
-                          }}
-                          className="flex items-center gap-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2 text-sm font-semibold text-white transition-all duration-150 active:scale-95"
-                        >
-                          <KeyRound className="w-4 h-4" />
-                          Change Password
-                        </button>
+                      <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f]">
+                        <p className="text-white font-black text-lg tracking-[0.06em]">Login & Security</p>
+                        <p className="text-slate-300 text-sm mt-1">
+                          Manage your login credentials. Password changes are saved to the accounts database.
+                        </p>
                       </div>
-                      <div className="p-7">
+                      <div className="p-7 space-y-4">
                         <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                           <div>
                             <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Login username</p>
                             <p className="mt-2 text-sm font-semibold text-slate-900">{currentUser.username}</p>
+                            <p className="mt-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                              {currentUser.role}
+                            </p>
                             <p className="mt-2 text-sm text-slate-600">
                               Use a strong password you do not share. You can update it anytime from this page.
                             </p>
@@ -2912,9 +2925,10 @@ export default function App() {
                               setShowPasswordPrompt(false);
                               setShowChangePasswordModal(true);
                             }}
-                            className="rounded-xl bg-[#001f4b] hover:bg-[#00172f] px-5 py-2.5 text-sm font-semibold text-white transition-all active:scale-95 shrink-0"
+                            className="rounded-xl bg-[#001f4b] hover:bg-[#00172f] px-5 py-2.5 text-sm font-semibold text-white transition-all active:scale-95 shrink-0 inline-flex items-center gap-2"
                           >
-                            Update password
+                            <KeyRound className="w-4 h-4" />
+                            Change password
                           </button>
                         </div>
                       </div>
@@ -2940,7 +2954,7 @@ export default function App() {
                               <div className="w-9 h-9 rounded-full bg-[#001f4b] flex items-center justify-center text-white text-sm font-black shrink-0">{currentEmployee?.avatar ?? '?'}</div>
                               <div>
                                 <p className="text-sm font-semibold text-slate-900">{currentEmployee?.name ?? 'Employee'}</p>
-                                <p className="text-xs text-slate-500">{currentEmployee?.department ?? ''} Â· ID: {currentEmployee?.id ?? 'â€”'}</p>
+                                <p className="text-xs text-slate-500">{currentEmployee?.department ?? ''} · ID: {currentEmployee?.id ?? '—'}</p>
                               </div>
                             </div>
                             <div className="grid gap-4 sm:grid-cols-2">
@@ -2977,7 +2991,7 @@ export default function App() {
                           <div className="px-7 pb-7 flex items-center justify-end gap-3">
                             <button id="cancel-edit-profile-btn" onClick={() => setShowEditProfileModal(false)} disabled={editProfileSaving} className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50">Cancel</button>
                             <button id="save-edit-profile-btn" onClick={handleSaveProfile} disabled={editProfileSaving || editProfileSuccess} className="rounded-xl bg-[#001f4b] hover:bg-[#00172f] px-6 py-2.5 text-sm font-semibold text-white transition-all active:scale-95 disabled:opacity-60 flex items-center gap-2">
-                              {editProfileSaving ? (<><svg className="w-4 h-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>Savingâ€¦</>) : editProfileSuccess ? (<><svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Saved!</>) : 'Save Changes'}
+                              {editProfileSaving ? (<><svg className="w-4 h-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>Saving…</>) : editProfileSuccess ? (<><svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Saved!</>) : 'Save Changes'}
                             </button>
                           </div>
                         </div>
@@ -3203,20 +3217,21 @@ export default function App() {
           </p>
         </div>
 
-        {/* Right Side: user session + co-labelled corporate logos */}
-        <div className="flex items-center gap-3 shrink-0 bg-slate-50/80 px-3 py-2 rounded-lg border border-slate-200">
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left">
-            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">Signed in as</p>
-            <p className="text-sm font-semibold text-slate-900">{currentUser.username}</p>
-            <p className="text-[11px] capitalize text-slate-500">{currentUser.role}</p>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-[#002060] hover:text-[#002060]"
-          >
-            Logout
-          </button>
-          </div>
+        {/* Right Side: avatar account menu + co-labelled corporate logos */}
+        <div className="flex items-center gap-4 shrink-0">
+          <UserAccountMenu
+            displayName={currentEmployee?.name ?? currentUser.username}
+            username={currentUser.username}
+            roleLabel={currentUser.role === 'admin' ? 'admin' : isManagerUser ? 'manager' : currentUser.role}
+            avatarText={currentEmployee?.avatar}
+            avatarUrl={currentUser.profilePicture}
+            onAccountSettings={() => {
+              setShowPasswordPrompt(false);
+              setShowChangePasswordModal(false);
+              setActivePage('account-settings');
+            }}
+            onLogout={handleLogout}
+          />
         <div className="flex items-center gap-4">
           {/* Innodata Logo Block */}
           <div className="flex items-center gap-1.5">
@@ -3242,6 +3257,7 @@ export default function App() {
           <div className="bg-[#ffcb05] px-2 py-0.5 flex items-center justify-center rounded">
             <span className="text-[#dd1c1a] font-black text-xs tracking-tighter italic font-serif leading-none">savills</span>
           </div>
+        </div>
         </div>
 
       </header>
@@ -5441,6 +5457,61 @@ export default function App() {
         <RiskMap employees={employees} />
       )}
 
+      {activePage === 'account-settings' && (
+        <div className="flex-1 p-6 bg-[#f8fafc]">
+          <div className="max-w-3xl mx-auto">
+            <section className="bg-white border border-slate-200 rounded-[32px] shadow-[0_18px_48px_rgba(15,23,42,0.08)] overflow-hidden">
+              <div className="bg-[#001f4b] px-6 py-5 border-b border-[#00172f]">
+                <p className="text-white font-black text-lg tracking-[0.06em]">Account Settings</p>
+                <p className="text-slate-300 text-sm mt-1">
+                  Manage your login credentials. Password changes are saved to the accounts database.
+                </p>
+              </div>
+              <div className="p-7 space-y-4">
+                <ProfilePictureUploader
+                  username={currentUser.username}
+                  displayName={currentEmployee?.name ?? currentUser.username}
+                  avatarText={currentEmployee?.avatar}
+                  profilePicture={currentUser.profilePicture}
+                  onUpdated={(url) =>
+                    setCurrentUser((prev) => ({ ...prev, profilePicture: url }))
+                  }
+                />
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                  <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Display name</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {currentEmployee?.name ?? currentUser.username}
+                  </p>
+                </div>
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Login username</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">{currentUser.username}</p>
+                    <p className="mt-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      {currentUser.role === 'admin' ? 'admin' : isManagerUser ? 'manager' : currentUser.role}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Use a strong password you do not share. You can update it anytime from this page.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPasswordPrompt(false);
+                      setShowChangePasswordModal(true);
+                    }}
+                    className="rounded-xl bg-[#001f4b] hover:bg-[#00172f] px-5 py-2.5 text-sm font-semibold text-white transition-all active:scale-95 shrink-0 inline-flex items-center gap-2"
+                  >
+                    <KeyRound className="w-4 h-4" />
+                    Change password
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+
       {/* ──────────── EXECUTIVE DASHBOARD PAGE ──────────── */}
       {activePage === 'executive' && (() => {
         const totalImpacted  = simulationActive ? employees.filter(e => getDistance(e) <= epicenter.radiusKm).length : 0;
@@ -6210,6 +6281,16 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <ChangePasswordModal
+        open={showChangePasswordModal}
+        username={currentUser.username}
+        onClose={() => setShowChangePasswordModal(false)}
+        onSuccess={() => {
+          setShowChangePasswordModal(false);
+          pushLog('Password updated successfully and saved to your account.', 'success');
+        }}
+      />
 
       {/* Government Links Footer — visible on all dashboard pages */}
       <GovernmentLinksFooter />
