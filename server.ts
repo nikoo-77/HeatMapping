@@ -32,8 +32,8 @@ interface Employee {
   department: string;
   lat: number;
   lng: number;
-  gpsLat: number;
-  gpsLng: number;
+  gpsLat?: number;
+  gpsLng?: number;
   carrier: 'Globe' | 'Smart' | 'DITO';
   normalSignalStrength: number;
   battery: number;
@@ -119,6 +119,21 @@ interface AidAttachmentRow {
   file_path: string;
   public_url: string;
   uploaded_at: string;
+}
+
+type IncidentSnapshotPayload = {
+  calamityReports: unknown[];
+  pendingEmployeeReports: unknown[];
+  resolvedReports: Record<string, boolean>;
+  simulationActive: boolean;
+  epicenter: { lat: number; lng: number; radiusKm: number };
+  activeDisaster: Record<string, unknown>;
+};
+
+interface IncidentSnapshotRow {
+  id: string;
+  snapshot: IncidentSnapshotPayload;
+  updated_at: string;
 }
 
 const AID_ATTACHMENT_BUCKET = process.env.SUPABASE_AID_ATTACHMENT_BUCKET || 'aid-assistance-attachments';
@@ -509,6 +524,38 @@ function setEmployeeProfilePicture(employeeId: string, profilePicture: string | 
   if (idx >= 0) {
     allEmployees[idx] = { ...allEmployees[idx], profilePicture };
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeIncidentSnapshotPayload(value: unknown): IncidentSnapshotPayload | null {
+  if (!isRecord(value)) return null;
+  const epicenter = isRecord(value.epicenter) ? value.epicenter : null;
+  const activeDisaster = isRecord(value.activeDisaster) ? value.activeDisaster : null;
+  if (!epicenter || typeof epicenter.lat !== 'number' || typeof epicenter.lng !== 'number' || typeof epicenter.radiusKm !== 'number' || !activeDisaster) {
+    return null;
+  }
+
+  const resolvedReports = isRecord(value.resolvedReports)
+    ? Object.fromEntries(
+        Object.entries(value.resolvedReports).filter(([, flag]) => typeof flag === 'boolean')
+      )
+    : {};
+
+  return {
+    calamityReports: Array.isArray(value.calamityReports) ? value.calamityReports : [],
+    pendingEmployeeReports: Array.isArray(value.pendingEmployeeReports) ? value.pendingEmployeeReports : [],
+    resolvedReports: resolvedReports as Record<string, boolean>,
+    simulationActive: Boolean(value.simulationActive),
+    epicenter: {
+      lat: epicenter.lat,
+      lng: epicenter.lng,
+      radiusKm: epicenter.radiusKm,
+    },
+    activeDisaster,
+  };
 }
 
 // Resolve a manager's employee id from their name (used for id-based matching).
@@ -1101,6 +1148,64 @@ loadEmployees()
         const message = err instanceof Error ? err.message : String(err);
         res.status(500).json({ message: 'Failed to load employees.', detail: message });
       }
+    });
+
+    app.get('/api/incidents/active', async (_req, res) => {
+      const { data, error } = await supabase
+        .from('active_incident_state')
+        .select('*')
+        .eq('id', 'global')
+        .limit(1);
+
+      if (error) {
+        return res.status(500).json({ message: 'Failed to load active incident.', detail: error.message });
+      }
+
+      const row = (data ?? [])[0] as IncidentSnapshotRow | undefined;
+      if (!row) {
+        return res.json({ snapshot: null });
+      }
+
+      const snapshot = normalizeIncidentSnapshotPayload(row.snapshot);
+      if (!snapshot) {
+        return res.status(500).json({ message: 'Stored active incident is invalid.' });
+      }
+
+      return res.json({ snapshot, updatedAt: row.updated_at });
+    });
+
+    app.put('/api/incidents/active', async (req, res) => {
+      const snapshot = normalizeIncidentSnapshotPayload((req.body as { snapshot?: unknown } | undefined)?.snapshot);
+      if (!snapshot) {
+        return res.status(400).json({ message: 'Invalid active incident snapshot.' });
+      }
+
+      const { error } = await supabase
+        .from('active_incident_state')
+        .upsert({
+          id: 'global',
+          snapshot,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+
+      if (error) {
+        return res.status(500).json({ message: 'Failed to save active incident.', detail: error.message });
+      }
+
+      return res.json({ message: 'Active incident saved.', snapshot });
+    });
+
+    app.delete('/api/incidents/active', async (_req, res) => {
+      const { error } = await supabase
+        .from('active_incident_state')
+        .delete()
+        .eq('id', 'global');
+
+      if (error) {
+        return res.status(500).json({ message: 'Failed to clear active incident.', detail: error.message });
+      }
+
+      return res.json({ message: 'Active incident cleared.' });
     });
 
     app.get('/api/aid-assistance', async (req, res) => {

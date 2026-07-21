@@ -201,6 +201,15 @@ type IncidentSessionSnapshot = {
   resolvedReports: Record<string, boolean>;
 };
 
+type PersistedIncidentSnapshot = {
+  calamityReports: CalamityReportRecord[];
+  pendingEmployeeReports: PendingEmployeeReportRecord[];
+  resolvedReports: Record<string, boolean>;
+  simulationActive: boolean;
+  epicenter: { lat: number; lng: number; radiusKm: number };
+  activeDisaster: DisasterConfig;
+};
+
 const INCIDENT_STORAGE_KEYS = {
   calamityReports: 'island_map_calamity_reports',
   pendingReports: 'island_map_pending_employee_reports',
@@ -252,6 +261,43 @@ function readIncidentSessionFromStorage(): IncidentSessionSnapshot | null {
     epicenter: session.epicenter,
     activeDisaster: session.activeDisaster,
     resolvedReports: session.resolvedReports ?? {},
+  };
+}
+
+function readPersistedIncidentSnapshotFromStorage(): PersistedIncidentSnapshot | null {
+  const calamityReports = readCalamityReportsFromStorage();
+  const pendingEmployeeReports = readPendingReportsFromStorage();
+  const session = readIncidentSessionFromStorage();
+  const resolvedReports = session?.resolvedReports ?? readResolvedReportsFromStorage();
+
+  if (calamityReports.length === 0 && pendingEmployeeReports.length === 0 && !session && Object.keys(resolvedReports).length === 0) {
+    return null;
+  }
+
+  return {
+    calamityReports,
+    pendingEmployeeReports,
+    resolvedReports,
+    simulationActive: session?.simulationActive ?? calamityReports.length > 0,
+    epicenter: session?.epicenter ?? (calamityReports[0] ? { lat: calamityReports[0].lat, lng: calamityReports[0].lng, radiusKm: calamityReports[0].radiusKm } : { lat: 10.3311, lng: 123.9053, radiusKm: 5 }),
+    activeDisaster: session?.activeDisaster ?? createDefaultActiveDisaster(),
+  };
+}
+
+function normalizePersistedIncidentSnapshot(value: unknown): PersistedIncidentSnapshot | null {
+  if (!value || typeof value !== 'object') return null;
+  const snapshot = value as Partial<PersistedIncidentSnapshot>;
+  if (!snapshot.epicenter || !snapshot.activeDisaster) return null;
+
+  return {
+    calamityReports: Array.isArray(snapshot.calamityReports) ? (snapshot.calamityReports as CalamityReportRecord[]) : [],
+    pendingEmployeeReports: Array.isArray(snapshot.pendingEmployeeReports) ? (snapshot.pendingEmployeeReports as PendingEmployeeReportRecord[]) : [],
+    resolvedReports: snapshot.resolvedReports && typeof snapshot.resolvedReports === 'object' && !Array.isArray(snapshot.resolvedReports)
+      ? (snapshot.resolvedReports as Record<string, boolean>)
+      : {},
+    simulationActive: Boolean(snapshot.simulationActive),
+    epicenter: snapshot.epicenter,
+    activeDisaster: snapshot.activeDisaster,
   };
 }
 
@@ -386,6 +432,7 @@ export default function App() {
 
   // ── Pending Employee Calamity Reports (awaiting manager approval) ────────
   const [pendingEmployeeReports, setPendingEmployeeReports] = useState<PendingEmployeeReportRecord[]>(() => readPendingReportsFromStorage());
+  const [incidentSyncReady, setIncidentSyncReady] = useState(false);
 
   // Geocoding state for the employee Calamity Report map
   const [empIsGeocoding, setEmpIsGeocoding] = useState(false);
@@ -575,16 +622,81 @@ export default function App() {
 
   // Persist calamity reports, pending employee reports, and active incident session
   useEffect(() => {
-    localStorage.setItem(INCIDENT_STORAGE_KEYS.calamityReports, JSON.stringify(calamityReports));
-    localStorage.setItem(INCIDENT_STORAGE_KEYS.pendingReports, JSON.stringify(pendingEmployeeReports));
-    localStorage.setItem(INCIDENT_STORAGE_KEYS.resolvedReports, JSON.stringify(resolvedReports));
-    localStorage.setItem(INCIDENT_STORAGE_KEYS.incidentSession, JSON.stringify({
+    if (!incidentSyncReady) return;
+
+    const hasIncidentState =
+      simulationActive ||
+      calamityReports.length > 0 ||
+      pendingEmployeeReports.length > 0 ||
+      Object.keys(resolvedReports).length > 0;
+
+    if (!hasIncidentState) return;
+
+    const snapshot: PersistedIncidentSnapshot = {
+      calamityReports,
+      pendingEmployeeReports,
+      resolvedReports,
       simulationActive,
       epicenter,
       activeDisaster,
-      resolvedReports,
-    } satisfies IncidentSessionSnapshot));
-  }, [calamityReports, pendingEmployeeReports, resolvedReports, simulationActive, epicenter, activeDisaster]);
+    };
+
+    const timer = setTimeout(() => {
+      localStorage.setItem(INCIDENT_STORAGE_KEYS.calamityReports, JSON.stringify(calamityReports));
+      localStorage.setItem(INCIDENT_STORAGE_KEYS.pendingReports, JSON.stringify(pendingEmployeeReports));
+      localStorage.setItem(INCIDENT_STORAGE_KEYS.resolvedReports, JSON.stringify(resolvedReports));
+      localStorage.setItem(INCIDENT_STORAGE_KEYS.incidentSession, JSON.stringify({
+        simulationActive,
+        epicenter,
+        activeDisaster,
+        resolvedReports,
+      } satisfies IncidentSessionSnapshot));
+
+      void fetch('/api/incidents/active', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot }),
+      }).catch((error) => {
+        console.error('Failed to persist active incident to Supabase:', error);
+      });
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [incidentSyncReady, calamityReports, pendingEmployeeReports, resolvedReports, simulationActive, epicenter, activeDisaster]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadIncidentFromServer = async () => {
+      try {
+        const res = await fetch('/api/incidents/active');
+        if (!res.ok) return;
+
+        const body = await res.json().catch(() => null) as { snapshot?: unknown } | null;
+        const snapshot = normalizePersistedIncidentSnapshot(body?.snapshot);
+        if (!snapshot || cancelled) return;
+
+        setCalamityReports(snapshot.calamityReports);
+        setPendingEmployeeReports(snapshot.pendingEmployeeReports);
+        setResolvedReports(snapshot.resolvedReports);
+        setSimulationActive(snapshot.simulationActive);
+        setEpicenter(snapshot.epicenter);
+        setActiveDisaster(snapshot.activeDisaster);
+      } catch (error) {
+        console.error('Failed to load active incident from Supabase:', error);
+      } finally {
+        if (!cancelled) {
+          setIncidentSyncReady(true);
+        }
+      }
+    };
+
+    void loadIncidentFromServer();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Log dispatch helper
   const pushLog = useCallback((msg: string, type: 'info' | 'warn' | 'success' | 'err' = 'info') => {
@@ -1171,7 +1283,12 @@ export default function App() {
     pushLog(`Removed ${employeeName} from the employee directory.`, 'warn');
   };
 
-  const handleResetDatabase = () => {
+  const handleResetDatabase = async () => {
+    try {
+      await fetch('/api/incidents/active', { method: 'DELETE' });
+    } catch (error) {
+      console.error('Failed to clear active incident from Supabase:', error);
+    }
     clearIncidentStorage();
     setCalamityReports([]);
     setPendingEmployeeReports([]);

@@ -75,14 +75,14 @@ export default function LoginPage({ onLogin, error, isSubmitting, officialEmailH
 
             <form className="space-y-5" onSubmit={handleSubmit}>
               <label className="block text-sm font-semibold text-slate-700">
-                <span className="mb-2 block">Email or username</span>
+                <span className="mb-2 block">Email</span>
                 <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus-within:border-[#002060] focus-within:bg-white focus-within:ring-2 focus-within:ring-[#002060]/20">
                   <UserRound className="h-4 w-4 text-slate-400" />
                   <input
                     value={identifier}
                     onChange={(event) => setIdentifier(event.target.value)}
                     className="w-full border-none bg-transparent text-sm text-slate-700 outline-none"
-                    placeholder={officialEmailHint || 'admin / manager / official email'}
+                    placeholder="Enter email"
                     autoComplete="username"
                     required
                   />
