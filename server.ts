@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
 import { extname } from 'path';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
-import { resolveEmployeeRegion } from './lib/regionResolver.js';
+import { resolveEmployeeRegion, parseRegionLabel } from './lib/regionResolver.js';
 
 const app = express();
 app.use(express.json());
@@ -329,21 +329,33 @@ const PROVINCE_COORDS: Record<string, { lat: number; lng: number }> = {
   'Agusan del Norte': { lat: 8.9480, lng: 125.5436 },
 };
 
-function getGpsForCity(city: string, province: string): { lat: number; lng: number } {
-  const lowerCity = city.toLowerCase();
-  for (const [key, coords] of Object.entries(CITY_COORDS)) {
-    if (lowerCity.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerCity)) {
-      return coords;
+function getGpsForCity(city: string, province: string): { lat: number; lng: number } | null {
+  const lowerCity = city.trim().toLowerCase();
+  const lowerProvince = province.trim().toLowerCase();
+  if (!lowerCity && !lowerProvince) return null;
+
+  if (lowerCity) {
+    for (const [key, coords] of Object.entries(CITY_COORDS)) {
+      const k = key.toLowerCase();
+      if (lowerCity.includes(k) || k.includes(lowerCity)) {
+        return coords;
+      }
     }
   }
-  if (PROVINCE_COORDS[province]) return PROVINCE_COORDS[province];
-  // Try partial province match
-  for (const [key, coords] of Object.entries(PROVINCE_COORDS)) {
-    if (province.toLowerCase().includes(key.toLowerCase()) || key.toLowerCase().includes(province.toLowerCase())) {
-      return coords;
+
+  if (province && PROVINCE_COORDS[province]) return PROVINCE_COORDS[province];
+
+  if (lowerProvince) {
+    for (const [key, coords] of Object.entries(PROVINCE_COORDS)) {
+      const k = key.toLowerCase();
+      if (lowerProvince.includes(k) || k.includes(lowerProvince)) {
+        return coords;
+      }
     }
   }
-  return { lat: 14.5995, lng: 120.9842 };
+
+  // Do NOT default to NCR — unknown cities must not inflate Metro Manila counts.
+  return null;
 }
 
 function getIslandGroup(city: string, province: string): 'Luzon' | 'Visayas' | 'Mindanao' {
@@ -369,44 +381,6 @@ function getIslandGroup(city: string, province: string): 'Luzon' | 'Visayas' | '
   if (mindanaoProvinces.some(mp => p.includes(mp) || c.includes(mp))) return 'Mindanao';
 
   return 'Visayas';
-}
-
-// ── Parse the "PERMANENT - REGION" text from Supabase into a region code ──────
-// Handles formats like: "Region VII", "VII", "7", "Central Visayas", "Region 7 - Central Visayas"
-function parseRegionLabel(label: string): string | null {
-  if (!label) return null;
-  const t = label.trim().toUpperCase();
-
-  // Direct code matches first (e.g. "VII", "NCR", "CAR", "IV-A", "BARMM")
-  const directCodes: Record<string, string> = {
-    'NCR': 'NCR', 'NATIONAL CAPITAL REGION': 'NCR',
-    'CAR': 'CAR', 'CORDILLERA': 'CAR',
-    'I': 'I', 'REGION I': 'I', 'REGION 1': 'I', 'ILOCOS': 'I',
-    'II': 'II', 'REGION II': 'II', 'REGION 2': 'II', 'CAGAYAN VALLEY': 'II',
-    'III': 'III', 'REGION III': 'III', 'REGION 3': 'III', 'CENTRAL LUZON': 'III',
-    'IV-A': 'IV-A', 'REGION IV-A': 'IV-A', 'REGION 4A': 'IV-A', 'CALABARZON': 'IV-A',
-    'IV-B': 'IV-B', 'REGION IV-B': 'IV-B', 'REGION 4B': 'IV-B', 'MIMAROPA': 'IV-B',
-    'V': 'V', 'REGION V': 'V', 'REGION 5': 'V', 'BICOL': 'V',
-    'VI': 'VI', 'REGION VI': 'VI', 'REGION 6': 'VI', 'WESTERN VISAYAS': 'VI',
-    'VII': 'VII', 'REGION VII': 'VII', 'REGION 7': 'VII', 'CENTRAL VISAYAS': 'VII',
-    'VIII': 'VIII', 'REGION VIII': 'VIII', 'REGION 8': 'VIII', 'EASTERN VISAYAS': 'VIII',
-    'IX': 'IX', 'REGION IX': 'IX', 'REGION 9': 'IX', 'ZAMBOANGA': 'IX',
-    'X': 'X', 'REGION X': 'X', 'REGION 10': 'X', 'NORTHERN MINDANAO': 'X',
-    'XI': 'XI', 'REGION XI': 'XI', 'REGION 11': 'XI', 'DAVAO': 'XI',
-    'XII': 'XII', 'REGION XII': 'XII', 'REGION 12': 'XII', 'SOCCSKSARGEN': 'XII',
-    'XIII': 'XIII', 'REGION XIII': 'XIII', 'REGION 13': 'XIII', 'CARAGA': 'XIII',
-    'BARMM': 'BARMM', 'BANGSAMORO': 'BARMM', 'ARMM': 'BARMM',
-  };
-
-  // Try exact match first
-  if (directCodes[t]) return directCodes[t];
-
-  // Try partial / contained match (e.g. "Region 7 - Central Visayas" → VII)
-  for (const [key, code] of Object.entries(directCodes)) {
-    if (t.includes(key)) return code;
-  }
-
-  return null;
 }
 
 // ── Main data loader from Supabase ────────────────────────────────────────────
@@ -470,13 +444,17 @@ async function loadEmployees(): Promise<Employee[]> {
     let gpsLng: number | undefined;
     let gridY = 0;
     let gridX = 0;
+    let knownCityCoords: { lat: number; lng: number } | null = null;
 
     if (hasLocationData) {
-      const coords = getGpsForCity(city, province);
+      knownCityCoords = getGpsForCity(city, province);
       const seed = hashString(empId);
       const scatter = 0.015;
-      gpsLat = coords.lat + (seededRandom(seed) - 0.5) * scatter;
-      gpsLng = coords.lng + (seededRandom(seed + 1) - 0.5) * scatter;
+      // Unknown city/province: pin near Cebu (Region VII HQ) for map display only —
+      // region field is resolved separately and must not inherit NCR from a GPS default.
+      const base = knownCityCoords ?? { lat: 10.3157, lng: 123.8854 };
+      gpsLat = base.lat + (seededRandom(seed) - 0.5) * scatter;
+      gpsLng = base.lng + (seededRandom(seed + 1) - 0.5) * scatter;
 
       const LAT_MIN = 4.5, LAT_MAX = 21.5;
       const LNG_MIN = 116.0, LNG_MAX = 127.0;
@@ -484,26 +462,30 @@ async function loadEmployees(): Promise<Employee[]> {
       gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
     }
 
-
     // Island group — undefined when no location data
     const islandGroup = hasLocationData
       ? getIslandGroup(city, province || regionLabel)
       : undefined;
 
-    // ── Region: trust the database value first, then fall back to resolver ──
-    // When no location data exists at all, mark as NEEDS_UPDATE (not NCR)
+    // ── Region: trust the database value first, then city/province resolver.
+    // Never GPS-default into NCR when the address/region column is empty.
     let region: string | undefined;
     if (!hasLocationData) {
       region = 'NEEDS_UPDATE';
     } else {
       const regionFromDb = parseRegionLabel(regionLabel);
-      region = regionFromDb ?? resolveEmployeeRegion({
-        city,
-        province,
-        facility: row['Facility'] ?? undefined,
-        gpsLat,
-        gpsLng,
-      });
+      region =
+        regionFromDb ??
+        resolveEmployeeRegion({
+          city,
+          province,
+          facility: row['Facility'] ?? undefined,
+          address: addressStr !== 'Needs Update' ? addressStr : completeAddress || undefined,
+          // Only use GPS when we recognized the city/province (avoids NCR dump)
+          gpsLat: knownCityCoords ? gpsLat : undefined,
+          gpsLng: knownCityCoords ? gpsLng : undefined,
+        }) ??
+        'NEEDS_UPDATE';
     }
 
     // Avatar initials from name

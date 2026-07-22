@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { resolveEmployeeRegion, parseRegionLabel } from '../../lib/regionResolver.js';
 
 type AccessRole = 'employee' | 'manager';
 type IslandGroup = 'Luzon' | 'Visayas' | 'Mindanao';
@@ -130,24 +131,33 @@ const PROVINCE_COORDS: Record<string, { lat: number; lng: number }> = {
   'Agusan del Norte': { lat: 8.9480, lng: 125.5436 },
 };
 
-function getGpsForCity(city: string, province: string): { lat: number; lng: number } {
-  const lowerCity = city.toLowerCase();
-  for (const [key, coords] of Object.entries(CITY_COORDS)) {
-    if (lowerCity.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerCity)) {
-      return coords;
+function getGpsForCity(city: string, province: string): { lat: number; lng: number } | null {
+  const lowerCity = city.trim().toLowerCase();
+  const lowerProvince = province.trim().toLowerCase();
+  if (!lowerCity && !lowerProvince) return null;
+
+  if (lowerCity) {
+    for (const [key, coords] of Object.entries(CITY_COORDS)) {
+      const k = key.toLowerCase();
+      if (lowerCity.includes(k) || k.includes(lowerCity)) {
+        return coords;
+      }
     }
   }
 
-  if (PROVINCE_COORDS[province]) return PROVINCE_COORDS[province];
+  if (province && PROVINCE_COORDS[province]) return PROVINCE_COORDS[province];
 
-  for (const [key, coords] of Object.entries(PROVINCE_COORDS)) {
-    const lowerProvince = province.toLowerCase();
-    if (lowerProvince.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerProvince)) {
-      return coords;
+  if (lowerProvince) {
+    for (const [key, coords] of Object.entries(PROVINCE_COORDS)) {
+      const k = key.toLowerCase();
+      if (lowerProvince.includes(k) || k.includes(lowerProvince)) {
+        return coords;
+      }
     }
   }
 
-  return { lat: 14.5995, lng: 120.9842 };
+  // Do NOT default to NCR — unknown cities must not inflate Metro Manila counts.
+  return null;
 }
 
 function getIslandGroup(city: string, province: string): IslandGroup {
@@ -173,36 +183,6 @@ function getIslandGroup(city: string, province: string): IslandGroup {
   if (luzonProvinces.some((lp) => p.includes(lp) || c.includes(lp))) return 'Luzon';
 
   return 'Visayas';
-}
-
-function parseRegionLabel(label: string): string | null {
-  if (!label) return null;
-  const t = label.trim().toUpperCase();
-  const directCodes: Record<string, string> = {
-    'NCR': 'NCR', 'NATIONAL CAPITAL REGION': 'NCR',
-    'CAR': 'CAR',
-    'I': 'I', 'REGION I': 'I', 'REGION 1': 'I',
-    'II': 'II', 'REGION II': 'II', 'REGION 2': 'II',
-    'III': 'III', 'REGION III': 'III', 'REGION 3': 'III',
-    'IV-A': 'IV-A', 'REGION IV-A': 'IV-A', 'REGION 4A': 'IV-A',
-    'IV-B': 'IV-B', 'REGION IV-B': 'IV-B', 'REGION 4B': 'IV-B',
-    'V': 'V', 'REGION V': 'V', 'REGION 5': 'V',
-    'VI': 'VI', 'REGION VI': 'VI', 'REGION 6': 'VI',
-    'VII': 'VII', 'REGION VII': 'VII', 'REGION 7': 'VII',
-    'VIII': 'VIII', 'REGION VIII': 'VIII', 'REGION 8': 'VIII',
-    'IX': 'IX', 'REGION IX': 'IX', 'REGION 9': 'IX',
-    'X': 'X', 'REGION X': 'X', 'REGION 10': 'X',
-    'XI': 'XI', 'REGION XI': 'XI', 'REGION 11': 'XI',
-    'XII': 'XII', 'REGION XII': 'XII', 'REGION 12': 'XII',
-    'XIII': 'XIII', 'REGION XIII': 'XIII', 'REGION 13': 'XIII',
-    'BARMM': 'BARMM', 'BANGSAMORO': 'BARMM', 'ARMM': 'BARMM',
-  };
-
-  if (directCodes[t]) return directCodes[t];
-  for (const [key, code] of Object.entries(directCodes)) {
-    if (t.includes(key)) return code;
-  }
-  return null;
 }
 
 async function queryAllRows(): Promise<SupabaseEmployeeRow[]> {
@@ -252,13 +232,17 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
     let gpsLng: number | undefined;
     let gridY = 0;
     let gridX = 0;
+    let knownCityCoords: { lat: number; lng: number } | null = null;
 
     if (hasLocationData) {
-      const coords = getGpsForCity(city, province);
+      knownCityCoords = getGpsForCity(city, province);
       const seed = hashString(empId);
       const scatter = 0.015;
-      gpsLat = coords.lat + (seededRandom(seed) - 0.5) * scatter;
-      gpsLng = coords.lng + (seededRandom(seed + 1) - 0.5) * scatter;
+      // Unknown city/province: pin near Cebu (Region VII HQ) for map display only —
+      // region field is resolved separately and must not inherit NCR from a GPS default.
+      const base = knownCityCoords ?? { lat: 10.3157, lng: 123.8854 };
+      gpsLat = base.lat + (seededRandom(seed) - 0.5) * scatter;
+      gpsLng = base.lng + (seededRandom(seed + 1) - 0.5) * scatter;
 
       const LAT_MIN = 4.5;
       const LAT_MAX = 21.5;
@@ -269,7 +253,24 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
     }
 
     const islandGroup = hasLocationData ? getIslandGroup(city, province || regionLabel) : undefined;
-    const region = !hasLocationData ? 'NEEDS_UPDATE' : (parseRegionLabel(regionLabel) ?? undefined);
+
+    let region: string | undefined;
+    if (!hasLocationData) {
+      region = 'NEEDS_UPDATE';
+    } else {
+      const regionFromDb = parseRegionLabel(regionLabel);
+      region =
+        regionFromDb ??
+        resolveEmployeeRegion({
+          city,
+          province,
+          facility: row['Facility'] ?? undefined,
+          address: address !== 'Needs Update' ? address : completeAddress || undefined,
+          gpsLat: knownCityCoords ? gpsLat : undefined,
+          gpsLng: knownCityCoords ? gpsLng : undefined,
+        }) ??
+        'NEEDS_UPDATE';
+    }
 
     const nameParts = fullName.split(' ').filter(Boolean);
     const avatar = nameParts.length >= 2

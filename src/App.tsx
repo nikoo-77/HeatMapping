@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees, PHILIPPINE_REGIONS, ALL_ISLAND_LOCATIONS, REGION_BY_CODE } from './data_islands';
-import { resolveEmployeeRegion, getRegionLabel } from './utils/resolveRegion';
+import { generateAllIslandEmployees, PHILIPPINE_REGIONS, ALL_ISLAND_LOCATIONS, REGION_BY_CODE } from './data_islands';
+import { getRegionLabel } from './utils/resolveRegion';
 import {
   clampCalamityRadiusKm,
   getCalamityRadiusConfig,
@@ -537,9 +537,6 @@ export default function App() {
   // Left panel tab: 'region' or 'island'
   const [panelTab, setPanelTab] = useState<'region' | 'island'>('region');
 
-  // Track which regions are collapsed (key = region code, true = collapsed)
-  const [collapsedRegions, setCollapsedRegions] = useState<Record<string, boolean>>({});
-
   // Viewer role & team filter
   const [viewerRole, setViewerRole] = useState<EmployeeTeam>('HR/CSR');
   const [filterByTeam, setFilterByTeam] = useState(false);
@@ -636,6 +633,12 @@ export default function App() {
 
   // Seeded employee database distributed across the three Philippine island groups
   const [employees, setEmployees] = useState<Employee[]>(() => {
+    const CACHE_VERSION = 'regions-v4'; // bump when region assignment logic changes
+    const savedVersion = localStorage.getItem('island_map_employees_version');
+    if (savedVersion !== CACHE_VERSION) {
+      localStorage.removeItem('island_map_employees');
+      localStorage.setItem('island_map_employees_version', CACHE_VERSION);
+    }
     const saved = localStorage.getItem('island_map_employees');
     if (saved) {
       try {
@@ -788,14 +791,10 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
+            // Trust server region assignment — never invent NCR via GPS fallback.
             const enriched = data.map((emp: Employee) => ({
               ...emp,
-              region: emp.region ?? resolveEmployeeRegion({
-                gpsLat: emp.gpsLat,
-                gpsLng: emp.gpsLng,
-                city: emp.address?.split(',').slice(-2, -1)[0]?.trim(),
-                province: emp.address?.split(',').slice(-1)[0]?.trim(),
-              }),
+              region: emp.region || 'NEEDS_UPDATE',
             }));
             const systemEmails = Array.from(new Set(
               enriched
@@ -1430,14 +1429,10 @@ export default function App() {
       const data = await res.json();
       if (!Array.isArray(data) || data.length === 0) return null;
 
+      // Trust server region assignment — never invent NCR via GPS fallback.
       const enriched = data.map((emp: Employee) => ({
         ...emp,
-        region: emp.region ?? resolveEmployeeRegion({
-          gpsLat: emp.gpsLat,
-          gpsLng: emp.gpsLng,
-          city: emp.address?.split(',').slice(-2, -1)[0]?.trim(),
-          province: emp.address?.split(',').slice(-1)[0]?.trim(),
-        }),
+        region: emp.region || 'NEEDS_UPDATE',
         // Fresh baseline safety state after a status reset
         status: 'Green' as SafetyStatus,
         contacted: false,
@@ -2531,17 +2526,6 @@ export default function App() {
     const counts = new Map<string, number>();
     employees.forEach(e => {
       if (e.region) counts.set(e.region, (counts.get(e.region) ?? 0) + 1);
-    });
-    return counts;
-  }, [employees]);
-
-  const cityCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    employees.forEach(e => {
-      const city = getEmployeeCity(e);
-      if (city) {
-        counts.set(city, (counts.get(city) ?? 0) + 1);
-      }
     });
     return counts;
   }, [employees]);
@@ -4505,17 +4489,6 @@ export default function App() {
 
             {/* ══ BY REGION TAB ══ */}
             {panelTab === 'region' && (() => {
-              // Group locations by region code
-              const regionLocMap = new Map<string, typeof ALL_ISLAND_LOCATIONS>();
-              ALL_ISLAND_LOCATIONS.forEach(loc => {
-                const arr = regionLocMap.get(loc.region) ?? [];
-                arr.push(loc);
-                regionLocMap.set(loc.region, arr);
-              });
-
-              // Only show regions that have locations
-              const activeRegions = PHILIPPINE_REGIONS.filter(r => regionLocMap.has(r.code));
-
               const colorMap: Record<string, { bg: string; text: string; dot: string; badge: string; border: string; hover: string }> = {
                 violet: { bg: 'bg-violet-50',  text: 'text-violet-900', dot: 'bg-violet-500', badge: 'bg-violet-100 text-violet-900 border-violet-200', border: 'border-l-violet-600', hover: 'hover:bg-violet-50' },
                 emerald:{ bg: 'bg-emerald-50', text: 'text-emerald-900',dot: 'bg-emerald-500',badge: 'bg-emerald-100 text-emerald-900 border-emerald-200',border: 'border-l-emerald-600',hover: 'hover:bg-emerald-50' },
@@ -4536,26 +4509,33 @@ export default function App() {
                 fuchsia:{ bg: 'bg-fuchsia-50', text: 'text-fuchsia-900',dot: 'bg-fuchsia-500',badge: 'bg-fuchsia-100 text-fuchsia-900 border-fuchsia-200',border: 'border-l-fuchsia-600',hover: 'hover:bg-fuchsia-50' },
               };
 
-              return activeRegions.map(region => {
-                const locs = regionLocMap.get(region.code) ?? [];
-                const regionFte = regionCounts.get(region.code) ?? 0;
-                const c = colorMap[region.color] ?? colorMap.blue;
-                const isRegionSelected = selectedRegion === region.code;
-                const isCollapsed = collapsedRegions[region.code] ?? false;
+              // Show only regions that actually have employees, sorted by headcount (VII first for this company).
+              const activeRegions = PHILIPPINE_REGIONS
+                .filter((r) => (regionCounts.get(r.code) ?? 0) > 0)
+                .sort((a, b) => (regionCounts.get(b.code) ?? 0) - (regionCounts.get(a.code) ?? 0));
 
-                return (
-                  <div key={region.code} className="border-b border-slate-100">
-                    {/* Region header row */}
-                    <div className={`flex items-center gap-0 ${ isRegionSelected ? `${c.bg} border-l-4 ${c.border}` : '' }`}>
+              const needsUpdateCount = regionCounts.get('NEEDS_UPDATE') ?? 0;
+
+              return (
+                <>
+                  {activeRegions.map((region) => {
+                    const regionFte = regionCounts.get(region.code) ?? 0;
+                    const c = colorMap[region.color] ?? colorMap.blue;
+                    const isRegionSelected = selectedRegion === region.code;
+
+                    return (
                       <button
+                        key={region.code}
                         onClick={() => {
                           const newRegion = isRegionSelected ? null : region.code;
                           setSelectedRegion(newRegion);
-                          setSelectedIslandGroup(newRegion ? region.islandGroup : null);
+                          setSelectedIslandGroup(null);
                           setSelectedCity(null);
                           if (newRegion) pushLog(`Filtering by ${region.name} — Region ${region.code} (${regionFte} employees).`, 'info');
                         }}
-                        className={`flex-1 text-left px-4 py-2 flex items-center gap-2 transition-all cursor-pointer ${c.hover}`}
+                        className={`w-full text-left px-4 py-2.5 flex items-center gap-2 transition-all cursor-pointer border-b border-slate-100 ${
+                          isRegionSelected ? `${c.bg} border-l-4 ${c.border}` : c.hover
+                        }`}
                       >
                         <span className={`w-2 h-2 rounded-full shrink-0 ${c.dot}`} />
                         <div className="flex-1 min-w-0">
@@ -4568,45 +4548,36 @@ export default function App() {
                           {regionFte}
                         </span>
                       </button>
-                      {/* Collapse toggle */}
-                      <button
-                        onClick={() => setCollapsedRegions(prev => ({ ...prev, [region.code]: !isCollapsed }))}
-                        className="px-2 py-2 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer shrink-0"
-                        title={isCollapsed ? 'Expand' : 'Collapse'}
-                      >
-                        <svg className={`w-3 h-3 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </button>
-                    </div>
+                    );
+                  })}
 
-                    {/* City rows under this region */}
-                    {!isCollapsed && locs.map(loc => {
-                      const cityEmp = cityCounts.get(loc.city) ?? 0;
-                      const isCitySelected = selectedCity === loc.city;
-                      return (
-                        <button
-                          key={loc.name}
-                          onClick={() => {
-                            setSelectedRegion(region.code);
-                            setSelectedIslandGroup(region.islandGroup);
-                            setSelectedCity(loc.city);
-                            pushLog(`Focused: ${loc.name}, ${loc.city} — Region ${region.code} (${cityEmp} FTEs).`, 'info');
-                          }}
-                          className={`w-full text-left pl-8 pr-4 py-1.5 flex items-center justify-between transition-all cursor-pointer text-xs ${
-                            isCitySelected ? `${c.bg} border-l-4 ${c.border}` : 'hover:bg-slate-50'
-                          }`}
-                        >
-                          <span className="text-slate-600 font-medium truncate">{loc.name}</span>
-                          <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shrink-0 text-[10px]">
-                            {cityEmp}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              });
+                  {needsUpdateCount > 0 && (
+                    <button
+                      onClick={() => {
+                        const isSelected = selectedRegion === 'NEEDS_UPDATE';
+                        setSelectedRegion(isSelected ? null : 'NEEDS_UPDATE');
+                        setSelectedIslandGroup(null);
+                        setSelectedCity(null);
+                        if (!isSelected) pushLog(`Filtering employees with no region (${needsUpdateCount}).`, 'warn');
+                      }}
+                      className={`w-full text-left px-4 py-2.5 flex items-center gap-2 transition-all cursor-pointer border-b border-slate-100 ${
+                        selectedRegion === 'NEEDS_UPDATE'
+                          ? 'bg-amber-50 border-l-4 border-l-amber-500'
+                          : 'hover:bg-amber-50'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full shrink-0 bg-amber-500" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-extrabold text-xs text-amber-900">Needs Update</div>
+                        <div className="text-[10px] text-slate-500 truncate leading-tight">No region in database</div>
+                      </div>
+                      <span className="font-mono font-black text-[10px] px-1.5 py-0.5 rounded border shrink-0 bg-amber-100 text-amber-900 border-amber-200">
+                        {needsUpdateCount}
+                      </span>
+                    </button>
+                  )}
+                </>
+              );
             })()}
 
             {/* ══ BY ISLAND GROUP TAB ══ */}
@@ -4619,7 +4590,7 @@ export default function App() {
                   setSelectedCity(null);
                   pushLog(`Filtering by Luzon island group (${islandCounts.Luzon} employees).`, 'info');
                 }}
-                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-emerald-50 cursor-pointer ${
+                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-emerald-50 cursor-pointer border-b border-slate-100 ${
                   selectedIslandGroup === 'Luzon' && !selectedCity ? 'bg-emerald-50 border-l-4 border-l-emerald-600 font-bold' : ''
                 }`}
               >
@@ -4631,29 +4602,6 @@ export default function App() {
                   {islandCounts.Luzon} fte
                 </span>
               </button>
-              {LUZON_LOCATIONS.map(loc => {
-                const cityEmp = cityCounts.get(loc.city) ?? 0;
-                const isSelected = selectedCity === loc.city;
-                return (
-                  <button
-                    key={loc.name}
-                    onClick={() => {
-                      setSelectedIslandGroup('Luzon');
-                      setSelectedRegion(loc.region);
-                      setSelectedCity(loc.city);
-                      pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
-                    }}
-                    className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs ${
-                      isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''
-                    }`}
-                  >
-                    <span className="text-slate-600 font-medium truncate">{loc.name}</span>
-                    <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
-                      {cityEmp} fte
-                    </span>
-                  </button>
-                );
-              })}
 
               {/* ── VISAYAS ── */}
               <button
@@ -4663,7 +4611,7 @@ export default function App() {
                   setSelectedCity(null);
                   pushLog(`Filtering by Visayas island group (${islandCounts.Visayas} employees).`, 'info');
                 }}
-                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-blue-50 cursor-pointer ${
+                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-blue-50 cursor-pointer border-b border-slate-100 ${
                   selectedIslandGroup === 'Visayas' && !selectedCity ? 'bg-blue-50 border-l-4 border-l-blue-600 font-bold' : ''
                 }`}
               >
@@ -4675,29 +4623,6 @@ export default function App() {
                   {islandCounts.Visayas} fte
                 </span>
               </button>
-              {VISAYAS_LOCATIONS.map(loc => {
-                const cityEmp = cityCounts.get(loc.city) ?? 0;
-                const isSelected = selectedCity === loc.city;
-                return (
-                  <button
-                    key={loc.name}
-                    onClick={() => {
-                      setSelectedIslandGroup('Visayas');
-                      setSelectedRegion(loc.region);
-                      setSelectedCity(loc.city);
-                      pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
-                    }}
-                    className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs ${
-                      isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''
-                    }`}
-                  >
-                    <span className="text-slate-600 font-medium truncate">{loc.name}</span>
-                    <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
-                      {cityEmp} fte
-                    </span>
-                  </button>
-                );
-              })}
 
               {/* ── MINDANAO ── */}
               <button
@@ -4707,7 +4632,7 @@ export default function App() {
                   setSelectedCity(null);
                   pushLog(`Filtering by Mindanao island group (${islandCounts.Mindanao} employees).`, 'info');
                 }}
-                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-amber-50 cursor-pointer ${
+                className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-all hover:bg-amber-50 cursor-pointer border-b border-slate-100 ${
                   selectedIslandGroup === 'Mindanao' && !selectedCity ? 'bg-amber-50 border-l-4 border-l-amber-600 font-bold' : ''
                 }`}
               >
@@ -4719,29 +4644,6 @@ export default function App() {
                   {islandCounts.Mindanao} fte
                 </span>
               </button>
-              {MINDANAO_LOCATIONS.map(loc => {
-                const cityEmp = cityCounts.get(loc.city) ?? 0;
-                const isSelected = selectedCity === loc.city;
-                return (
-                  <button
-                    key={loc.name}
-                    onClick={() => {
-                      setSelectedIslandGroup('Mindanao');
-                      setSelectedRegion(loc.region);
-                      setSelectedCity(loc.city);
-                      pushLog(`Focused: ${loc.name}, ${loc.province} (${cityEmp} FTEs).`, 'info');
-                    }}
-                    className={`w-full text-left pl-8 pr-4 py-2 flex items-center justify-between transition-all hover:bg-slate-50 cursor-pointer text-xs ${
-                      isSelected ? 'bg-amber-50 border-l-4 border-l-amber-500' : ''
-                    }`}
-                  >
-                    <span className="text-slate-600 font-medium truncate">{loc.name}</span>
-                    <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0 text-[11px]">
-                      {cityEmp} fte
-                    </span>
-                  </button>
-                );
-              })}
             </>}
 
           </div>
@@ -4754,8 +4656,8 @@ export default function App() {
               <span className="text-[#002060] font-black">Single pin: {selectedEmployee.name}</span>
             ) : (selectedRegion || selectedIslandGroup) && (
               <span className="text-[#002060] font-black">
-                {selectedCity
-                  ? `Viewing: ${selectedCity}`
+                {selectedRegion === 'NEEDS_UPDATE'
+                  ? `Needs Update · ${regionCounts.get('NEEDS_UPDATE') ?? 0} fte`
                   : selectedRegion
                   ? `Region ${selectedRegion} · ${regionCounts.get(selectedRegion) ?? 0} fte`
                   : `${selectedIslandGroup} · ${islandCounts[selectedIslandGroup!] ?? 0} fte`
@@ -4778,8 +4680,8 @@ export default function App() {
                 ? (selectedEmployee ? `${selectedEmployee.name} — Location` : 'My Team — Overview')
                 : mapSoloEmployeeId && selectedEmployee
                 ? `${selectedEmployee.name} — Single Pin`
-                : selectedCity
-                ? `${selectedCity} — Local View`
+                : selectedRegion === 'NEEDS_UPDATE'
+                ? 'Needs Update — Missing Region'
                 : selectedRegion
                 ? `Region ${selectedRegion} — ${PHILIPPINE_REGIONS.find(r => r.code === selectedRegion)?.name ?? selectedRegion}`
                 : selectedIslandGroup
@@ -5053,15 +4955,8 @@ export default function App() {
         const departments = ['All Departments', ...Array.from(new Set(dirSource.map(e => e.department))).sort()];
         const regionCounts = new Map<string, number>();
         dirSource.forEach((e) => {
-          const code = e.region === 'NEEDS_UPDATE'
-            ? 'NEEDS_UPDATE'
-            : (e.region ?? resolveEmployeeRegion({
-                gpsLat: e.gpsLat,
-                gpsLng: e.gpsLng,
-                city: e.address?.split(',').slice(-2, -1)[0]?.trim(),
-                province: e.address?.split(',').slice(-1)[0]?.trim(),
-              }));
-          if (code) regionCounts.set(code, (regionCounts.get(code) ?? 0) + 1);
+          const code = e.region || 'NEEDS_UPDATE';
+          regionCounts.set(code, (regionCounts.get(code) ?? 0) + 1);
         });
         const regionsByIsland = {
           Luzon: PHILIPPINE_REGIONS.filter((r) => r.islandGroup === 'Luzon'),
@@ -5069,13 +4964,7 @@ export default function App() {
           Mindanao: PHILIPPINE_REGIONS.filter((r) => r.islandGroup === 'Mindanao'),
         };
 
-        const getEmpRegion = (e: Employee) =>
-          e.region ?? resolveEmployeeRegion({
-            gpsLat: e.gpsLat,
-            gpsLng: e.gpsLng,
-            city: e.address?.split(',').slice(-2, -1)[0]?.trim(),
-            province: e.address?.split(',').slice(-1)[0]?.trim(),
-          });
+        const getEmpRegion = (e: Employee) => e.region || 'NEEDS_UPDATE';
 
         const filtered = dirSource.filter(e => {
           const q = dirSearch.toLowerCase();
@@ -5334,23 +5223,15 @@ export default function App() {
                                 <span className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-300 text-amber-700 text-[10px] font-black px-2.5 py-1 rounded-full w-fit">
                                   ⚠ Address Needs Update
                                 </span>
-                              ) : (() => {
-                                const empRegion = emp.region ?? resolveEmployeeRegion({
-                                  gpsLat: emp.gpsLat,
-                                  gpsLng: emp.gpsLng,
-                                  city: emp.address?.split(',').slice(-2, -1)[0]?.trim(),
-                                  province: emp.address?.split(',').slice(-1)[0]?.trim(),
-                                });
-                                return empRegion ? (
+                              ) : emp.region ? (
                                 <span className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-black px-2.5 py-1 rounded-full w-fit">
-                                  <MapPin className="w-3 h-3" /> Region {empRegion}
+                                  <MapPin className="w-3 h-3" /> Region {emp.region}
                                 </span>
                               ) : emp.islandGroup ? (
                                 <span className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded-full w-fit">
                                   {emp.islandGroup}
                                 </span>
-                              ) : null;
-                              })()}
+                              ) : null}
                               {emp.gpsLat ? (
                                 <span className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black px-2.5 py-1 rounded-full w-fit">
                                   <Crosshair className="w-3 h-3" /> GPS Verified

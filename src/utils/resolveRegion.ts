@@ -62,8 +62,9 @@ function normalize(value: string): string {
 function matchProvince(text: string): string | null {
   const p = normalize(text);
   if (!p) return null;
-  for (const [key, code] of Object.entries(PROVINCE_TO_REGION)) {
-    if (p.includes(key) || key.includes(p)) return code;
+  const entries = Object.entries(PROVINCE_TO_REGION).sort((a, b) => b[0].length - a[0].length);
+  for (const [key, code] of entries) {
+    if (p.includes(key)) return code;
   }
   return null;
 }
@@ -82,10 +83,11 @@ export function resolveEmployeeRegion(options: {
   city?: string;
   province?: string;
   facility?: string;
+  address?: string;
   gpsLat?: number;
   gpsLng?: number;
 }): string | undefined {
-  const { city, province, facility, gpsLat, gpsLng } = options;
+  const { city, province, facility, address, gpsLat, gpsLng } = options;
 
   if (facility) {
     const fromFacility = FACILITY_TO_REGION[normalize(facility)];
@@ -98,6 +100,10 @@ export function resolveEmployeeRegion(options: {
   if (city) {
     const fromCity = matchProvince(city);
     if (fromCity) return fromCity;
+  }
+  if (address) {
+    const fromAddress = matchProvince(address);
+    if (fromAddress) return fromAddress;
   }
   if (gpsLat != null && gpsLng != null) {
     return matchByGps(gpsLat, gpsLng) ?? undefined;
