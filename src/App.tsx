@@ -621,6 +621,26 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [employees]);
 
+  const persistIncidentSnapshotToServer = useCallback((snapshot: PersistedIncidentSnapshot) => {
+    if (!incidentSyncReady) return;
+    void (async () => {
+      try {
+        const res = await fetch('/api/incidents/active', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ snapshot }),
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          console.error('Failed to persist active incident to Supabase:', body?.message || res.statusText, body?.detail || '');
+        }
+      } catch (error) {
+        console.error('Failed to persist active incident to Supabase:', error);
+      }
+    })();
+  }, [incidentSyncReady]);
+
   // Persist calamity reports, pending employee reports, and active incident session
   useEffect(() => {
     if (!incidentSyncReady) return;
@@ -653,17 +673,11 @@ export default function App() {
         resolvedReports,
       } satisfies IncidentSessionSnapshot));
 
-      void fetch('/api/incidents/active', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapshot }),
-      }).catch((error) => {
-        console.error('Failed to persist active incident to Supabase:', error);
-      });
+      persistIncidentSnapshotToServer(snapshot);
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [incidentSyncReady, calamityReports, pendingEmployeeReports, resolvedReports, simulationActive, epicenter, activeDisaster]);
+  }, [incidentSyncReady, calamityReports, pendingEmployeeReports, resolvedReports, simulationActive, epicenter, activeDisaster, persistIncidentSnapshotToServer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -847,6 +861,54 @@ export default function App() {
     }, {});
   }, [calamityReports, employeeLookup]);
 
+  const activeIncidentOptions = useMemo(
+    () =>
+      calamityReports
+        .filter((report) => !resolvedReports[report.id])
+        .map((report) => ({
+          id: report.id,
+          incidentName: report.incidentName,
+          label: `${report.incidentName} (${report.type})`,
+        })),
+    [calamityReports, resolvedReports]
+  );
+
+  useEffect(() => {
+    if (activeIncidentOptions.length === 1) {
+      const onlyIncidentName = activeIncidentOptions[0].incidentName;
+      setEmployeeAidForm((prev) =>
+        prev.incidentName === onlyIncidentName ? prev : { ...prev, incidentName: onlyIncidentName }
+      );
+      return;
+    }
+
+    if (activeIncidentOptions.length > 1) {
+      setEmployeeAidForm((prev) =>
+        activeIncidentOptions.some((option) => option.incidentName === prev.incidentName)
+          ? prev
+          : { ...prev, incidentName: '' }
+      );
+    }
+  }, [activeIncidentOptions]);
+
+  useEffect(() => {
+    if (activeIncidentOptions.length === 1) {
+      const onlyIncidentName = activeIncidentOptions[0].incidentName;
+      setManagerAidForm((prev) =>
+        prev.incidentName === onlyIncidentName ? prev : { ...prev, incidentName: onlyIncidentName }
+      );
+      return;
+    }
+
+    if (activeIncidentOptions.length > 1) {
+      setManagerAidForm((prev) =>
+        activeIncidentOptions.some((option) => option.incidentName === prev.incidentName)
+          ? prev
+          : { ...prev, incidentName: '' }
+      );
+    }
+  }, [activeIncidentOptions]);
+
   // Fixed values shown in Metro Cebu Image 2 for pristine alignment
   const fteInside5km = useMemo(() => {
     // Metro central business coordinates are at Cebu IT park
@@ -886,10 +948,9 @@ export default function App() {
     setEmployees((prev) =>
       prev.map((emp) => {
         if (emp.id === employeeId) {
-          const isFailedDelivery = emp.carrier === 'DITO';
-          const finalStatus: SafetyStatus = isFailedDelivery ? 'Red' : 'Yellow';
+          const finalStatus: SafetyStatus = 'Yellow';
           const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          pushLog(`MANUAL CONTACT REGISTERED: HR manually reached out to ${emp.name} via ${emp.carrier} GSM link. Status: ${finalStatus === 'Red' ? 'TRANSMISSION FAILURE' : 'PENDING REPLY'}`, finalStatus === 'Red' ? 'err' : 'info');
+          pushLog(`MANUAL CONTACT REGISTERED: HR manually reached out to ${emp.name} via ${emp.carrier} GSM link. Status: AWAITING REPLY`, 'info');
           return {
             ...emp,
             status: finalStatus,
@@ -908,10 +969,9 @@ export default function App() {
     setEmployees((prev) =>
       prev.map((emp) => {
         if (emp.id === employeeId) {
-          const isFailedDelivery = emp.carrier === 'DITO';
-          const finalStatus: SafetyStatus = isFailedDelivery ? 'Red' : 'Yellow';
+          const finalStatus: SafetyStatus = 'Yellow';
           const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          pushLog(`EMAIL DISPATCH REGISTERED: HR reached out to ${emp.name} via corporate email. Status: ${finalStatus === 'Red' ? 'TRANSMISSION FAILURE' : 'PENDING REPLY'}`, finalStatus === 'Red' ? 'err' : 'info');
+          pushLog(`EMAIL DISPATCH REGISTERED: HR reached out to ${emp.name} via corporate email. Status: AWAITING REPLY`, 'info');
           return {
             ...emp,
             status: finalStatus,
@@ -935,10 +995,9 @@ export default function App() {
         const dist = getDistance(emp);
         if (dist <= epicenter.radiusKm) {
           triggeredCount++;
-          const isFailedDelivery = emp.carrier === 'DITO';
           return {
             ...emp,
-            status: (isFailedDelivery ? 'Red' : 'Yellow') as SafetyStatus,
+            status: 'Yellow' as SafetyStatus,
             contacted: true,
             unresponsive: false,
             safetyMessage: undefined,
@@ -1047,6 +1106,10 @@ export default function App() {
     }
     if (!managerAidForm.description.trim()) {
       setManagerAidMessage('Please describe why aid is needed before submitting.');
+      return;
+    }
+    if (activeIncidentOptions.length > 1 && !managerAidForm.incidentName.trim()) {
+      setManagerAidMessage('Please select an incident before submitting.');
       return;
     }
 
@@ -1716,7 +1779,7 @@ export default function App() {
     }
     setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '', lat: 0, lng: 0, locationPinned: false, iAmVictim: true });
     if (empCalamityLeafletRef.current) { empCalamityLeafletRef.current.remove(); empCalamityLeafletRef.current = null; empCalamityMarkerRef.current = null; }
-    setEmployeePortalMessage('Your calamity report has been submitted and is awaiting manager verification. Your status has been set to "Need Help" until approved.');
+    setEmployeePortalMessage('Your calamity report has been submitted and is awaiting manager verification. Your status has been set to "Awaiting" until approved or updated.');
     pushLog('PENDING REPORT: ' + currentEmployee.name + ' filed a self-reported calamity (' + pendingReport.type + '). Routed to manager for verification.', 'warn');
   };
 
@@ -2084,11 +2147,22 @@ export default function App() {
     }
 
     const nextAffectedIds = Array.from(new Set([...report.affectedEmployeeIds, targetEmployee.id]));
-    setCalamityReports((prev) => prev.map((entry) => (
+    const nextCalamityReports = calamityReports.map((entry) => (
       entry.id === reportId
         ? { ...entry, affectedEmployeeIds: nextAffectedIds, affectedCount: nextAffectedIds.length }
         : entry
-    )));
+    ));
+
+    setCalamityReports(nextCalamityReports);
+    persistIncidentSnapshotToServer({
+      calamityReports: nextCalamityReports,
+      pendingEmployeeReports,
+      resolvedReports,
+      simulationActive,
+      epicenter,
+      activeDisaster,
+    });
+
     setEmployees((prev) => prev.map((emp) => (
       emp.id === targetEmployee.id
         ? { ...emp, status: 'Yellow' as SafetyStatus, contacted: true, unresponsive: false, safetyMessage: 'Joined an existing calamity incident.', lastResponseRecv: new Date().toLocaleTimeString() }
@@ -2240,6 +2314,10 @@ export default function App() {
       setEmployeePortalMessage('Please describe your aid request before submitting.');
       return;
     }
+    if (activeIncidentOptions.length > 1 && !employeeAidForm.incidentName.trim()) {
+      setEmployeePortalMessage('Please select an incident before submitting.');
+      return;
+    }
 
     try {
       setEmployeeAidSubmitting(true);
@@ -2323,8 +2401,21 @@ export default function App() {
     };
 
     setCalamityReports((prev) => [newReport, ...prev]);
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        emp.id === currentEmployee.id
+          ? {
+              ...emp,
+              status: 'Yellow' as SafetyStatus,
+              contacted: true,
+              unresponsive: false,
+              safetyMessage: 'Calamity report submitted. Awaiting verification/reply.',
+            }
+          : emp
+      )
+    );
     setEmployeeIncidentForm({ type: 'Fire', description: '', locationLabel: '', incidentName: '', lat: 0, lng: 0, locationPinned: false, iAmVictim: true });
-    setEmployeePortalMessage('Your incident report has been filed and shared with the response team.');
+    setEmployeePortalMessage('Your incident report has been filed and shared with the response team. Your status is now Awaiting until a reply/update is received.');
     setSimulationActive(true);
     pushLog(`Self-reported incident filed by ${currentEmployee.name}.`, 'warn');
   };
@@ -2872,7 +2963,7 @@ export default function App() {
                                     <p className="text-rose-600 text-xs mt-2 font-medium">Your report was reviewed and rejected by the manager. You may file a new report if the situation persists.</p>
                                   )}
                                   {report.status === 'Pending' && (
-                                    <p className="text-amber-700 text-xs mt-2">Your report is being reviewed by your manager. Your safety status has been set to <strong>Need Help</strong> in the meantime.</p>
+                                    <p className="text-amber-700 text-xs mt-2">Your report is being reviewed by your manager. Your safety status is currently <strong>Awaiting</strong> in the meantime.</p>
                                   )}
                                   {report.status === 'ManagerApproved' && (
                                     <p className="text-blue-700 text-xs mt-2">Your manager has verified your report. It is now pending final review by CSR/Admin.</p>
@@ -3001,7 +3092,7 @@ export default function App() {
                           />
                           <label htmlFor="iAmVictim" className="cursor-pointer">
                             <p className="text-sm font-bold text-amber-800">I am tagging myself as a victim of this calamity</p>
-                            <p className="text-xs text-amber-700 mt-0.5">Checking this will set your safety status to <strong>Need Help</strong> until the manager approves or rejects your report.</p>
+                            <p className="text-xs text-amber-700 mt-0.5">Checking this will keep your safety status as <strong>Awaiting</strong> until the manager approves or rejects your report.</p>
                           </label>
                         </div>
 
@@ -3401,12 +3492,35 @@ export default function App() {
                        </div>
                        <label className="block text-sm font-semibold text-slate-700">
                          <span className="mb-2 block">Incident / event name</span>
-                         <input
-                           value={employeeAidForm.incidentName}
-                           onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
-                           placeholder="e.g. Typhoon Carina"
-                           className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                         />
+                         {activeIncidentOptions.length > 1 ? (
+                           <select
+                             value={employeeAidForm.incidentName}
+                             onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
+                             className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                             required
+                           >
+                             <option value="">Select an active incident...</option>
+                             {activeIncidentOptions.map((incident) => (
+                               <option key={incident.id} value={incident.incidentName}>
+                                 {incident.label}
+                               </option>
+                             ))}
+                           </select>
+                         ) : (
+                           <input
+                             value={employeeAidForm.incidentName}
+                             onChange={(event) => setEmployeeAidForm((prev) => ({ ...prev, incidentName: event.target.value }))}
+                             placeholder="e.g. Typhoon Carina"
+                             className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                             readOnly={activeIncidentOptions.length === 1}
+                           />
+                         )}
+                         {activeIncidentOptions.length === 1 && (
+                           <p className="mt-1 text-xs font-medium text-emerald-700">Auto-selected from the current active incident.</p>
+                         )}
+                         {activeIncidentOptions.length > 1 && (
+                           <p className="mt-1 text-xs font-medium text-slate-500">Choose from currently active incidents.</p>
+                         )}
                        </label>
                        <label className="block text-sm font-semibold text-slate-700">
                          <span className="mb-2 block">Why do you need aid?</span>
@@ -5691,14 +5805,39 @@ export default function App() {
 
                   <label className="block text-sm font-semibold text-slate-700">
                     <span className="mb-2 block">Incident / event name</span>
-                    <input
-                      value={managerAidForm.incidentName}
-                      onChange={(event) =>
-                        setManagerAidForm((prev) => ({ ...prev, incidentName: event.target.value }))
-                      }
-                      placeholder="e.g. Typhoon Carina"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
-                    />
+                    {activeIncidentOptions.length > 1 ? (
+                      <select
+                        value={managerAidForm.incidentName}
+                        onChange={(event) =>
+                          setManagerAidForm((prev) => ({ ...prev, incidentName: event.target.value }))
+                        }
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        required
+                      >
+                        <option value="">Select an active incident...</option>
+                        {activeIncidentOptions.map((incident) => (
+                          <option key={incident.id} value={incident.incidentName}>
+                            {incident.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={managerAidForm.incidentName}
+                        onChange={(event) =>
+                          setManagerAidForm((prev) => ({ ...prev, incidentName: event.target.value }))
+                        }
+                        placeholder="e.g. Typhoon Carina"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
+                        readOnly={activeIncidentOptions.length === 1}
+                      />
+                    )}
+                    {activeIncidentOptions.length === 1 && (
+                      <p className="mt-1 text-xs font-medium text-emerald-700">Auto-selected from the current active incident.</p>
+                    )}
+                    {activeIncidentOptions.length > 1 && (
+                      <p className="mt-1 text-xs font-medium text-slate-500">Choose from currently active incidents.</p>
+                    )}
                   </label>
 
                   <label className="block text-sm font-semibold text-slate-700">

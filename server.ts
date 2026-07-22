@@ -178,6 +178,8 @@ interface CalamityIncidentPersonRow {
   notes: string | null;
 }
 
+type CalamityIncidentPersonUpsertRow = Omit<CalamityIncidentPersonRow, 'id'>;
+
 interface IncidentReportLike {
   id: string;
   timestamp: string;
@@ -855,7 +857,7 @@ async function loadIncidentSnapshotFromNormalizedTables(): Promise<IncidentSnaps
 async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshotPayload): Promise<void> {
   const incidentMap = new Map<string, {
     incident: Partial<CalamityIncidentRow>;
-    people: CalamityIncidentPersonRow[];
+    people: CalamityIncidentPersonUpsertRow[];
   }>();
 
   const addIncident = (input: {
@@ -871,7 +873,7 @@ async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshot
     createdByEmployeeId?: string | null;
     createdByEmployeeName?: string | null;
     createdByRole?: string | null;
-    people: CalamityIncidentPersonRow[];
+    people: CalamityIncidentPersonUpsertRow[];
   }) => {
     const incidentKey = buildIncidentKey({
       type: input.incidentType,
@@ -931,7 +933,6 @@ async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshot
       people: report.affectedEmployeeIds.map((employeeId) => {
         const employee = allEmployees.find((entry) => entry.id === employeeId);
         return {
-          id: `${report.id}-${employeeId}`,
           incident_id: '',
           employee_id: employeeId,
           employee_name: employee?.name ?? employeeId,
@@ -964,7 +965,6 @@ async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshot
       createdByEmployeeName: report.employeeName,
       createdByRole: 'employee',
       people: [{
-        id: report.id,
         incident_id: '',
         employee_id: report.employeeId,
         employee_name: report.employeeName,
