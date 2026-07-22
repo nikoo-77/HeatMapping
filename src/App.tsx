@@ -2633,6 +2633,17 @@ export default function App() {
     return directReports;
   }, [isManagerUser, directReports, employees]);
 
+  /** Managers only see their direct reports inside each incident's affected list. */
+  const scopedReportAffectedEmployeesById = useMemo(() => {
+    if (!isManagerUser) return reportAffectedEmployeesById;
+    const teamIds = new Set(directReports.map((emp) => emp.id));
+    const scoped: Record<string, Employee[]> = {};
+    for (const [reportId, emps] of Object.entries(reportAffectedEmployeesById)) {
+      scoped[reportId] = emps.filter((emp) => teamIds.has(emp.id));
+    }
+    return scoped;
+  }, [isManagerUser, directReports, reportAffectedEmployeesById]);
+
   // Status counts derived from the manager-scoped set (team only, not org-wide).
   const scopedStatusCounts = useMemo(() => {
     let green = 0, red = 0;
@@ -5345,7 +5356,9 @@ export default function App() {
                   <Siren className="w-5 h-5" /> Active Incidents
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  All filed incident reports — track status, affected personnel, and response progress.
+                  {isManagerUser
+                    ? 'Active incidents with your team’s affected members only — org-wide personnel are hidden.'
+                    : 'All filed incident reports — track status, affected personnel, and response progress.'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -5369,7 +5382,14 @@ export default function App() {
               {[
                 { label: 'Total Incidents', value: calamityReports.length, color: 'bg-white border-slate-200', textColor: 'text-slate-800' },
                 { label: 'Currently Active', value: simulationActive ? 1 : 0, color: simulationActive ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200', textColor: simulationActive ? 'text-red-700' : 'text-slate-400' },
-                { label: 'Employees in Zone', value: simulationActive ? employees.filter(e => getDistance(e) <= epicenter.radiusKm).length : 0, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-700' },
+                {
+                  label: isManagerUser ? 'Team in Zone' : 'Employees in Zone',
+                  value: simulationActive
+                    ? (isManagerUser ? directReports : employees).filter((e) => getDistance(e) <= epicenter.radiusKm).length
+                    : 0,
+                  color: 'bg-amber-50 border-amber-200',
+                  textColor: 'text-amber-700',
+                },
                 { label: 'Aid Applications', value: aidApplications.length, color: 'bg-emerald-50 border-emerald-200', textColor: 'text-emerald-700' },
               ].map(({ label, value, color, textColor }) => (
                 <div key={label} className={`${color} border rounded-xl p-4 flex flex-col gap-1`}>
@@ -5557,11 +5577,14 @@ export default function App() {
                     Other: 'bg-amber-50 border-amber-200 text-amber-800',
                   };
 
-                  const affectedEmps = reportAffectedEmployeesById[r.id] ?? [];
+                  const affectedEmps = scopedReportAffectedEmployeesById[r.id] ?? [];
                   const safeCount    = affectedEmps.filter(e => e.status === 'Green').length;
                   const awaitCount   = affectedEmps.filter(e => e.status === 'Yellow').length;
                   const mutedCount   = affectedEmps.filter(e => e.status === 'Red').length;
                   const isExpanded   = expandedReportId === r.id;
+                  const zoneCountLabel = isManagerUser
+                    ? `${affectedEmps.length} team in zone`
+                    : `${r.affectedCount} in zone`;
 
                   return (
                     <div key={r.id} className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -5579,9 +5602,9 @@ export default function App() {
                           <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border uppercase ${ typeBg[r.type] ?? typeBg['Other'] }`}>
                             {r.type}
                           </span>
-                          {r.affectedCount > 0 && (
+                          {(isManagerUser ? affectedEmps.length > 0 : r.affectedCount > 0) && (
                             <span className="bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full">
-                              {r.affectedCount} in zone
+                              {zoneCountLabel}
                             </span>
                           )}
                         </div>
@@ -5636,12 +5659,16 @@ export default function App() {
                             className="flex items-center gap-1.5 text-[11px] font-black text-[#002060] hover:text-[#003399] bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition cursor-pointer"
                           >
                             <Users className="w-3.5 h-3.5" />
-                            {isExpanded ? 'Hide' : 'Show'} Affected Employees ({affectedEmps.length})
+                            {isExpanded ? 'Hide' : 'Show'} Affected {isManagerUser ? 'Team' : 'Employees'} ({affectedEmps.length})
                             <span className={`transition-transform duration-200 ${ isExpanded ? 'rotate-180' : '' }`}>&#x25BE;</span>
                           </button>
                         )}
                         {affectedEmps.length === 0 && (
-                          <span className="text-[11px] text-slate-400 font-mono italic">No employees were in zone at time of filing.</span>
+                          <span className="text-[11px] text-slate-400 font-mono italic">
+                            {isManagerUser
+                              ? 'None of your team members were in this zone.'
+                              : 'No employees were in zone at time of filing.'}
+                          </span>
                         )}
                       </div>
 
@@ -5650,7 +5677,7 @@ export default function App() {
                         <div className="border-t border-slate-200">
                           <div className="px-4 py-2.5 flex items-center justify-between bg-[#f8fafc] border-b border-slate-100">
                             <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                              Affected Personnel ({affectedEmps.length})
+                              Affected {isManagerUser ? 'Team Members' : 'Personnel'} ({affectedEmps.length})
                             </span>
                             <button
                               onClick={() => handleExportCalamityReport(r, affectedEmps)}
