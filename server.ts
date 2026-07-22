@@ -49,6 +49,10 @@ interface Employee {
   managerName?: string;
   team?: 'HR/CSR' | 'Manager';
   facility?: string;
+  contacted?: boolean;
+  unresponsive?: boolean;
+  safetyMessage?: string;
+  lastResponseRecv?: string;
 }
 
 // Raw row shape from Supabase "Employee Details" table
@@ -1608,6 +1612,16 @@ loadEmployees()
         const message = err instanceof Error ? err.message : String(err);
         res.status(500).json({ message: 'Failed to load employees.', detail: message });
       }
+    });
+
+    app.post('/api/check-in/email', async (_req, res) => {
+      return res.status(410).json({
+        message: 'SMTP check-in endpoint is disabled. The app now uses mailto from the browser.',
+      });
+    });
+
+    app.get('/api/check-in/respond', async (_req, res) => {
+      return res.status(410).send('Email response tracking endpoint is disabled. The app now uses mailto only.');
     });
 
     app.get('/api/incidents', async (_req, res) => {

@@ -582,71 +582,34 @@ export default function StatusTracker({
                          ) : (
                            <div className="flex flex-col gap-2">
                              <div className="flex gap-2">
-                               {/* Send SMS ping - shows as "Send SMS" if email was already sent */}
-                               {emp.emailed && !emp.lastMessageSent ? (
-                                 <button
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     onSendCheckIn(emp.id);
-                                   }}
-                                   className="flex-1 bg-sky-600 hover:bg-sky-500 text-white text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-sky-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
-                                   title="Send SMS as alternative contact"
-                                 >
-                                   <Send className="w-3 h-3 text-white" />
-                                   <span>Send SMS</span>
-                                 </button>
-                               ) : (
                                  <button
                                    onClick={(e) => {
                                      e.stopPropagation();
                                      onSendCheckIn(emp.id);
                                    }}
                                    className="flex-1 bg-amber-55 text-amber-900 hover:bg-amber-100/80 text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-amber-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
-                                   title="Send manual disaster notification SMS"
+                                   title={emp.lastMessageSent ? 'Re-send SMS notification' : 'Send manual disaster notification SMS'}
                                  >
                                    <Send className="w-3 h-3 text-amber-700" />
-                                   <span>{!emp.contacted ? "Send Manual SMS" : "Manual SMS Re-Send"}</span>
+                                   <span>{emp.lastMessageSent ? 'SMS Re-Send' : 'Send SMS'}</span>
                                  </button>
-                               )}
 
-                               {/* Send Email button - shows as "Send Email" if SMS was already sent */}
-                               {emp.lastMessageSent && !emp.emailed ? (
                                  <button
                                    onClick={(e) => {
                                      e.stopPropagation();
                                      onSendEmail && onSendEmail(emp.id);
                                    }}
-                                   className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-indigo-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
-                                   title="Send email as alternative contact"
+                                   disabled={!onSendEmail}
+                                   className={`flex-1 text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border flex items-center justify-center gap-1.5 transition shadow-xs ${
+                                     onSendEmail
+                                       ? 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-300 cursor-pointer'
+                                       : 'bg-slate-200 text-slate-500 border-slate-300 cursor-not-allowed'
+                                   }`}
+                                   title={emp.lastEmailSent ? 'Re-send email notification' : 'Send corporate email notification'}
                                  >
-                                   <Mail className="w-3 h-3 text-white" />
-                                   <span>Send Email</span>
+                                   <Mail className="w-3 h-3" />
+                                   <span>{emp.lastEmailSent ? 'Email Re-Send' : 'Send Email'}</span>
                                  </button>
-                               ) : !emp.emailed ? (
-                                 <button
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     onSendEmail && onSendEmail(emp.id);
-                                   }}
-                                   className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-indigo-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
-                                   title="Send corporate email notification"
-                                 >
-                                   <Mail className="w-3 h-3 text-white" />
-                                   <span>{!emp.emailed ? "Send Email" : "Email Re-Send"}</span>
-                                 </button>
-                               ) : (
-                                 <button
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     onSendEmail && onSendEmail(emp.id);
-                                   }}
-                                   className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-mono font-black uppercase px-2.5 py-2 rounded-lg border border-indigo-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
-                                   title="Send email as alternative contact"
-                                 >
-                                   <Mail className="w-3 h-3 text-white" />
-                                   <span>Send Email</span>
-                                 </button>
-                               )}
 
                                {/* Toggle developer panel */}
                                <button

@@ -966,25 +966,53 @@ export default function App() {
   };
 
   const handleSendEmail = (employeeId: string) => {
+    const target = employees.find((emp) => emp.id === employeeId);
+    if (!target) {
+      pushLog('Email dispatch failed: employee not found.', 'err');
+      return;
+    }
+    if (!target.email?.trim()) {
+      pushLog(`Email dispatch failed: no email address saved for ${target.name}.`, 'err');
+      return;
+    }
+
+    const activeIncident = calamityReports.find((report) => !resolvedReports[report.id]) ?? calamityReports[0] ?? null;
+
+    const senderName = currentEmployee?.name ?? currentUser.username ?? 'Response Team';
+    const incidentLabel = activeIncident?.incidentName ?? 'current incident';
+    const subject = `Safety Check-In: ${incidentLabel}`;
+    const body = [
+      `Hi ${target.name},`,
+      '',
+      `This is a safety check-in from ${senderName}.`,
+      `Incident: ${incidentLabel}`,
+      '',
+      'Please reply with one of the following:',
+      '- SAFE',
+      '- NEED HELP',
+      '',
+      'Thank you.',
+    ].join('\n');
+
+    const mailtoUrl = `mailto:${target.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailtoUrl;
+
+    const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setEmployees((prev) =>
       prev.map((emp) => {
-        if (emp.id === employeeId) {
-          const finalStatus: SafetyStatus = 'Yellow';
-          const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          pushLog(`EMAIL DISPATCH REGISTERED: HR reached out to ${emp.name} via corporate email. Status: AWAITING REPLY`, 'info');
-          return {
-            ...emp,
-            status: finalStatus,
-            contacted: true,
-            emailed: true,
-            unresponsive: false,
-            safetyMessage: undefined,
-            lastEmailSent: stamp,
-          };
-        }
-        return emp;
+        if (emp.id !== employeeId) return emp;
+        return {
+          ...emp,
+          status: 'Yellow' as SafetyStatus,
+          contacted: true,
+          emailed: true,
+          unresponsive: false,
+          safetyMessage: undefined,
+          lastEmailSent: stamp,
+        };
       })
     );
+    pushLog(`EMAIL COMPOSE OPENED: Mail client opened for ${target.name}. Status: AWAITING REPLY`, 'info');
   };
 
   const handleSendCheckInAllAffected = () => {
@@ -5458,10 +5486,20 @@ export default function App() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-center gap-1">
-                              {!emp.contacted && (
-                                <button onClick={() => handleSendCheckIn(emp.id)}
-                                  className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black rounded-md transition cursor-pointer" title="Send SMS">SMS</button>
-                              )}
+                              <button
+                                onClick={() => handleSendCheckIn(emp.id)}
+                                className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black rounded-md transition cursor-pointer"
+                                title={emp.lastMessageSent ? 'Re-send SMS' : 'Send SMS'}
+                              >
+                                SMS
+                              </button>
+                              <button
+                                onClick={() => handleSendEmail(emp.id)}
+                                className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black rounded-md transition cursor-pointer"
+                                title={emp.lastEmailSent ? 'Re-send Email' : 'Send Email'}
+                              >
+                                Email
+                              </button>
                               {emp.contacted && emp.status === 'Yellow' && (<>
                                 <button onClick={() => handleSimulateReply(emp.id)}
                                   className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black rounded-md transition cursor-pointer">Safe</button>
