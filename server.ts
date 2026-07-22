@@ -889,13 +889,28 @@ async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshot
     });
 
     const existing = incidentMap.get(incidentKey);
-    const nextStatus = existing
-      ? (existing.incident.status === 'approved' || input.status === 'approved'
-          ? 'approved'
-          : existing.incident.status === 'manager_approved' || input.status === 'manager_approved'
-            ? 'manager_approved'
-            : input.status)
-      : input.status;
+    let nextStatus: IncidentWorkflowStatus = input.status;
+    if (existing?.incident.status) {
+      if (input.status === 'closed') {
+        nextStatus = 'closed';
+      } else if (existing.incident.status === 'closed' && input.status === 'approved') {
+        // Explicit reopen from snapshot (resolvedReports cleared for this report).
+        nextStatus = 'approved';
+      } else if (existing.incident.status === 'closed') {
+        nextStatus = 'closed';
+      } else if (existing.incident.status === 'approved' || input.status === 'approved') {
+        nextStatus = 'approved';
+      } else if (existing.incident.status === 'manager_approved' || input.status === 'manager_approved') {
+        nextStatus = 'manager_approved';
+      } else {
+        nextStatus = input.status;
+      }
+    }
+
+    const closedAt =
+      nextStatus === 'closed'
+        ? (existing?.incident.closed_at ?? new Date().toISOString())
+        : null;
 
     const incident: Partial<CalamityIncidentRow> = {
       ...(existing?.incident ?? {}),
@@ -914,7 +929,7 @@ async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshot
       created_by_role: input.createdByRole ?? existing?.incident.created_by_role ?? null,
       approved_by: existing?.incident.approved_by ?? null,
       approved_at: existing?.incident.approved_at ?? null,
-      closed_at: existing?.incident.closed_at ?? null,
+      closed_at: closedAt,
       join_deadline_at: existing?.incident.join_deadline_at ?? null,
     };
 
@@ -924,6 +939,7 @@ async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshot
 
   for (const report of snapshot.calamityReports) {
     if (!isIncidentReportLike(report)) continue;
+    const isResolved = Boolean(snapshot.resolvedReports?.[report.id]);
     addIncident({
       sourceReportId: report.id,
       incidentType: report.type,
@@ -933,7 +949,7 @@ async function syncIncidentSnapshotToNormalizedTables(snapshot: IncidentSnapshot
       lng: report.lng,
       radiusKm: report.radiusKm,
       description: report.description,
-      status: 'approved',
+      status: isResolved ? 'closed' : 'approved',
       people: report.affectedEmployeeIds.map((employeeId) => {
         const employee = allEmployees.find((entry) => entry.id === employeeId);
         return {
@@ -1722,6 +1738,83 @@ loadEmployees()
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return res.status(500).json({ message: 'Failed to clear active incident.', detail: message });
+      }
+    });
+
+    /** Mark an incident finished/resolved (or reopen). Persists to calamity_incidents. */
+    app.patch('/api/incidents/:id/resolve', async (req, res) => {
+      const role = String(req.body?.role || req.query.role || req.header('x-user-role') || '')
+        .trim()
+        .toLowerCase();
+      if (role !== 'admin' && role !== 'manager') {
+        return res.status(403).json({
+          message: 'Only manager or admin accounts can resolve or reopen incidents.',
+        });
+      }
+
+      const incidentId = String(req.params.id || '').trim();
+      if (!incidentId) {
+        return res.status(400).json({ message: 'Incident id is required.' });
+      }
+
+      const action = String(req.body?.action || 'resolve').trim().toLowerCase();
+      const reopen = action === 'reopen';
+      const now = new Date().toISOString();
+      const updates = reopen
+        ? { status: 'approved' as const, closed_at: null, updated_at: now }
+        : { status: 'closed' as const, closed_at: now, updated_at: now };
+
+      try {
+        let { data, error } = await supabase
+          .from('calamity_incidents')
+          .update(updates)
+          .eq('id', incidentId)
+          .select('*');
+
+        if (!error && (!data || data.length === 0)) {
+          ({ data, error } = await supabase
+            .from('calamity_incidents')
+            .update(updates)
+            .eq('source_report_id', incidentId)
+            .select('*'));
+        }
+
+        if (error) {
+          return res.status(500).json({ message: 'Failed to update incident status.', detail: error.message });
+        }
+
+        if (!data || data.length === 0) {
+          return res.status(404).json({
+            message: 'Incident not found in the database. File/sync the incident first, then resolve it.',
+          });
+        }
+
+        const row = data[0] as CalamityIncidentRow;
+        const snapshot = await loadIncidentSnapshotFromNormalizedTables();
+        if (snapshot) {
+          await supabase.from('active_incident_state').upsert(
+            {
+              id: 'global',
+              snapshot,
+              updated_at: now,
+            },
+            { onConflict: 'id' }
+          );
+        }
+
+        return res.json({
+          message: reopen ? 'Incident reopened.' : 'Incident marked as resolved.',
+          incident: {
+            id: row.id,
+            sourceReportId: row.source_report_id,
+            status: row.status,
+            closedAt: row.closed_at,
+          },
+          snapshot,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return res.status(500).json({ message: 'Failed to update incident status.', detail: message });
       }
     });
 

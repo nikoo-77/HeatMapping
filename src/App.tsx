@@ -2288,6 +2288,90 @@ export default function App() {
     pushLog('CSR/ADMIN REJECTED: Calamity report by ' + report.employeeName + ' was rejected after manager verification.', 'warn');
   };
 
+  /** Mark an incident finished/resolved (or reopen). Persists to DB + local logs. */
+  const handleResolveIncident = async (reportId: string, action: 'resolve' | 'reopen' = 'resolve') => {
+    const report = calamityReports.find((r) => r.id === reportId);
+    if (!report) return;
+
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') {
+      pushLog('ACCESS DENIED: Only managers and admins can resolve incidents.', 'err');
+      return;
+    }
+
+    if (action === 'resolve') {
+      const confirmed = window.confirm(
+        `Mark "${report.incidentName}" as finished / resolved?\n\nThis will be saved to the database and kept in the Resolved log.`
+      );
+      if (!confirmed) return;
+    }
+
+    const role = currentUser.role === 'admin' ? 'admin' : 'manager';
+
+    try {
+      const res = await fetch(`/api/incidents/${encodeURIComponent(reportId)}/resolve`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, role }),
+      });
+      const body = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        // Still update local state so the UI stays usable if the row isn't synced yet;
+        // the next snapshot PUT will attempt to persist closed status.
+        console.warn('Incident resolve API:', body?.message || res.statusText);
+        if (res.status !== 404) {
+          pushLog(`Could not save incident status to database: ${body?.message || res.statusText}`, 'err');
+          return;
+        }
+        pushLog('Incident not yet in DB — marking resolved locally; sync will persist shortly.', 'warn');
+      }
+
+      const nextResolved = { ...resolvedReports, [reportId]: action === 'resolve' };
+      if (action === 'reopen') {
+        delete nextResolved[reportId];
+      }
+      setResolvedReports(nextResolved);
+
+      const stillActive = calamityReports.some(
+        (r) => r.id !== reportId && !nextResolved[r.id]
+      );
+
+      if (action === 'resolve') {
+        if (!stillActive) {
+          setSimulationActive(false);
+          setActiveTrackPoints([]);
+          setActiveImpactScope(null);
+          setActiveZoneIslandGroup(null);
+          setActiveZoneRegion(null);
+        }
+        pushLog(
+          `✅ INCIDENT RESOLVED: "${report.incidentName}" marked finished by ${role}. Saved to incident log.`,
+          'success'
+        );
+        setIncidentStatusFilter('Resolved');
+      } else {
+        setSimulationActive(true);
+        pushLog(`🔄 INCIDENT REOPENED: "${report.incidentName}" is active again.`, 'warn');
+        setIncidentStatusFilter('Active');
+      }
+
+      // Force a snapshot persist with the new resolved flag.
+      const snapshot: PersistedIncidentSnapshot = {
+        calamityReports,
+        pendingEmployeeReports,
+        resolvedReports: nextResolved,
+        simulationActive: action === 'reopen' ? true : stillActive,
+        epicenter,
+        activeDisaster,
+      };
+      persistIncidentSnapshotToServer(snapshot);
+      localStorage.setItem(INCIDENT_STORAGE_KEYS.resolvedReports, JSON.stringify(nextResolved));
+    } catch (error) {
+      console.error('Resolve incident failed:', error);
+      pushLog('Failed to update incident status. Check your connection and try again.', 'err');
+    }
+  };
+
   const handleDispatchRescue = (employeeId: string) => {
 
     setEmployees((prev) =>
@@ -5568,7 +5652,15 @@ export default function App() {
               </div>
             ) : (
               <div className="flex flex-col gap-5">
-                {calamityReports.map(r => {
+                {calamityReports
+                  .filter((r) =>
+                    incidentStatusFilter === 'All'
+                      ? true
+                      : incidentStatusFilter === 'Active'
+                      ? !resolvedReports[r.id]
+                      : Boolean(resolvedReports[r.id])
+                  )
+                  .map(r => {
                   const typeEmoji: Record<string, string> = { Fire: '🔥', Earthquake: '🚨', Typhoon: '🌀', Other: '⚠️' };
                   const typeBg: Record<string, string> = {
                     Fire: 'bg-orange-50 border-orange-200 text-orange-800',
@@ -5582,23 +5674,33 @@ export default function App() {
                   const awaitCount   = affectedEmps.filter(e => e.status === 'Yellow').length;
                   const mutedCount   = affectedEmps.filter(e => e.status === 'Red').length;
                   const isExpanded   = expandedReportId === r.id;
+                  const isResolved   = Boolean(resolvedReports[r.id]);
                   const zoneCountLabel = isManagerUser
                     ? `${affectedEmps.length} team in zone`
                     : `${r.affectedCount} in zone`;
 
                   return (
-                    <div key={r.id} className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                    <div key={r.id} className={`bg-white border rounded-2xl shadow-sm overflow-hidden ${isResolved ? 'border-emerald-200 opacity-95' : 'border-slate-200'}`}>
 
                       {/* Card header */}
-                      <div className="bg-gradient-to-r from-[#002060] to-[#0055cc] px-5 py-4 flex items-center justify-between">
+                      <div className={`px-5 py-4 flex items-center justify-between ${isResolved ? 'bg-gradient-to-r from-emerald-800 to-teal-700' : 'bg-gradient-to-r from-[#002060] to-[#0055cc]'}`}>
                         <div className="flex items-center gap-3">
                           <span className="text-2xl">{typeEmoji[r.type] ?? '⚠️'}</span>
                           <div>
                             <p className="text-white font-black text-sm leading-tight">{r.incidentName}</p>
-                            <p className="text-blue-200 text-[11px] font-mono">{r.timestamp}</p>
+                            <p className="text-blue-100/90 text-[11px] font-mono">{r.timestamp}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          {isResolved ? (
+                            <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black px-2.5 py-1 rounded-full uppercase">
+                              Resolved
+                            </span>
+                          ) : (
+                            <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black px-2.5 py-1 rounded-full uppercase">
+                              Active
+                            </span>
+                          )}
                           <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border uppercase ${ typeBg[r.type] ?? typeBg['Other'] }`}>
                             {r.type}
                           </span>
@@ -5639,9 +5741,9 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Status summary + toggle */}
-                      <div className="px-5 py-3 flex items-center justify-between bg-slate-50">
-                        <div className="flex items-center gap-3">
+                      {/* Status summary + toggle + resolve */}
+                      <div className="px-5 py-3 flex items-center justify-between gap-3 flex-wrap bg-slate-50">
+                        <div className="flex items-center gap-3 flex-wrap">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Personnel Status:</span>
                           <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                             ✔ {safeCount} Safe
@@ -5653,23 +5755,46 @@ export default function App() {
                             ✕ {mutedCount} No Signal
                           </span>
                         </div>
-                        {affectedEmps.length > 0 && (
-                          <button
-                            onClick={() => setExpandedReportId(isExpanded ? null : r.id)}
-                            className="flex items-center gap-1.5 text-[11px] font-black text-[#002060] hover:text-[#003399] bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition cursor-pointer"
-                          >
-                            <Users className="w-3.5 h-3.5" />
-                            {isExpanded ? 'Hide' : 'Show'} Affected {isManagerUser ? 'Team' : 'Employees'} ({affectedEmps.length})
-                            <span className={`transition-transform duration-200 ${ isExpanded ? 'rotate-180' : '' }`}>&#x25BE;</span>
-                          </button>
-                        )}
-                        {affectedEmps.length === 0 && (
-                          <span className="text-[11px] text-slate-400 font-mono italic">
-                            {isManagerUser
-                              ? 'None of your team members were in this zone.'
-                              : 'No employees were in zone at time of filing.'}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {affectedEmps.length > 0 && (
+                            <button
+                              onClick={() => setExpandedReportId(isExpanded ? null : r.id)}
+                              className="flex items-center gap-1.5 text-[11px] font-black text-[#002060] hover:text-[#003399] bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition cursor-pointer"
+                            >
+                              <Users className="w-3.5 h-3.5" />
+                              {isExpanded ? 'Hide' : 'Show'} Affected {isManagerUser ? 'Team' : 'Employees'} ({affectedEmps.length})
+                              <span className={`transition-transform duration-200 ${ isExpanded ? 'rotate-180' : '' }`}>&#x25BE;</span>
+                            </button>
+                          )}
+                          {affectedEmps.length === 0 && (
+                            <span className="text-[11px] text-slate-400 font-mono italic">
+                              {isManagerUser
+                                ? 'None of your team members were in this zone.'
+                                : 'No employees were in zone at time of filing.'}
+                            </span>
+                          )}
+                          {!isResolved ? (
+                            <button
+                              type="button"
+                              onClick={() => handleResolveIncident(r.id, 'resolve')}
+                              className="flex items-center gap-1.5 text-[11px] font-black text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-700 px-3 py-1.5 rounded-lg transition cursor-pointer shadow-sm active:scale-95"
+                              title="Mark this incident finished and save it to the database log"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              Mark Finished
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleResolveIncident(r.id, 'reopen')}
+                              className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg transition cursor-pointer"
+                              title="Reopen this incident"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              Reopen
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {/* Expandable employee list */}
