@@ -1,6 +1,21 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LUZON_LOCATIONS, VISAYAS_LOCATIONS, MINDANAO_LOCATIONS, generateAllIslandEmployees, PHILIPPINE_REGIONS, ALL_ISLAND_LOCATIONS, REGION_BY_CODE } from './data_islands';
 import { resolveEmployeeRegion, getRegionLabel } from './utils/resolveRegion';
+import {
+  clampCalamityRadiusKm,
+  getCalamityRadiusConfig,
+} from './utils/calamityRadius';
+import {
+  EARTHQUAKE_SCOPE_PRESETS,
+  corridorKmForTyphoonSignal,
+  displayRadiusKmForEarthquake,
+  impactScopeForMagnitude,
+  isEmployeeInCalamityZone,
+  resolveGeoAt,
+  scopeLabel,
+  type EarthquakeImpactScope,
+  type GeoPoint,
+} from './utils/calamityZone';
 import { Employee, SafetyStatus, DisasterConfig, EmployeeTeam, AidApplication, AidType, AID_TYPE_OPTIONS, formatAidTypeLabel, parseAidTypes } from './types';
 import InteractiveMap from './components/InteractiveMap';
 import RiskMap from './components/RiskMap';
@@ -167,6 +182,13 @@ type CalamityReportRecord = {
   magnitude?: string;
   signalLevel?: string;
   description: string;
+  /** Earthquake: local city / whole region / whole island group. */
+  impactScope?: EarthquakeImpactScope;
+  islandGroup?: string;
+  region?: string;
+  /** Typhoon storm track (path), not a circle. */
+  trackPoints?: GeoPoint[];
+  corridorKm?: number;
 };
 
 type PendingEmployeeReportRecord = {
@@ -542,6 +564,11 @@ export default function App() {
     hazardName: string;      // used when type === 'Other'
     magnitude: string;       // used when type === 'Earthquake'
     signalLevel: string;     // used when type === 'Typhoon'
+    impactScope: EarthquakeImpactScope;
+    islandGroup: string;
+    region: string;
+    trackPoints: GeoPoint[];
+    corridorKm: number;
   }>({
     type: 'Fire',
     description: '',
@@ -551,14 +578,20 @@ export default function App() {
     radiusKm: 0.3,
     locationPinned: false,
     hazardName: '',
-    magnitude: '',
+    magnitude: 'M5.5',
     signalLevel: 'Signal No. 1',
+    impactScope: 'region',
+    islandGroup: '',
+    region: '',
+    trackPoints: [],
+    corridorKm: corridorKmForTyphoonSignal('Signal No. 1'),
   });
   // ref to hold the mini leaflet map inside the modal
   const calamityMapRef = React.useRef<HTMLDivElement | null>(null);
   const calamityLeafletRef = React.useRef<any>(null);
   const calamityMarkerRef = React.useRef<any>(null);
   const calamityCircleRef = React.useRef<any>(null);
+  const calamityTrackLayerRef = React.useRef<any>(null);
   const calamityFormRef = React.useRef(calamityForm);
   // Geocoding state
   const [isGeocoding, setIsGeocoding] = useState(false);
@@ -580,6 +613,21 @@ export default function App() {
     }
     return { lat: 10.3311, lng: 123.9053, radiusKm: 5 };
   });
+  /** Active typhoon track on the main map (path corridor). */
+  const [activeTrackPoints, setActiveTrackPoints] = useState<GeoPoint[]>(() => {
+    const latest = readCalamityReportsFromStorage().find((r) => r.type === 'Typhoon' && (r.trackPoints?.length ?? 0) >= 2);
+    return latest?.trackPoints ?? [];
+  });
+  const [activeCorridorKm, setActiveCorridorKm] = useState(() => {
+    const latest = readCalamityReportsFromStorage().find((r) => r.type === 'Typhoon');
+    return latest?.corridorKm ?? corridorKmForTyphoonSignal(latest?.signalLevel);
+  });
+  const [activeImpactScope, setActiveImpactScope] = useState<EarthquakeImpactScope | null>(() => {
+    const latest = readCalamityReportsFromStorage().find((r) => r.type === 'Earthquake');
+    return latest?.impactScope ?? null;
+  });
+  const [activeZoneIslandGroup, setActiveZoneIslandGroup] = useState<string | null>(null);
+  const [activeZoneRegion, setActiveZoneRegion] = useState<string | null>(null);
   const [activeDisaster, setActiveDisaster] = useState<DisasterConfig>(() => {
     const session = readIncidentSessionFromStorage();
     if (session?.activeDisaster) return session.activeDisaster;
@@ -1375,9 +1423,101 @@ export default function App() {
     pushLog(`Removed ${employeeName} from the employee directory.`, 'warn');
   };
 
-  const handleResetDatabase = async () => {
+  const reloadEmployeesFromServer = useCallback(async (): Promise<Employee[] | null> => {
     try {
-      await fetch('/api/incidents/active', { method: 'DELETE' });
+      const res = await fetch('/api/employees');
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) return null;
+
+      const enriched = data.map((emp: Employee) => ({
+        ...emp,
+        region: emp.region ?? resolveEmployeeRegion({
+          gpsLat: emp.gpsLat,
+          gpsLng: emp.gpsLng,
+          city: emp.address?.split(',').slice(-2, -1)[0]?.trim(),
+          province: emp.address?.split(',').slice(-1)[0]?.trim(),
+        }),
+        // Fresh baseline safety state after a status reset
+        status: 'Green' as SafetyStatus,
+        contacted: false,
+        unresponsive: false,
+        safetyMessage: undefined,
+        rescueDispatched: false,
+        lastMessageSent: undefined,
+        lastEmailSent: undefined,
+        lastResponseRecv: undefined,
+      }));
+
+      const systemEmails = Array.from(new Set(
+        enriched
+          .map((emp: Employee) => emp.email?.trim().toLowerCase())
+          .filter((email: string | undefined): email is string => Boolean(email))
+      ));
+      setEmployees(enriched);
+      setOfficialAccountEmails(systemEmails);
+      localStorage.setItem('island_map_employees', JSON.stringify(enriched));
+      return enriched;
+    } catch (error) {
+      console.error('Failed to reload employees from server:', error);
+      return null;
+    }
+  }, []);
+
+  const resetEmployeeSafetyState = useCallback((list: Employee[]) => (
+    list.map((emp) => ({
+      ...emp,
+      status: 'Green' as SafetyStatus,
+      contacted: false,
+      unresponsive: false,
+      safetyMessage: undefined,
+      rescueDispatched: false,
+      lastMessageSent: undefined,
+      lastEmailSent: undefined,
+      lastResponseRecv: undefined,
+    }))
+  ), []);
+
+  const handleResetDatabase = async () => {
+    const isManager = currentUser.role === 'manager';
+
+    if (isManager) {
+      const confirmed = window.confirm(
+        'Reset your team’s safety statuses (check-in flags and colors)?\n\n' +
+        'Team members and incident logs will NOT be deleted.'
+      );
+      if (!confirmed) return;
+
+      const reloaded = await reloadEmployeesFromServer();
+      if (!reloaded) {
+        setEmployees((prev) => resetEmployeeSafetyState(prev));
+      }
+      setSelectedEmployee(null);
+      setSimulationActive(false);
+      setEpicenter({ lat: 10.3311, lng: 123.9053, radiusKm: 5 });
+      setActiveDisaster(createDefaultActiveDisaster());
+      setActiveTrackPoints([]);
+      setActiveImpactScope(null);
+      setActiveZoneIslandGroup(null);
+      setActiveZoneRegion(null);
+      pushLog('Team safety statuses reset. Team members and incident logs were preserved.', 'info');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Reset all employee safety statuses and clear the active calamity session?\n\n' +
+      '• Employee directory will be reloaded from the database (not deleted)\n' +
+      '• Active incident logs will be cleared from the database\n\n' +
+      'Continue?'
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch('/api/incidents/active?role=admin', { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.error('Failed to clear active incident from Supabase:', body?.message || res.statusText);
+      }
     } catch (error) {
       console.error('Failed to clear active incident from Supabase:', error);
     }
@@ -1388,12 +1528,23 @@ export default function App() {
     setSimulationActive(false);
     setEpicenter({ lat: 10.3311, lng: 123.9053, radiusKm: 5 });
     setActiveDisaster(createDefaultActiveDisaster());
-    setEmployees(generateAllIslandEmployees());
+    setActiveTrackPoints([]);
+    setActiveImpactScope(null);
+    setActiveZoneIslandGroup(null);
+    setActiveZoneRegion(null);
+
+    const reloaded = await reloadEmployeesFromServer();
+    if (!reloaded) {
+      // Keep real employees if reload fails — never swap in generated dummy data.
+      setEmployees((prev) => resetEmployeeSafetyState(prev));
+      pushLog('Statuses reset locally. Could not reload employees from the server — existing directory kept.', 'warn');
+    } else {
+      pushLog('Safety statuses reset and active calamity session cleared. Employee directory reloaded from database.', 'info');
+    }
     setSelectedEmployee(null);
     setSelectedCity(null);
     setSelectedIslandGroup(null);
     setFilterByTeam(false);
-    pushLog('Database reset. All personnel records restored and active calamity report cleared.', 'info');
   };
 
   // Close employee directory actions menu on outside click
@@ -1418,6 +1569,7 @@ export default function App() {
         calamityLeafletRef.current = null;
         calamityMarkerRef.current = null;
         calamityCircleRef.current = null;
+        calamityTrackLayerRef.current = null;
       }
       return;
     }
@@ -1432,6 +1584,7 @@ export default function App() {
         zoomControl: true,
       });
       calamityLeafletRef.current = map;
+      calamityTrackLayerRef.current = L.layerGroup().addTo(map);
 
       // Light tile layer
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -1440,12 +1593,95 @@ export default function App() {
         maxZoom: 19,
       }).addTo(map);
 
-      // Click handler to pin location
+      const redrawTrack = (points: GeoPoint[], corridorKm: number) => {
+        const layer = calamityTrackLayerRef.current;
+        if (!layer) return;
+        layer.clearLayers();
+        if (points.length === 0) return;
+        points.forEach((p, idx) => {
+          L.circleMarker([p.lat, p.lng], {
+            radius: idx === 0 ? 7 : 5,
+            color: '#0e7490',
+            fillColor: idx === 0 ? '#06b6d4' : '#67e8f9',
+            fillOpacity: 1,
+            weight: 2,
+          })
+            .bindTooltip(idx === 0 ? 'Landfall / start' : `Track ${idx + 1}`, { direction: 'top' })
+            .addTo(layer);
+        });
+        if (points.length >= 2) {
+          L.polyline(
+            points.map((p) => [p.lat, p.lng]),
+            { color: '#0891b2', weight: 4, opacity: 0.9 }
+          ).addTo(layer);
+          // Visual corridor: circles along path (approximate storm width)
+          points.forEach((p) => {
+            L.circle([p.lat, p.lng], {
+              radius: (corridorKm / 2) * 1000,
+              color: '#06b6d4',
+              fillColor: '#22d3ee',
+              fillOpacity: 0.08,
+              weight: 1,
+              dashArray: '4 6',
+            }).addTo(layer);
+          });
+        }
+      };
+
+      // Click handler: Fire/EQ/Other = single pin; Typhoon = append track points
       map.on('click', (e: any) => {
         const { lat, lng } = e.latlng;
-        setCalamityForm(prev => ({ ...prev, lat, lng, locationPinned: true }));
+        const form = calamityFormRef.current;
 
-        // Draw / update marker
+        if (form.type === 'Typhoon') {
+          setCalamityForm((prev) => {
+            const nextTrack = [...prev.trackPoints, { lat, lng }];
+            const corridorKm = prev.corridorKm || corridorKmForTyphoonSignal(prev.signalLevel);
+            redrawTrack(nextTrack, corridorKm);
+            return {
+              ...prev,
+              lat: nextTrack[0].lat,
+              lng: nextTrack[0].lng,
+              locationPinned: nextTrack.length >= 1,
+              trackPoints: nextTrack,
+              corridorKm,
+            };
+          });
+          if (calamityCircleRef.current) {
+            map.removeLayer(calamityCircleRef.current);
+            calamityCircleRef.current = null;
+          }
+          if (calamityMarkerRef.current) {
+            map.removeLayer(calamityMarkerRef.current);
+            calamityMarkerRef.current = null;
+          }
+          return;
+        }
+
+        const geo = resolveGeoAt(lat, lng);
+        setCalamityForm((prev) => {
+          const scope =
+            prev.type === 'Earthquake'
+              ? prev.impactScope || impactScopeForMagnitude(prev.magnitude)
+              : prev.impactScope;
+          const radiusKm =
+            prev.type === 'Earthquake'
+              ? displayRadiusKmForEarthquake(scope, prev.magnitude)
+              : prev.radiusKm;
+          return {
+            ...prev,
+            lat,
+            lng,
+            locationPinned: true,
+            islandGroup: geo.islandGroup,
+            region: geo.region,
+            radiusKm,
+            trackPoints: [],
+          };
+        });
+
+        if (calamityTrackLayerRef.current) calamityTrackLayerRef.current.clearLayers();
+
         if (calamityMarkerRef.current) {
           calamityMarkerRef.current.setLatLng([lat, lng]);
         } else {
@@ -1458,19 +1694,25 @@ export default function App() {
           calamityMarkerRef.current = L.marker([lat, lng], { icon }).addTo(map);
         }
 
-        // Draw / update circle
+        const showCircle = form.type === 'Fire' || form.type === 'Other' ||
+          (form.type === 'Earthquake' && (form.impactScope || impactScopeForMagnitude(form.magnitude)) === 'local');
         const radius = calamityFormRef.current.radiusKm * 1000;
-        if (calamityCircleRef.current) {
-          calamityCircleRef.current.setLatLng([lat, lng]).setRadius(radius);
-        } else {
-          calamityCircleRef.current = L.circle([lat, lng], {
-            radius,
-            color: '#dc2626',
-            fillColor: '#dc2626',
-            fillOpacity: 0.12,
-            weight: 2,
-            dashArray: '6 4',
-          }).addTo(map);
+        if (showCircle) {
+          if (calamityCircleRef.current) {
+            calamityCircleRef.current.setLatLng([lat, lng]).setRadius(radius);
+          } else {
+            calamityCircleRef.current = L.circle([lat, lng], {
+              radius,
+              color: '#dc2626',
+              fillColor: '#dc2626',
+              fillOpacity: 0.12,
+              weight: 2,
+              dashArray: '6 4',
+            }).addTo(map);
+          }
+        } else if (calamityCircleRef.current) {
+          map.removeLayer(calamityCircleRef.current);
+          calamityCircleRef.current = null;
         }
       });
     }, 150);
@@ -1480,21 +1722,93 @@ export default function App() {
   // Keep circle radius in sync when the slider changes (while modal is open)
   React.useEffect(() => {
     if (!calamityCircleRef.current) return;
+    if (calamityForm.type === 'Typhoon') return;
+    if (calamityForm.type === 'Earthquake' && calamityForm.impactScope !== 'local') {
+      calamityCircleRef.current.setRadius(0);
+      return;
+    }
     calamityCircleRef.current.setRadius(calamityForm.radiusKm * 1000);
-  }, [calamityForm.radiusKm]);
+  }, [calamityForm.radiusKm, calamityForm.type, calamityForm.impactScope]);
 
-  // Compute live count of employees inside the calamity geofence
+  // Redraw typhoon track corridor when width / points change
+  React.useEffect(() => {
+    if (calamityForm.type !== 'Typhoon' || !calamityTrackLayerRef.current || !calamityLeafletRef.current) return;
+    const L = (window as any).L || require('leaflet');
+    const layer = calamityTrackLayerRef.current;
+    const points = calamityForm.trackPoints;
+    const corridorKm = calamityForm.corridorKm;
+    layer.clearLayers();
+    if (points.length === 0) return;
+    points.forEach((p, idx) => {
+      L.circleMarker([p.lat, p.lng], {
+        radius: idx === 0 ? 7 : 5,
+        color: '#0e7490',
+        fillColor: idx === 0 ? '#06b6d4' : '#67e8f9',
+        fillOpacity: 1,
+        weight: 2,
+      }).addTo(layer);
+    });
+    if (points.length >= 2) {
+      L.polyline(
+        points.map((p) => [p.lat, p.lng]),
+        { color: '#0891b2', weight: 4, opacity: 0.9 }
+      ).addTo(layer);
+      points.forEach((p) => {
+        L.circle([p.lat, p.lng], {
+          radius: (corridorKm / 2) * 1000,
+          color: '#06b6d4',
+          fillColor: '#22d3ee',
+          fillOpacity: 0.08,
+          weight: 1,
+          dashArray: '4 6',
+        }).addTo(layer);
+      });
+    }
+  }, [calamityForm.type, calamityForm.trackPoints, calamityForm.corridorKm]);
+
+  const calamityRadiusConfig = React.useMemo(
+    () =>
+      getCalamityRadiusConfig(calamityForm.type, {
+        magnitude: calamityForm.magnitude,
+        signalLevel: calamityForm.signalLevel,
+      }),
+    [calamityForm.type, calamityForm.magnitude, calamityForm.signalLevel]
+  );
+
+  const calamityZoneForForm = React.useMemo(
+    () => ({
+      type: calamityForm.type,
+      lat: calamityForm.lat,
+      lng: calamityForm.lng,
+      radiusKm: calamityForm.radiusKm,
+      magnitude: calamityForm.magnitude,
+      signalLevel: calamityForm.signalLevel,
+      impactScope: calamityForm.impactScope,
+      islandGroup: calamityForm.islandGroup,
+      region: calamityForm.region,
+      trackPoints: calamityForm.trackPoints,
+      corridorKm: calamityForm.corridorKm,
+    }),
+    [calamityForm]
+  );
+
+  // Compute live count of employees inside the calamity zone (radius / region / island / track)
   const calamityAffectedCount = React.useMemo(() => {
     if (!calamityForm.locationPinned) return 0;
-    return employees.filter(emp => {
-      const lat = emp.gpsLat ?? emp.lat;
-      const lng = emp.gpsLng ?? emp.lng;
-      return haversineKm(calamityForm.lat, calamityForm.lng, lat, lng) <= calamityForm.radiusKm;
-    }).length;
-  }, [calamityForm.lat, calamityForm.lng, calamityForm.radiusKm, calamityForm.locationPinned, employees, haversineKm]);
+    if (calamityForm.type === 'Typhoon' && calamityForm.trackPoints.length < 1) return 0;
+    return employees.filter((emp) => isEmployeeInCalamityZone(emp, calamityZoneForForm)).length;
+  }, [calamityForm.locationPinned, calamityForm.type, calamityForm.trackPoints.length, employees, calamityZoneForForm]);
 
   const handleSubmitCalamityReport = () => {
-    const { type, description, locationLabel, lat, lng, radiusKm, hazardName, magnitude, signalLevel } = calamityForm;
+    const {
+      type, description, locationLabel, lat, lng, radiusKm, hazardName, magnitude, signalLevel,
+      impactScope, islandGroup, region, trackPoints, corridorKm,
+    } = calamityForm;
+
+    if (type === 'Typhoon' && trackPoints.length < 2) {
+      pushLog('Typhoon reports need a storm path — click at least 2 points on the map (start → path).', 'warn');
+      return;
+    }
 
     // Build a meaningful incident name
     const incidentLabel = type === 'Other' && hazardName.trim() ? hazardName.trim() : type;
@@ -1502,22 +1816,47 @@ export default function App() {
       ? `${incidentLabel} — ${locationLabel}`
       : `${incidentLabel} Incident`;
 
+    const geo = resolveGeoAt(lat, lng);
+    const resolvedIsland = islandGroup || geo.islandGroup;
+    const resolvedRegion = region || geo.region;
+    const scope = type === 'Earthquake' ? (impactScope || impactScopeForMagnitude(magnitude)) : impactScope;
+    const effectiveCorridor = type === 'Typhoon' ? (corridorKm || corridorKmForTyphoonSignal(signalLevel)) : corridorKm;
+    const effectiveRadius =
+      type === 'Earthquake'
+        ? displayRadiusKmForEarthquake(scope, magnitude)
+        : type === 'Typhoon'
+        ? effectiveCorridor / 2
+        : radiusKm;
+
     // Build auto-description with extra fields
     let extraDetails = '';
-    if (type === 'Earthquake' && magnitude.trim()) extraDetails = ` Magnitude/Intensity: ${magnitude}.`;
-    if (type === 'Typhoon' && signalLevel)         extraDetails = ` ${signalLevel}.`;
+    if (type === 'Earthquake' && magnitude.trim()) {
+      extraDetails = ` Magnitude: ${magnitude}. Impact: ${scopeLabel(scope)} (${resolvedIsland}${scope === 'region' ? ` / ${resolvedRegion}` : ''}).`;
+    }
+    if (type === 'Typhoon' && signalLevel) {
+      extraDetails = ` ${signalLevel}. Storm track corridor ~${effectiveCorridor} km wide (${trackPoints.length} path points).`;
+    }
     const desc = description
       ? description + extraDetails
       : `${incidentLabel} calamity reported by HR/Management at [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E].${extraDetails}`;
 
-    // Capture which employees are in zone at filing time
+    const zone = {
+      type,
+      lat,
+      lng,
+      radiusKm: effectiveRadius,
+      magnitude,
+      signalLevel,
+      impactScope: scope,
+      islandGroup: resolvedIsland,
+      region: resolvedRegion,
+      trackPoints,
+      corridorKm: effectiveCorridor,
+    };
+
     const affectedEmployeeIds = employees
-      .filter(emp => {
-        const eLat = emp.gpsLat ?? emp.lat;
-        const eLng = emp.gpsLng ?? emp.lng;
-        return haversineKm(lat, lng, eLat, eLng) <= radiusKm;
-      })
-      .map(emp => emp.id);
+      .filter((emp) => isEmployeeInCalamityZone(emp, zone))
+      .map((emp) => emp.id);
 
     const existingIncident = findMatchingIncident({
       type,
@@ -1525,12 +1864,18 @@ export default function App() {
       locationLabel,
       lat,
       lng,
-      radiusKm,
+      radiusKm: effectiveRadius,
     });
 
-    handleTriggerSimulation(fullName, lat, lng, radiusKm, desc);
+    setActiveTrackPoints(type === 'Typhoon' ? trackPoints : []);
+    setActiveCorridorKm(effectiveCorridor);
+    setActiveImpactScope(type === 'Earthquake' ? scope : null);
+    setActiveZoneIslandGroup(type === 'Earthquake' ? resolvedIsland : null);
+    setActiveZoneRegion(type === 'Earthquake' ? resolvedRegion : null);
+
+    handleTriggerSimulation(fullName, lat, lng, effectiveRadius, desc, zone);
     setSimulationActive(true);
-    const newReport = {
+    const newReport: CalamityReportRecord = {
       id: `${Date.now()}`,
       timestamp: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }),
       type,
@@ -1538,12 +1883,17 @@ export default function App() {
       locationLabel,
       lat,
       lng,
-      radiusKm,
+      radiusKm: effectiveRadius,
       affectedCount: affectedEmployeeIds.length,
       affectedEmployeeIds,
       magnitude: (type === 'Earthquake' && magnitude.trim()) ? magnitude.trim() : undefined,
       signalLevel: type === 'Typhoon' ? signalLevel : undefined,
       description: desc,
+      impactScope: type === 'Earthquake' ? scope : undefined,
+      islandGroup: type === 'Earthquake' ? resolvedIsland : undefined,
+      region: type === 'Earthquake' ? resolvedRegion : undefined,
+      trackPoints: type === 'Typhoon' ? trackPoints : undefined,
+      corridorKm: type === 'Typhoon' ? effectiveCorridor : undefined,
     };
     setCalamityReports((prev) => {
       if (existingIncident) {
@@ -1551,26 +1901,44 @@ export default function App() {
           report.id === existingIncident.id
             ? {
                 ...report,
-                type,
-                incidentName: fullName,
-                locationLabel,
-                lat,
-                lng,
-                radiusKm,
+                ...newReport,
+                id: report.id,
                 affectedEmployeeIds: Array.from(new Set([...report.affectedEmployeeIds, ...affectedEmployeeIds])),
                 affectedCount: Array.from(new Set([...report.affectedEmployeeIds, ...affectedEmployeeIds])).length,
-                magnitude: (type === 'Earthquake' && magnitude.trim()) ? magnitude.trim() : report.magnitude,
-                signalLevel: type === 'Typhoon' ? signalLevel : report.signalLevel,
-                description: desc,
               }
             : report
         ));
       }
       return [newReport, ...prev];
     });
-    pushLog(`📋 CALAMITY REPORT FILED: "${fullName}" by HR/Manager. ${calamityAffectedCount} personnel in ${radiusKm} km zone.`, 'err');
+
+    const zoneSummary =
+      type === 'Earthquake'
+        ? `${scopeLabel(scope)} · ${resolvedIsland}`
+        : type === 'Typhoon'
+        ? `track corridor ${effectiveCorridor} km`
+        : `${effectiveRadius} km radius`;
+    pushLog(`📋 CALAMITY REPORT FILED: "${fullName}" by HR/Manager. ${affectedEmployeeIds.length} personnel in zone (${zoneSummary}).`, 'err');
     setShowCalamityModal(false);
-    setCalamityForm(prev => ({ ...prev, locationPinned: false, description: '', locationLabel: '', hazardName: '', magnitude: '' }));
+    setCalamityForm((prev) => {
+      const cfg = getCalamityRadiusConfig(prev.type, {
+        magnitude: prev.type === 'Earthquake' ? (prev.magnitude || 'M5.5') : prev.magnitude,
+        signalLevel: prev.signalLevel,
+      });
+      return {
+        ...prev,
+        locationPinned: false,
+        description: '',
+        locationLabel: '',
+        hazardName: '',
+        magnitude: prev.type === 'Earthquake' ? (prev.magnitude || 'M5.5') : prev.magnitude,
+        radiusKm: cfg.defaultKm,
+        trackPoints: [],
+        corridorKm: corridorKmForTyphoonSignal(prev.signalLevel),
+        islandGroup: '',
+        region: '',
+      };
+    });
   };
 
   // Geocode the typed location label using Nominatim (OpenStreetMap) — no API key required
@@ -1609,7 +1977,36 @@ export default function App() {
   };
 
   const _applyGeocodedLocation = (lat: number, lng: number, displayName: string) => {
-    setCalamityForm(prev => ({ ...prev, lat, lng, locationPinned: true }));
+    const geo = resolveGeoAt(lat, lng);
+    setCalamityForm((prev) => {
+      if (prev.type === 'Typhoon') {
+        const nextTrack = [...prev.trackPoints, { lat, lng }];
+        return {
+          ...prev,
+          lat: nextTrack[0].lat,
+          lng: nextTrack[0].lng,
+          locationPinned: true,
+          trackPoints: nextTrack,
+          locationLabel: prev.locationLabel || displayName.split(',').slice(0, 2).join(',').trim(),
+          islandGroup: geo.islandGroup,
+          region: geo.region,
+        };
+      }
+      const scope = prev.type === 'Earthquake' ? prev.impactScope : prev.impactScope;
+      return {
+        ...prev,
+        lat,
+        lng,
+        locationPinned: true,
+        locationLabel: prev.locationLabel || displayName.split(',').slice(0, 2).join(',').trim(),
+        islandGroup: geo.islandGroup,
+        region: geo.region,
+        radiusKm:
+          prev.type === 'Earthquake'
+            ? displayRadiusKmForEarthquake(scope, prev.magnitude)
+            : prev.radiusKm,
+      };
+    });
     setGeocodeError(null);
     const L = (window as any).L || require('leaflet');
     const map = calamityLeafletRef.current;
@@ -1907,7 +2304,14 @@ export default function App() {
     );
   };
 
-  const handleTriggerSimulation = (name: string, lat: number, lng: number, radiusKm: number, desc: string) => {
+  const handleTriggerSimulation = (
+    name: string,
+    lat: number,
+    lng: number,
+    radiusKm: number,
+    desc: string,
+    zone?: Parameters<typeof isEmployeeInCalamityZone>[1]
+  ) => {
     let disasterId: 'fire' | 'earthquake' | 'typhoon' = 'fire';
     let subName = 'Barangay Block Outbreak';
     let icon = 'fire' as any;
@@ -1919,14 +2323,14 @@ export default function App() {
 
     if (name.includes('Flood') || name.includes('Typhoon')) {
       disasterId = 'typhoon';
-      subName = 'High wind-surge wall';
+      subName = 'Storm track corridor';
       icon = 'typhoon';
       color = 'cyan';
       colorClass = 'text-cyan-700 bg-cyan-50 border-cyan-200';
       hexColor = '#06b6d4';
     } else if (name.includes('Blast') || name.includes('Leak') || name.includes('Earthquake') || name.includes('Rupture')) {
       disasterId = 'earthquake';
-      subName = 'Infrastructure fracturing';
+      subName = 'Island / region shake zone';
       icon = 'earthquake';
       color = 'red';
       colorClass = 'text-rose-700 bg-rose-50 border-rose-200';
@@ -1953,37 +2357,43 @@ export default function App() {
     setEpicenter({ lat, lng, radiusKm });
     setSelectedEmployee(null);
 
-     // Apply immediate impact statuses using accurate GPS Haversine distance.
-     // Employees outside the incident radius are no longer auto-marked as safe/confirmed
-     // unless the user explicitly contacts or confirms them later.
-     setEmployees((prev) =>
-       prev.map((emp) => {
-         const empLat = emp.gpsLat ?? emp.lat;
-         const empLng = emp.gpsLng ?? emp.lng;
-         const dist = haversineKm(lat, lng, empLat, empLng);
-         if (dist <= radiusKm) {
-           return {
-             ...emp,
-             status: 'Yellow' as SafetyStatus,
-             contacted: false,
-             unresponsive: false,
-             safetyMessage: undefined,
-             rescueDispatched: false,
-           };
-         }
+    const activeZone = zone ?? {
+      type: (name.includes('Typhoon') ? 'Typhoon' : name.includes('Earthquake') ? 'Earthquake' : 'Fire') as 'Fire' | 'Earthquake' | 'Typhoon' | 'Other',
+      lat,
+      lng,
+      radiusKm,
+    };
 
-         return {
-           ...emp,
-           status: 'Yellow' as SafetyStatus,
-           contacted: false,
-           unresponsive: false,
-           safetyMessage: undefined,
-           rescueDispatched: false,
-         };
-       })
-     );
+    setEmployees((prev) =>
+      prev.map((emp) => {
+        if (isEmployeeInCalamityZone(emp, activeZone)) {
+          return {
+            ...emp,
+            status: 'Yellow' as SafetyStatus,
+            contacted: false,
+            unresponsive: false,
+            safetyMessage: undefined,
+            rescueDispatched: false,
+          };
+        }
+        return {
+          ...emp,
+          status: 'Green' as SafetyStatus,
+          contacted: false,
+          unresponsive: false,
+          safetyMessage: undefined,
+          rescueDispatched: false,
+        };
+      })
+    );
 
-    pushLog(`🚨 SIMULATION ACTIVE: "${name}" @ [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E] — Radius: ${radiusKm} km`, 'err');
+    const zoneNote =
+      activeZone.type === 'Earthquake' && activeZone.impactScope
+        ? scopeLabel(activeZone.impactScope)
+        : activeZone.type === 'Typhoon'
+        ? `track · ${activeZone.corridorKm ?? radiusKm * 2} km corridor`
+        : `${radiusKm} km radius`;
+    pushLog(`🚨 SIMULATION ACTIVE: "${name}" @ [${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E] — ${zoneNote}`, 'err');
     pushLog(`Description: ${desc}`, 'warn');
   };
 
@@ -4312,11 +4722,15 @@ export default function App() {
                 <span>Calamity Report</span>
               </button>
 
-              {/* Reset button — always visible */}
+              {/* Reset: statuses only for managers; admin may also clear active incident session */}
               <button
                 onClick={handleResetDatabase}
                 className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 border border-emerald-600 text-white rounded-md text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
-                title="Reset all employee statuses and clear active calamity report"
+                title={
+                  isManagerUser
+                    ? 'Reset team safety statuses only — does not delete team members or incident logs'
+                    : 'Reset employee safety statuses and clear the active calamity session (employees are reloaded, not deleted)'
+                }
               >
                 <RefreshCw className="w-3 h-3 shrink-0" />
                 <span>Reset</span>
@@ -4347,6 +4761,11 @@ export default function App() {
               selectedIslandGroup={isManagerUser || mapSoloEmployeeId ? null : selectedIslandGroup}
               selectedRegion={isManagerUser || mapSoloEmployeeId ? null : selectedRegion}
               teamFocusMode={isManagerUser || Boolean(mapSoloEmployeeId)}
+              trackPoints={activeTrackPoints}
+              corridorKm={activeCorridorKm}
+              impactScope={activeImpactScope}
+              zoneIslandGroup={activeZoneIslandGroup}
+              zoneRegion={activeZoneRegion}
             />
 
             {/* Static Overlay Card inside Metro Cebu Map View */}
@@ -6508,7 +6927,31 @@ export default function App() {
                       return (
                         <button
                           key={t}
-                          onClick={() => setCalamityForm(prev => ({ ...prev, type: t }))}
+                          onClick={() =>
+                            setCalamityForm((prev) => {
+                              const nextMagnitude = t === 'Earthquake' ? (prev.magnitude || 'M5.5') : prev.magnitude;
+                              const nextSignal = t === 'Typhoon' ? (prev.signalLevel || 'Signal No. 1') : prev.signalLevel;
+                              const scope = t === 'Earthquake' ? impactScopeForMagnitude(nextMagnitude) : prev.impactScope;
+                              const cfg = getCalamityRadiusConfig(t, {
+                                magnitude: nextMagnitude,
+                                signalLevel: nextSignal,
+                              });
+                              return {
+                                ...prev,
+                                type: t,
+                                magnitude: nextMagnitude,
+                                signalLevel: nextSignal,
+                                impactScope: scope,
+                                radiusKm:
+                                  t === 'Earthquake'
+                                    ? displayRadiusKmForEarthquake(scope, nextMagnitude)
+                                    : cfg.defaultKm,
+                                corridorKm: corridorKmForTyphoonSignal(nextSignal),
+                                trackPoints: t === 'Typhoon' ? prev.trackPoints : [],
+                                locationPinned: t === 'Typhoon' ? prev.trackPoints.length > 0 : prev.locationPinned,
+                              };
+                            })
+                          }
                           className={`flex items-center gap-2 py-2 px-3 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer ${
                             active
                               ? 'border-[#003399] bg-blue-50 text-[#002060] ring-2 ring-offset-1 ring-blue-400 shadow-sm'
@@ -6542,27 +6985,82 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Earthquake: Magnitude / Intensity */}
+                {/* Earthquake: Magnitude → local / region / island impact */}
                 {calamityForm.type === 'Earthquake' && (
                   <div className="flex flex-col gap-2">
                     <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                      Magnitude / Intensity
+                      Magnitude &amp; Impact Scope
                     </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Magnitude 6.2, Intensity V (Strong)..."
-                      value={calamityForm.magnitude}
-                      onChange={e => setCalamityForm(prev => ({ ...prev, magnitude: e.target.value }))}
-                      className="w-full border border-blue-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder:text-slate-400 transition"
-                    />
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {EARTHQUAKE_SCOPE_PRESETS.map((preset) => {
+                        const active = calamityForm.magnitude === preset.value;
+                        return (
+                          <button
+                            key={preset.value}
+                            type="button"
+                            onClick={() =>
+                              setCalamityForm((prev) => ({
+                                ...prev,
+                                magnitude: preset.value,
+                                impactScope: preset.scope,
+                                radiusKm: displayRadiusKmForEarthquake(preset.scope, preset.value),
+                              }))
+                            }
+                            className={`py-2 px-2 rounded-lg border-2 text-xs font-black transition-all cursor-pointer text-left ${
+                              active
+                                ? 'border-rose-500 bg-rose-50 text-rose-800 ring-2 ring-offset-1 ring-rose-300'
+                                : 'border-blue-100 bg-white text-slate-600 hover:border-rose-300 hover:bg-rose-50/50'
+                            }`}
+                          >
+                            {preset.label}
+                            <span className="block text-[9px] font-semibold text-slate-500 mt-0.5 leading-snug">
+                              {preset.blurb}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(['local', 'region', 'island'] as EarthquakeImpactScope[]).map((scope) => (
+                        <button
+                          key={scope}
+                          type="button"
+                          onClick={() =>
+                            setCalamityForm((prev) => ({
+                              ...prev,
+                              impactScope: scope,
+                              radiusKm: displayRadiusKmForEarthquake(scope, prev.magnitude),
+                            }))
+                          }
+                          className={`py-1.5 px-1 rounded-md border text-[9px] font-black uppercase tracking-wide ${
+                            calamityForm.impactScope === scope
+                              ? 'border-[#002060] bg-[#002060] text-white'
+                              : 'border-slate-200 bg-white text-slate-500'
+                          }`}
+                        >
+                          {scope === 'local' ? 'Local' : scope === 'region' ? 'Region' : 'Island'}
+                        </button>
+                      ))}
+                    </div>
+                    {calamityForm.locationPinned && (calamityForm.islandGroup || calamityForm.region) && (
+                      <p className="text-[10px] text-rose-700 font-semibold leading-snug bg-rose-50 border border-rose-100 rounded-lg px-2 py-1.5">
+                        Pin resolves to{' '}
+                        {calamityForm.impactScope === 'island'
+                          ? `all of ${calamityForm.islandGroup}`
+                          : calamityForm.impactScope === 'region'
+                          ? `Region ${calamityForm.region}`
+                          : 'a local radius around the epicenter'}
+                        . Strong quakes are felt island-wide (e.g. end-to-end Cebu).
+                      </p>
+                    )}
                     <p className="text-[10px] text-slate-400 font-mono leading-snug">
-                      PHIVOLCS Intensity Scale I (Scarcely Perceptible) – X (Completely Devastating)
+                      M6+ defaults to whole island group — not a small city circle.
                     </p>
                   </div>
                 )}
 
-                {/* Typhoon: Signal Level */}
+                {/* Typhoon: Signal + path corridor */}
                 {calamityForm.type === 'Typhoon' && (
                   <div className="flex flex-col gap-2">
                     <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center gap-1.5">
@@ -6579,10 +7077,18 @@ export default function App() {
                           'Signal No. 5': 'border-purple-600 bg-purple-50 text-purple-900',
                         };
                         const active = calamityForm.signalLevel === sig;
+                        const corridor = corridorKmForTyphoonSignal(sig);
                         return (
                           <button
                             key={sig}
-                            onClick={() => setCalamityForm(prev => ({ ...prev, signalLevel: sig }))}
+                            type="button"
+                            onClick={() =>
+                              setCalamityForm((prev) => ({
+                                ...prev,
+                                signalLevel: sig,
+                                corridorKm: corridor,
+                              }))
+                            }
                             className={`py-1.5 px-2 rounded-lg border-2 text-[10px] font-bold transition-all cursor-pointer text-center ${
                               active
                                 ? sigColors[sig] + ' ring-2 ring-offset-1 ring-blue-400 shadow-sm'
@@ -6590,13 +7096,53 @@ export default function App() {
                             }`}
                           >
                             {sig}
+                            <span className="block text-[8px] font-mono font-semibold opacity-70 mt-0.5">
+                              ~{corridor} km corridor
+                            </span>
                           </button>
                         );
                       })}
                     </div>
-                    <p className="text-[10px] text-slate-400 font-mono leading-snug">
-                      No. 1 = 30–60 km/h · No. 3 = 89–117 km/h · No. 5 = &gt;220 km/h
+                    <p className="text-[10px] text-cyan-800 font-semibold leading-snug bg-cyan-50 border border-cyan-100 rounded-lg px-2 py-1.5">
+                      Click the map along the storm path (at least 2 points). Typhoons use a track corridor, not a circle.
                     </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-slate-500">
+                        Path points: {calamityForm.trackPoints.length}
+                      </span>
+                      {calamityForm.trackPoints.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCalamityForm((prev) => ({
+                              ...prev,
+                              trackPoints: prev.trackPoints.slice(0, -1),
+                              locationPinned: prev.trackPoints.length > 1,
+                              lat: prev.trackPoints[0]?.lat ?? prev.lat,
+                              lng: prev.trackPoints[0]?.lng ?? prev.lng,
+                            }))
+                          }
+                          className="text-[10px] font-black text-slate-600 underline"
+                        >
+                          Undo point
+                        </button>
+                      )}
+                      {calamityForm.trackPoints.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCalamityForm((prev) => ({
+                              ...prev,
+                              trackPoints: [],
+                              locationPinned: false,
+                            }))
+                          }
+                          className="text-[10px] font-black text-rose-600 underline"
+                        >
+                          Clear path
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -6669,32 +7215,73 @@ export default function App() {
                   />
                 </div>
 
-                {/* Radius Slider */}
-                <div className="flex flex-col gap-2">
-                  <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                      Geofence Radius
-                    </span>
-                    <span className="text-[#003399] font-black text-xs bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
-                      {calamityForm.radiusKm.toFixed(2)} km
-                    </span>
-                  </label>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="1"
-                    step="0.05"
-                    value={calamityForm.radiusKm}
-                    onChange={e => setCalamityForm(prev => ({ ...prev, radiusKm: Number(e.target.value) }))}
-                    className="w-full accent-blue-600 cursor-pointer h-2"
-                  />
-                  <div className="flex justify-between text-[10px] text-slate-400 font-mono">
-                    <span>0.1 km</span>
-                    <span>0.5 km</span>
-                    <span>1 km</span>
+                {/* Zone controls: Fire/Other = radius; Typhoon = corridor; EQ region/island = scope */}
+                {calamityForm.type === 'Typhoon' ? (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-600"></span>
+                        Track Corridor Width
+                      </span>
+                      <span className="text-cyan-800 font-black text-xs bg-cyan-50 border border-cyan-200 rounded px-2 py-0.5">
+                        {Math.round(calamityForm.corridorKm)} km
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      min={40}
+                      max={300}
+                      step={10}
+                      value={calamityForm.corridorKm}
+                      onChange={(e) =>
+                        setCalamityForm((prev) => ({ ...prev, corridorKm: Number(e.target.value) }))
+                      }
+                      className="w-full accent-cyan-600 cursor-pointer h-2"
+                    />
+                    <p className="text-[10px] text-slate-500 leading-snug">
+                      Employees within half this width of the drawn storm path are marked affected.
+                    </p>
                   </div>
-                </div>
+                ) : calamityForm.type === 'Earthquake' && calamityForm.impactScope !== 'local' ? (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-[11px] text-rose-900 leading-snug">
+                    <p className="font-black uppercase tracking-wider text-[10px] mb-1">
+                      {scopeLabel(calamityForm.impactScope)} impact
+                    </p>
+                    No radius circle — everyone in the pinned{' '}
+                    {calamityForm.impactScope === 'island' ? 'island group' : 'region'} is in the shake zone
+                    (e.g. Cebu end-to-end for a Visayas epicenter).
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-black text-[#002060] uppercase tracking-widest flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                        Geofence Radius
+                      </span>
+                      <span className="text-[#003399] font-black text-xs bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+                        {calamityForm.radiusKm < 10
+                          ? `${calamityForm.radiusKm.toFixed(1)} km`
+                          : `${Math.round(calamityForm.radiusKm)} km`}
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      min={calamityForm.type === 'Earthquake' ? 10 : calamityRadiusConfig.min}
+                      max={calamityForm.type === 'Earthquake' ? 80 : calamityRadiusConfig.max}
+                      step={calamityForm.type === 'Earthquake' ? 5 : calamityRadiusConfig.step}
+                      value={
+                        calamityForm.type === 'Fire' || calamityForm.type === 'Other'
+                          ? clampCalamityRadiusKm(calamityForm.type, calamityForm.radiusKm)
+                          : Math.min(80, Math.max(10, calamityForm.radiusKm))
+                      }
+                      onChange={(e) =>
+                        setCalamityForm((prev) => ({ ...prev, radiusKm: Number(e.target.value) }))
+                      }
+                      className="w-full accent-blue-600 cursor-pointer h-2"
+                    />
+                    <p className="text-[10px] text-slate-500 leading-snug">{calamityRadiusConfig.hint}</p>
+                  </div>
+                )}
 
                 {/* Coordinates display */}
                 {calamityForm.locationPinned && (
@@ -6719,7 +7306,17 @@ export default function App() {
                     calamityAffectedCount > 0 ? 'text-[#002060]' : 'text-slate-300'
                   }`}>{calamityAffectedCount}</span>
                   <span className="text-[10px] text-slate-400 font-mono">
-                    {calamityForm.locationPinned ? `within ${calamityForm.radiusKm.toFixed(2)} km` : 'Pin a location to preview'}
+                    {calamityForm.type === 'Typhoon'
+                      ? calamityForm.trackPoints.length >= 2
+                        ? `along ${calamityForm.trackPoints.length}-point track · ${Math.round(calamityForm.corridorKm)} km corridor`
+                        : 'Draw at least 2 path points on the map'
+                      : calamityForm.type === 'Earthquake' && calamityForm.impactScope !== 'local'
+                      ? calamityForm.locationPinned
+                        ? scopeLabel(calamityForm.impactScope)
+                        : 'Pin an epicenter to preview'
+                      : calamityForm.locationPinned
+                      ? `within ${calamityForm.radiusKm < 10 ? calamityForm.radiusKm.toFixed(1) : Math.round(calamityForm.radiusKm)} km`
+                      : 'Pin a location to preview'}
                   </span>
                 </div>
 
@@ -6727,15 +7324,25 @@ export default function App() {
                 <button
                   id="submit-calamity-report-btn"
                   onClick={handleSubmitCalamityReport}
-                  disabled={!calamityForm.locationPinned}
+                  disabled={
+                    calamityForm.type === 'Typhoon'
+                      ? calamityForm.trackPoints.length < 2
+                      : !calamityForm.locationPinned
+                  }
                   className={`w-full py-3 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition-all ${
-                    calamityForm.locationPinned
+                    (calamityForm.type === 'Typhoon' ? calamityForm.trackPoints.length >= 2 : calamityForm.locationPinned)
                       ? 'bg-gradient-to-r from-[#002060] to-[#0055cc] hover:from-[#001848] hover:to-[#003faa] text-white shadow-lg hover:shadow-xl cursor-pointer active:scale-95'
                       : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                   }`}
                 >
                   <FileWarning className="w-4 h-4 shrink-0" />
-                  {calamityForm.locationPinned ? 'File Calamity Report & Activate' : 'Pin a Location First'}
+                  {calamityForm.type === 'Typhoon'
+                    ? calamityForm.trackPoints.length >= 2
+                      ? 'File Calamity Report & Activate'
+                      : 'Draw Storm Path First (2+ points)'
+                    : calamityForm.locationPinned
+                    ? 'File Calamity Report & Activate'
+                    : 'Pin a Location First'}
                 </button>
               </div>
 

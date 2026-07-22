@@ -1697,7 +1697,14 @@ loadEmployees()
       }
     });
 
-    app.delete('/api/incidents/active', async (_req, res) => {
+    app.delete('/api/incidents/active', async (req, res) => {
+      const role = String(req.query.role || req.header('x-user-role') || '').trim().toLowerCase();
+      if (role !== 'admin') {
+        return res.status(403).json({
+          message: 'Only admin accounts can clear active incident records from the database.',
+        });
+      }
+
       try {
         await supabase.from('calamity_incident_people').delete().gte('joined_at', '1900-01-01');
         await supabase.from('calamity_incidents').delete().gte('created_at', '1900-01-01');

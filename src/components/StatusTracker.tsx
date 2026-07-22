@@ -272,7 +272,7 @@ export default function StatusTracker({
           <button
           onClick={onResetDatabase}
           className="text-xs uppercase font-mono font-black text-slate-400 hover:text-red-700 flex items-center gap-1 cursor-pointer transition-colors px-2 py-1 hover:bg-red-50 rounded"
-          title="Reset database to initial Cebu employees list"
+          title="Reset employee safety statuses (does not delete the employee directory)"
         >
           <RefreshCw className="w-3.5 h-3.5 animate-spin-hover" />
           <span>RESET DATABASE</span>

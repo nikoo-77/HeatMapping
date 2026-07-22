@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Employee, DisasterConfig } from '../types';
 import { ALL_ISLAND_LOCATIONS, PHILIPPINE_REGIONS } from '../data_islands';
 import PersonAvatar from './PersonAvatar';
+import { isEmployeeInCalamityZone } from '../utils/calamityZone';
 import { Flame, MapPin, Search, Users, ShieldAlert, Crosshair, HelpCircle, Signal, Battery, Home, Info, Compass, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import L from 'leaflet';
@@ -110,6 +111,12 @@ interface InteractiveMapProps {
   selectedRegion?: string | null;
   /** When true, only the selected employee's pin is rendered (manager team focus or directory View in Map). */
   teamFocusMode?: boolean;
+  /** Typhoon storm track path points. */
+  trackPoints?: { lat: number; lng: number }[];
+  corridorKm?: number;
+  impactScope?: 'local' | 'region' | 'island' | null;
+  zoneIslandGroup?: string | null;
+  zoneRegion?: string | null;
 }
 
 export default function InteractiveMap({
@@ -126,6 +133,11 @@ export default function InteractiveMap({
   selectedIslandGroup = null,
   selectedRegion = null,
   teamFocusMode = false,
+  trackPoints = [],
+  corridorKm = 120,
+  impactScope = null,
+  zoneIslandGroup = null,
+  zoneRegion = null,
 }: InteractiveMapProps) {
   const mockMapRef = useRef<SVGSVGElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -376,23 +388,63 @@ export default function InteractiveMap({
 
     // 3. EMERGENCY INCIDENTS
     if (simulationActive) {
-      const centerGps = { lat: epicenter.lat, lng: epicenter.lng };
-      const radialHeatRings = [
-        { radiusMult: 0.15, fillColor: activeDisaster.id === 'typhoon' ? '#0891b2' : activeDisaster.id === 'earthquake' ? '#be123c' : '#db2777', opacity: 0.40 },
-        { radiusMult: 0.35, fillColor: activeDisaster.id === 'typhoon' ? '#06b6d4' : activeDisaster.id === 'earthquake' ? '#e11d48' : '#ef4444', opacity: 0.30 },
-        { radiusMult: 0.60, fillColor: activeDisaster.id === 'typhoon' ? '#22d3ee' : activeDisaster.id === 'earthquake' ? '#f43f5e' : '#f97316', opacity: 0.20 },
-        { radiusMult: 0.85, fillColor: activeDisaster.id === 'typhoon' ? '#67e8f9' : activeDisaster.id === 'earthquake' ? '#fb7185' : '#eab308', opacity: 0.12 },
-        { radiusMult: 1.00, fillColor: activeDisaster.id === 'typhoon' ? '#a5f3fc' : activeDisaster.id === 'earthquake' ? '#fca5a5' : '#fb923c', opacity: 0.05 },
-      ];
-      radialHeatRings.forEach(ring => {
-        L.circle([centerGps.lat, centerGps.lng], {
-          radius: getRadiusInMeters(epicenter.radiusKm) * ring.radiusMult,
-          color: 'transparent', fillColor: ring.fillColor, fillOpacity: ring.opacity, weight: 0, interactive: false,
-        }).addTo(layers);
-      });
+      const isTyphoonTrack = activeDisaster.id === 'typhoon' && trackPoints.length >= 2;
+      const isIslandOrRegionQuake =
+        activeDisaster.id === 'earthquake' && impactScope && impactScope !== 'local';
 
+      if (isTyphoonTrack) {
+        L.polyline(
+          trackPoints.map((p) => [p.lat, p.lng]),
+          { color: '#0891b2', weight: 5, opacity: 0.95 }
+        ).addTo(layers);
+        trackPoints.forEach((p, idx) => {
+          L.circle([p.lat, p.lng], {
+            radius: (corridorKm / 2) * 1000,
+            color: '#06b6d4',
+            fillColor: '#22d3ee',
+            fillOpacity: 0.1,
+            weight: 1,
+            dashArray: '4 6',
+            interactive: false,
+          }).addTo(layers);
+          L.circleMarker([p.lat, p.lng], {
+            radius: idx === 0 ? 7 : 5,
+            color: '#0e7490',
+            fillColor: '#67e8f9',
+            fillOpacity: 1,
+            weight: 2,
+          }).addTo(layers);
+        });
+      } else if (!isIslandOrRegionQuake) {
+        const centerGps = { lat: epicenter.lat, lng: epicenter.lng };
+        const radialHeatRings = [
+          { radiusMult: 0.15, fillColor: activeDisaster.id === 'typhoon' ? '#0891b2' : activeDisaster.id === 'earthquake' ? '#be123c' : '#db2777', opacity: 0.40 },
+          { radiusMult: 0.35, fillColor: activeDisaster.id === 'typhoon' ? '#06b6d4' : activeDisaster.id === 'earthquake' ? '#e11d48' : '#ef4444', opacity: 0.30 },
+          { radiusMult: 0.60, fillColor: activeDisaster.id === 'typhoon' ? '#22d3ee' : activeDisaster.id === 'earthquake' ? '#f43f5e' : '#f97316', opacity: 0.20 },
+          { radiusMult: 0.85, fillColor: activeDisaster.id === 'typhoon' ? '#67e8f9' : activeDisaster.id === 'earthquake' ? '#fb7185' : '#eab308', opacity: 0.12 },
+          { radiusMult: 1.00, fillColor: activeDisaster.id === 'typhoon' ? '#a5f3fc' : activeDisaster.id === 'earthquake' ? '#fca5a5' : '#fb923c', opacity: 0.05 },
+        ];
+        radialHeatRings.forEach(ring => {
+          L.circle([centerGps.lat, centerGps.lng], {
+            radius: getRadiusInMeters(epicenter.radiusKm) * ring.radiusMult,
+            color: 'transparent', fillColor: ring.fillColor, fillOpacity: ring.opacity, weight: 0, interactive: false,
+          }).addTo(layers);
+        });
+      } else if (zoneIslandGroup && ISLAND_GROUP_BOUNDS[zoneIslandGroup as keyof typeof ISLAND_GROUP_BOUNDS]) {
+        const [swLat, swLng, neLat, neLng] = ISLAND_GROUP_BOUNDS[zoneIslandGroup as keyof typeof ISLAND_GROUP_BOUNDS];
+        L.rectangle([[swLat, swLng], [neLat, neLng]], {
+          color: '#be123c',
+          weight: 2,
+          dashArray: '6 4',
+          fillColor: '#f43f5e',
+          fillOpacity: 0.12,
+          interactive: false,
+        }).addTo(layers);
+      }
+
+      const centerGps = { lat: epicenter.lat, lng: epicenter.lng };
       const epicenterMarker = L.marker([centerGps.lat, centerGps.lng], {
-        draggable: true,
+        draggable: !isTyphoonTrack,
         icon: L.divIcon({
           className: '',
           html: `
@@ -407,6 +459,9 @@ export default function InteractiveMap({
               </div>
               <div class="absolute -top-7 bg-indigo-950 border border-slate-700 text-white text-[8px] font-mono px-1.5 py-0.5 rounded shadow-md whitespace-nowrap uppercase font-black tracking-widest z-50 animate-bounce">
                 ${getDisasterEmoji(activeDisaster.icon)} ${getDisasterCategory(activeDisaster.name).toUpperCase()} INCIDENT
+                ${isIslandOrRegionQuake ? ` · ${(impactScope || '').toUpperCase()}` : ''}
+                ${zoneIslandGroup && isIslandOrRegionQuake ? ` · ${zoneIslandGroup}` : ''}
+                ${zoneRegion && impactScope === 'region' ? ` · ${zoneRegion}` : ''}
               </div>
             </div>
           `,
@@ -454,7 +509,7 @@ export default function InteractiveMap({
         });
       }
     }
-  }, [mapType, activeLayers, mapView, simulationActive, epicenter, activeDisaster, selectedIslandGroup, selectedCity]);
+  }, [mapType, activeLayers, mapView, simulationActive, epicenter, activeDisaster, selectedIslandGroup, selectedCity, trackPoints, corridorKm, impactScope, zoneIslandGroup, zoneRegion]);
 
   // Employee markers — shown for focused selections, selected team member, and disaster simulation
   useEffect(() => {
@@ -499,8 +554,23 @@ export default function InteractiveMap({
         }
 
         if (simulationActive) {
-          const distKm = haversineKm(epicenter.lat, epicenter.lng, empGps.lat, empGps.lng);
-          const isInsideDisaster = distKm <= epicenter.radiusKm;
+          const disasterType =
+            activeDisaster.id === 'typhoon'
+              ? 'Typhoon'
+              : activeDisaster.id === 'earthquake'
+              ? 'Earthquake'
+              : 'Fire';
+          const isInsideDisaster = isEmployeeInCalamityZone(emp, {
+            type: disasterType,
+            lat: epicenter.lat,
+            lng: epicenter.lng,
+            radiusKm: epicenter.radiusKm,
+            impactScope: impactScope ?? undefined,
+            islandGroup: zoneIslandGroup,
+            region: zoneRegion,
+            trackPoints,
+            corridorKm,
+          });
           return !activeLayers.showOnlyAffected || isInsideDisaster;
         }
 
@@ -512,8 +582,25 @@ export default function InteractiveMap({
           ? { lat: emp.gpsLat, lng: emp.gpsLng }
           : customToLatLng(emp.lng, emp.lat);
 
-        const distKm = haversineKm(epicenter.lat, epicenter.lng, empGps.lat, empGps.lng);
-        const isInsideDisaster = simulationActive && distKm <= epicenter.radiusKm;
+        const disasterType =
+          activeDisaster.id === 'typhoon'
+            ? 'Typhoon'
+            : activeDisaster.id === 'earthquake'
+            ? 'Earthquake'
+            : 'Fire';
+        const isInsideDisaster =
+          simulationActive &&
+          isEmployeeInCalamityZone(emp, {
+            type: disasterType,
+            lat: epicenter.lat,
+            lng: epicenter.lng,
+            radiusKm: epicenter.radiusKm,
+            impactScope: impactScope ?? undefined,
+            islandGroup: zoneIslandGroup,
+            region: zoneRegion,
+            trackPoints,
+            corridorKm,
+          });
 
         let pinColor = '#3b82f6';
         if (simulationActive) {
@@ -570,7 +657,7 @@ export default function InteractiveMap({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity, selectedRegion, teamFocusMode]);
+  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity, selectedRegion, teamFocusMode, trackPoints, corridorKm, impactScope, zoneIslandGroup, zoneRegion, activeDisaster.id]);
 
   // --- MOCK SVG CHOP MAP HANDLERS (As secondary fallback diagram mode) ---
   const handleMapClickOnMock = (e: React.MouseEvent<SVGSVGElement>) => {
