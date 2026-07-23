@@ -19,6 +19,7 @@
     "@types/multer": "^2.2.0",
     "@vis.gl/react-google-maps": "^1.8.3",
     "@vitejs/plugin-react": "^5.0.4",
+    "busboy": "^1.6.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "leaflet": "^1.9.4",
