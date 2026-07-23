@@ -249,6 +249,18 @@ async function queryTableRows<T>(tableName: string): Promise<T[]> {
   return rows;
 }
 
+async function queryTableRowsIfPresent<T>(tableName: string): Promise<T[]> {
+  try {
+    return await queryTableRows<T>(tableName);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    if (message.includes('does not exist') || message.includes('42p01')) {
+      return [];
+    }
+    throw error;
+  }
+}
+
 function composeFullName(row: EmpPersonalDetailsRow): string {
   const explicitName = String(row.employee_name ?? '').trim();
   if (explicitName) return explicitName;
@@ -261,12 +273,16 @@ function composeFullName(row: EmpPersonalDetailsRow): string {
 
 async function queryAllRowsFromNormalizedTables(): Promise<SupabaseEmployeeRow[]> {
   const [personalRows, infoRows, contactRows, addressRows, departmentRows] = await Promise.all([
-    queryTableRows<EmpPersonalDetailsRow>('emp_personal_details'),
-    queryTableRows<EmployeeInfoRow>('employee_info'),
-    queryTableRows<ContactRow>('contact'),
-    queryTableRows<AddressRow>('address'),
-    queryTableRows<DepartmentRow>('department'),
+    queryTableRowsIfPresent<EmpPersonalDetailsRow>('emp_personal_details'),
+    queryTableRowsIfPresent<EmployeeInfoRow>('employee_info'),
+    queryTableRowsIfPresent<ContactRow>('contact'),
+    queryTableRowsIfPresent<AddressRow>('address'),
+    queryTableRowsIfPresent<DepartmentRow>('department'),
   ]);
+
+  if (personalRows.length === 0) {
+    return [];
+  }
 
   const departmentById = new Map<string, DepartmentRow>();
   departmentRows.forEach((row) => {
