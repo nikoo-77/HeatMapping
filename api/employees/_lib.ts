@@ -56,6 +56,47 @@ interface SupabaseEmployeeRow {
   role?: string | null;
 }
 
+interface DepartmentRow {
+  department_id?: string | null;
+  department_name?: string | null;
+  du_id?: string | null;
+  employee_id?: string | null;
+}
+
+interface EmpPersonalDetailsRow {
+  employee_id?: string | null;
+  employee_name?: string | null;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  email_address?: string | null;
+}
+
+interface EmployeeInfoRow {
+  emp_info_id?: string | null;
+  employee_id?: string | null;
+  employee_role?: string | null;
+  position?: string | null;
+  facility?: string | null;
+  is_manager?: boolean | null;
+  department_id?: string | null;
+}
+
+interface ContactRow {
+  contact_id?: string | null;
+  employee_id?: string | null;
+  contact_number?: string | null;
+}
+
+interface AddressRow {
+  address_id?: string | null;
+  employee_id?: string | null;
+  complete_address?: string | null;
+  city_municipality?: string | null;
+  province?: string | null;
+  is_permanent?: boolean | null;
+}
+
 let supabaseClient: ReturnType<typeof createClient> | null = null;
 let cache: { data: Employee[]; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -185,24 +226,133 @@ function getIslandGroup(city: string, province: string): IslandGroup {
   return 'Visayas';
 }
 
+async function queryTableRows<T>(tableName: string): Promise<T[]> {
+  const supabase = getSupabaseClient();
+  const rows: T[] = [];
+  let from = 0;
+  const pageSize = 1000;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .select('*')
+      .range(from, from + pageSize - 1);
+
+    if (error) throw new Error(`Supabase query failed for ${tableName}: ${error.message}`);
+    if (!data || data.length === 0) break;
+
+    rows.push(...(data as T[]));
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
+function composeFullName(row: EmpPersonalDetailsRow): string {
+  const explicitName = String(row.employee_name ?? '').trim();
+  if (explicitName) return explicitName;
+
+  const parts = [row.first_name, row.middle_name, row.last_name]
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean);
+  return parts.join(' ');
+}
+
+async function queryAllRowsFromNormalizedTables(): Promise<SupabaseEmployeeRow[]> {
+  const [personalRows, infoRows, contactRows, addressRows, departmentRows] = await Promise.all([
+    queryTableRows<EmpPersonalDetailsRow>('emp_personal_details'),
+    queryTableRows<EmployeeInfoRow>('employee_info'),
+    queryTableRows<ContactRow>('contact'),
+    queryTableRows<AddressRow>('address'),
+    queryTableRows<DepartmentRow>('department'),
+  ]);
+
+  const departmentById = new Map<string, DepartmentRow>();
+  departmentRows.forEach((row) => {
+    const id = String(row.department_id ?? row.du_id ?? '').trim();
+    if (id) departmentById.set(id, row);
+  });
+
+  const infoByEmployeeId = new Map<string, EmployeeInfoRow>();
+  infoRows.forEach((row) => {
+    const id = String(row.employee_id ?? '').trim();
+    if (id) infoByEmployeeId.set(id, row);
+  });
+
+  const contactByEmployeeId = new Map<string, ContactRow>();
+  contactRows.forEach((row) => {
+    const id = String(row.employee_id ?? '').trim();
+    if (id) contactByEmployeeId.set(id, row);
+  });
+
+  const addressByEmployeeId = new Map<string, AddressRow>();
+  addressRows.forEach((row) => {
+    const id = String(row.employee_id ?? '').trim();
+    if (id) addressByEmployeeId.set(id, row);
+  });
+
+  return personalRows.map((personal) => {
+    const empId = String(personal.employee_id ?? '').trim();
+    const info = infoByEmployeeId.get(empId);
+    const address = addressByEmployeeId.get(empId);
+    const contact = contactByEmployeeId.get(empId);
+    const department = info?.department_id ? departmentById.get(String(info.department_id).trim()) : undefined;
+
+    return {
+      'Facility': info?.facility ?? '',
+      'Employee ID': empId,
+      'Employee Name': composeFullName(personal),
+      'Designation': (info?.position ?? info?.employee_role ?? 'Employee') as string,
+      'Managers ID': undefined,
+      'Managers Name': undefined,
+      'Manager\'s Name': undefined,
+      'DU': (department?.department_name ?? department?.du_id ?? 'Unknown') as string,
+      'PeopleManager/Individual Contributor': info?.is_manager ? 'Manager' : 'Individual Contributor',
+      'COMPLETE ADDRESS': address?.complete_address ?? '',
+      'PERMANENT- HOUSE NUMBER': undefined,
+      'PERMANENT - STREET': undefined,
+      'PERMANENT - BARANGAY': undefined,
+      'PERMANENT - CITY/MUNICIPALITY': address?.city_municipality ?? '',
+      'PERMANENT - PROVINCE': address?.province ?? '',
+      'PERMANENT - REGION': undefined,
+      'OFFICIAL EMAIL': personal.email_address ?? '',
+      'PERSONAL EMAIL': '',
+      'MOBILE NUMBER': contact?.contact_number ?? '',
+      role: info?.employee_role ?? info?.position ?? '',
+    } satisfies SupabaseEmployeeRow;
+  });
+}
+
 async function queryAllRows(): Promise<SupabaseEmployeeRow[]> {
   const supabase = getSupabaseClient();
   const allRows: SupabaseEmployeeRow[] = [];
   let from = 0;
   const pageSize = 1000;
 
-  while (true) {
-    const { data, error } = await supabase
-      .from('Employee Details')
-      .select('*')
-      .range(from, from + pageSize - 1);
+  try {
+    while (true) {
+      const { data, error } = await supabase
+        .from('Employee Details')
+        .select('*')
+        .range(from, from + pageSize - 1);
 
-    if (error) throw new Error(`Supabase query failed: ${error.message}`);
-    if (!data || data.length === 0) break;
+      if (error) throw new Error(`Supabase query failed: ${error.message}`);
+      if (!data || data.length === 0) break;
 
-    allRows.push(...(data as SupabaseEmployeeRow[]));
-    if (data.length < pageSize) break;
-    from += pageSize;
+      allRows.push(...(data as SupabaseEmployeeRow[]));
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+  } catch {
+    const normalizedRows = await queryAllRowsFromNormalizedTables();
+    if (normalizedRows.length > 0) return normalizedRows;
+    throw new Error('No employee rows found in Supabase.');
+  }
+
+  if (allRows.length === 0) {
+    const normalizedRows = await queryAllRowsFromNormalizedTables();
+    if (normalizedRows.length > 0) return normalizedRows;
   }
 
   return allRows;
