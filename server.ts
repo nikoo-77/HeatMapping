@@ -9,6 +9,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { resolveEmployeeRegion, parseRegionLabel } from './lib/regionResolver.js';
 
 const app = express();
+export default app;
 app.use(express.json());
 const PORT = Number(process.env.PORT || 5000);
 
@@ -2228,19 +2229,23 @@ loadEmployees()
       res.json({ message: 'Employee updated.', employeeId: req.params.id });
     });
 
-    app.listen(PORT, () => {
-      console.log(`Server listening on port ${PORT}`);
-      console.log(`Loaded ${employees.length} employees from Supabase.`);
-    }).on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        console.error(
-          `Port ${PORT} is already in use. Stop the other process (Vite proxies /api to localhost:${PORT}).`
-        );
-      } else {
-        console.error('Failed to start server:', err);
-      }
-      process.exit(1);
-    });
+    if (!process.env.VERCEL) {
+      app.listen(PORT, () => {
+        console.log(`Server listening on port ${PORT}`);
+        console.log(`Loaded ${employees.length} employees from Supabase.`);
+      }).on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          console.error(
+            `Port ${PORT} is already in use. Stop the other process (Vite proxies /api to localhost:${PORT}).`
+          );
+        } else {
+          console.error('Failed to start server:', err);
+        }
+        process.exit(1);
+      });
+    } else {
+      console.log(`Serverless mode: ${employees.length} employees loaded from Supabase.`);
+    }
   })
   .catch((err) => {
     console.error('Failed to load employees from Supabase:', err);
