@@ -372,8 +372,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<{
     username: string;
     role: 'official' | 'admin' | 'manager';
+    employeeId: string | null;
     profilePicture: string | null;
-  }>({ username: '', role: 'official', profilePicture: null });
+  }>({ username: '', role: 'official', employeeId: null, profilePicture: null });
   const [officialAccountEmails, setOfficialAccountEmails] = useState<string[]>([]);
   const [employeeAidForm, setEmployeeAidForm] = useState({
     aidTypes: ['Cash'] as AidType[],
@@ -819,10 +820,11 @@ export default function App() {
     setAidLoading(true);
     setAidError('');
     try {
-      const normalizedEmail = currentUser.username.trim().toLowerCase();
-      const activeEmployee = currentUser.role === 'manager' && currentUser.username === 'manager'
-        ? ({ id: 'manager-dummy', name: 'Manager' } as Pick<Employee, 'id' | 'name'>)
-        : employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedEmail);
+      const activeEmployee = currentUser.employeeId
+        ? employees.find((emp) => emp.id === currentUser.employeeId)
+        : currentUser.role === 'manager' && currentUser.username === 'manager'
+          ? ({ id: 'manager-dummy', name: 'Manager' } as Pick<Employee, 'id' | 'name'>)
+          : employees.find((emp) => emp.email?.trim().toLowerCase() === currentUser.username.trim().toLowerCase());
 
       const params = new URLSearchParams({
         viewerRole: currentUser.role,
@@ -858,7 +860,7 @@ export default function App() {
     } finally {
       setAidLoading(false);
     }
-  }, [currentUser.role, currentUser.username, employees, isAuthenticated]);
+  }, [currentUser.employeeId, currentUser.role, currentUser.username, employees, isAuthenticated]);
 
   useEffect(() => {
     loadAidApplications();
@@ -2553,6 +2555,7 @@ export default function App() {
       setCurrentUser({
         username: String(body.username).trim().toLowerCase(),
         role,
+        employeeId: body.employeeId ? String(body.employeeId).trim() : null,
         profilePicture: body.profilePicture ? String(body.profilePicture) : null,
       });
       setIsAuthenticated(true);
@@ -2574,7 +2577,7 @@ export default function App() {
   const handleLogout = () => {
     setIsAuthenticated(false);
     setAuthError('');
-    setCurrentUser({ username: '', role: 'official', profilePicture: null });
+    setCurrentUser({ username: '', role: 'official', employeeId: null, profilePicture: null });
     setShowPasswordPrompt(false);
     setShowChangePasswordModal(false);
   };
@@ -2586,6 +2589,11 @@ export default function App() {
   }, [employees]);
 
   const currentEmployee = useMemo(() => {
+    if (currentUser.employeeId) {
+      const byId = employees.find((emp) => emp.id === currentUser.employeeId);
+      if (byId) return byId;
+    }
+
     if (currentUser.role === 'manager' && currentUser.username === 'manager') {
       return {
         id: 'manager-dummy',
@@ -2612,7 +2620,7 @@ export default function App() {
     const normalizedEmail = currentUser.username.trim().toLowerCase();
     if (!normalizedEmail) return null;
     return employees.find((emp) => emp.email?.trim().toLowerCase() === normalizedEmail) ?? null;
-  }, [currentUser.username, currentUser.role, employees]);
+  }, [currentUser.employeeId, currentUser.username, currentUser.role, employees]);
 
   function findMatchingIncident(params: {
     type: string;
