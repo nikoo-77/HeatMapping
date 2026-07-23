@@ -1,4 +1,4 @@
-import { getEmployees, readManagerFromRequest, resolveManagerId } from './_lib';
+import { getEmployees, readManagerFromRequest, resolveManagerId } from './_lib.js';
 
 export default async function handler(req: any, res: any) {
 	try {

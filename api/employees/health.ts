@@ -1,4 +1,4 @@
-import { getHealth } from './_lib';
+import { getHealth } from './_lib.js';
 
 export default async function handler(req: any, res: any) {
   const method = String(req.method || 'GET').toUpperCase();
