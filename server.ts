@@ -1290,6 +1290,7 @@ function isAllowedAttachment(file: Express.Multer.File): boolean {
 
 // ── Accounts / login (persisted in Supabase `accounts`) ───────────────────────
 type AccountRole = 'admin' | 'manager' | 'official';
+type SwitchableRole = 'admin' | 'manager' | 'official';
 
 const SYSTEM_ACCOUNT_IDS = {
   admin: 'ADMIN',
@@ -1304,6 +1305,46 @@ interface AccountRow {
   display_name: string | null;
   profile_picture: string | null;
   is_active: boolean;
+}
+
+function normalizeAccountText(value: string | null | undefined): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveSwitchableRoles(account: AccountRow): { canSwitchRoles: boolean; switchableRoles: SwitchableRole[] } {
+  const employeeId = normalizeAccountText(account.employee_id);
+  const username = normalizeAccountText(account.username);
+  const displayName = normalizeAccountText(account.display_name);
+
+  const isPrivilegedAccount =
+    employeeId === '7rf' ||
+    username === '7rf' ||
+    username === 'zulueta vladimir' ||
+    displayName === 'zulueta vladimir';
+
+  if (!isPrivilegedAccount) {
+    if (account.access_role === 'manager') {
+      return {
+        canSwitchRoles: true,
+        switchableRoles: ['official', 'manager'],
+      };
+    }
+
+    return {
+      canSwitchRoles: false,
+      switchableRoles: [account.access_role],
+    };
+  }
+
+  return {
+    canSwitchRoles: true,
+    switchableRoles: ['official', 'manager', 'admin'],
+  };
 }
 
 function hashPassword(password: string): string {
@@ -1542,6 +1583,8 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid username or password.' });
     }
 
+    const { canSwitchRoles, switchableRoles } = resolveSwitchableRoles(account);
+
     const employee =
       (account.employee_id
         ? allEmployees.find((e) => e.id === account.employee_id)
@@ -1558,6 +1601,8 @@ app.post('/api/login', async (req, res) => {
       // Prompt employees still on the seeded default to change password after login.
       mustChangePassword:
         account.access_role === 'official' && verifyPassword('123456', account.password_hash),
+      canSwitchRoles,
+      switchableRoles,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Login failed.';

@@ -233,6 +233,8 @@ type PersistedIncidentSnapshot = {
   activeDisaster: DisasterConfig;
 };
 
+type AppRole = 'official' | 'admin' | 'manager';
+
 const INCIDENT_STORAGE_KEYS = {
   calamityReports: 'island_map_calamity_reports',
   pendingReports: 'island_map_pending_employee_reports',
@@ -371,10 +373,12 @@ export default function App() {
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
   const [currentUser, setCurrentUser] = useState<{
     username: string;
-    role: 'official' | 'admin' | 'manager';
+    role: AppRole;
     employeeId: string | null;
     profilePicture: string | null;
   }>({ username: '', role: 'official', employeeId: null, profilePicture: null });
+  const [canSwitchRoles, setCanSwitchRoles] = useState(false);
+  const [switchableRoles, setSwitchableRoles] = useState<AppRole[]>(['official']);
   const [officialAccountEmails, setOfficialAccountEmails] = useState<string[]>([]);
   const [employeeAidForm, setEmployeeAidForm] = useState({
     aidTypes: ['Cash'] as AidType[],
@@ -2547,10 +2551,30 @@ export default function App() {
         throw new Error(body?.message || 'Invalid username or password.');
       }
 
-      const role = body.role as 'admin' | 'manager' | 'official';
+      const role = body.role as AppRole;
       if (!role || !body.username) {
         throw new Error('Login response was incomplete.');
       }
+
+      const parsedSwitchableRoles = Array.isArray(body.switchableRoles)
+        ? body.switchableRoles.filter((value: unknown): value is AppRole => (
+          value === 'official' || value === 'manager' || value === 'admin'
+        ))
+        : [];
+      const normalizedSwitchableRoles = Array.from(new Set([
+        role,
+        ...parsedSwitchableRoles,
+      ]));
+
+      // Backward-compatible fallback: managers should always be able to switch
+      // to employee mode even if the API response is from an older deployment.
+      if (role === 'manager' && !normalizedSwitchableRoles.includes('official')) {
+        normalizedSwitchableRoles.push('official');
+      }
+
+      const allowRoleSwitch =
+        (body.canSwitchRoles === true && normalizedSwitchableRoles.length > 1) ||
+        role === 'manager';
 
       setCurrentUser({
         username: String(body.username).trim().toLowerCase(),
@@ -2558,6 +2582,8 @@ export default function App() {
         employeeId: body.employeeId ? String(body.employeeId).trim() : null,
         profilePicture: body.profilePicture ? String(body.profilePicture) : null,
       });
+      setCanSwitchRoles(allowRoleSwitch);
+      setSwitchableRoles(normalizedSwitchableRoles);
       setIsAuthenticated(true);
       setShowPasswordPrompt(role === 'official' && body.mustChangePassword === true);
       setShowChangePasswordModal(false);
@@ -2578,9 +2604,40 @@ export default function App() {
     setIsAuthenticated(false);
     setAuthError('');
     setCurrentUser({ username: '', role: 'official', employeeId: null, profilePicture: null });
+    setCanSwitchRoles(false);
+    setSwitchableRoles(['official']);
     setShowPasswordPrompt(false);
     setShowChangePasswordModal(false);
   };
+
+  const handleRoleSwitch = (nextRole: AppRole) => {
+    if (!canSwitchRoles) return;
+    if (!switchableRoles.includes(nextRole)) return;
+    if (nextRole === currentUser.role) return;
+
+    setCurrentUser((prev) => ({ ...prev, role: nextRole }));
+    setShowPasswordPrompt(false);
+    setShowChangePasswordModal(false);
+    setEmployeePortalPage('dashboard');
+    setActivePage(nextRole === 'manager' ? 'team-overview' : 'dashboard');
+    pushLog(`Access mode switched to ${nextRole}.`, 'info');
+  };
+
+  const showAccessModeSelector = canSwitchRoles && switchableRoles.length > 1;
+
+  const roleModeLabel = (role: AppRole) => {
+    if (role === 'official') return 'Employee';
+    if (role === 'manager') return 'Manager';
+    return 'Admin';
+  };
+
+  const unifiedHeaderTitle = showAccessModeSelector
+    ? 'Crisis Intelligence Dashboard'
+    : null;
+
+  const unifiedHeaderSubtitle = showAccessModeSelector
+    ? `Signed in as ${roleModeLabel(currentUser.role)} mode.`
+    : null;
 
   const managerTeamMemberIds = ['T8U', 'T8S'];
 
@@ -3121,27 +3178,79 @@ export default function App() {
                 <MapIcon className="w-5 h-5 shrink-0" />
               </div>
               <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#002060] uppercase animate-fade-in">
-                Employee Self-Service Portal
+                {unifiedHeaderTitle ?? 'Employee Self-Service Portal'}
               </h1>
             </div>
             <p className="text-xs text-slate-500 font-medium max-w-xl mt-1">
-              Submit aid requests, report incident impact, and flag yourself as affected from one secure workspace.
+              {unifiedHeaderSubtitle ?? 'Submit aid requests, report incident impact, and flag yourself as affected from one secure workspace.'}
             </p>
           </div>
 
-          <UserAccountMenu
-            displayName={currentEmployee?.name ?? currentUser.username}
-            username={currentUser.username}
-            roleLabel={currentUser.role}
-            avatarText={currentEmployee?.avatar}
-            avatarUrl={currentUser.profilePicture}
-            onAccountSettings={() => {
-              setShowPasswordPrompt(false);
-              setShowChangePasswordModal(false);
-              setEmployeePortalPage('settings');
-            }}
-            onLogout={handleLogout}
-          />
+          <div className="flex items-center gap-4 shrink-0">
+            {showAccessModeSelector ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">Access mode</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {switchableRoles.map((role) => {
+                    const active = currentUser.role === role;
+                    return (
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() => handleRoleSwitch(role)}
+                        className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                          active
+                            ? 'border-[#002060] bg-[#002060] text-white'
+                            : 'border-slate-300 bg-white text-slate-700 hover:border-[#002060] hover:text-[#002060]'
+                        }`}
+                      >
+                        {roleModeLabel(role)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            <UserAccountMenu
+              displayName={currentEmployee?.name ?? currentUser.username}
+              username={currentUser.username}
+              roleLabel={currentUser.role}
+              avatarText={currentEmployee?.avatar}
+              avatarUrl={currentUser.profilePicture}
+              onAccountSettings={() => {
+                setShowPasswordPrompt(false);
+                setShowChangePasswordModal(false);
+                setEmployeePortalPage('settings');
+              }}
+              onLogout={handleLogout}
+            />
+
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 bg-[#0a4d92] flex items-center justify-center rounded-sm">
+                  <div className="grid grid-cols-3 gap-0.5 p-0.5">
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                    <div className="w-0.75 h-0.75 bg-white rounded-full"></div>
+                  </div>
+                </div>
+                <span className="text-[#0a4d92] font-black text-base tracking-tight leading-none font-sans">Innodata</span>
+              </div>
+
+              <div className="w-px h-6 bg-slate-300"></div>
+
+              <div className="bg-[#ffcb05] px-2 py-0.5 flex items-center justify-center rounded">
+                <span className="text-[#dd1c1a] font-black text-xs tracking-tighter italic font-serif leading-none">savills</span>
+              </div>
+            </div>
+          </div>
         </header>
 
         <div className="flex flex-1 min-h-0">
@@ -4183,19 +4292,43 @@ export default function App() {
               <MapIcon className="w-5 h-5 shrink-0" />
             </div>
             <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#002060] uppercase animate-fade-in">
-              {isManagerUser ? 'Manager Crisis Intelligence Dashboard' : 'CSR Crisis Intelligence Dashboard'}
+              {unifiedHeaderTitle ?? (isManagerUser ? 'Manager Crisis Intelligence Dashboard' : 'CSR Crisis Intelligence Dashboard')}
             </h1>
           </div>
           <p className="text-xs text-slate-500 font-medium max-w-xl mt-1">
-            {isManagerUser
+            {unifiedHeaderSubtitle ?? (isManagerUser
               ? `Manager workspace for ${currentEmployee?.name ?? 'your team'}; direct report oversight and approval controls.`
               : `Analyzing workforce and satellite footprints for ${scopedEmployees.length} personnel across the Philippine Islands.`
-            }
+            )}
           </p>
         </div>
 
         {/* Right Side: avatar account menu + co-labelled corporate logos */}
         <div className="flex items-center gap-4 shrink-0">
+          {showAccessModeSelector ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+              <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">Access mode</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {switchableRoles.map((role) => {
+                  const active = currentUser.role === role;
+                  return (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => handleRoleSwitch(role)}
+                      className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                        active
+                          ? 'border-[#002060] bg-[#002060] text-white'
+                          : 'border-slate-300 bg-white text-slate-700 hover:border-[#002060] hover:text-[#002060]'
+                      }`}
+                    >
+                      {roleModeLabel(role)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           <UserAccountMenu
             displayName={currentEmployee?.name ?? currentUser.username}
             username={currentUser.username}

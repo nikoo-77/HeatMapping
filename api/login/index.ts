@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { scryptSync, timingSafeEqual } from 'crypto';
 
 type AccountRole = 'admin' | 'manager' | 'official';
+type SwitchableRole = 'admin' | 'manager' | 'official';
 
 interface AccountRow {
   employee_id: string;
@@ -11,6 +12,46 @@ interface AccountRow {
   display_name: string | null;
   profile_picture: string | null;
   is_active: boolean;
+}
+
+function normalizeAccountText(value: string | null | undefined): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveSwitchableRoles(account: AccountRow): { canSwitchRoles: boolean; switchableRoles: SwitchableRole[] } {
+  const employeeId = normalizeAccountText(account.employee_id);
+  const username = normalizeAccountText(account.username);
+  const displayName = normalizeAccountText(account.display_name);
+
+  const isPrivilegedAccount =
+    employeeId === '7rf' ||
+    username === '7rf' ||
+    username === 'zulueta vladimir' ||
+    displayName === 'zulueta vladimir';
+
+  if (!isPrivilegedAccount) {
+    if (account.access_role === 'manager') {
+      return {
+        canSwitchRoles: true,
+        switchableRoles: ['official', 'manager'],
+      };
+    }
+
+    return {
+      canSwitchRoles: false,
+      switchableRoles: [account.access_role],
+    };
+  }
+
+  return {
+    canSwitchRoles: true,
+    switchableRoles: ['official', 'manager', 'admin'],
+  };
 }
 
 function getSupabase() {
@@ -78,6 +119,8 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ message: 'Invalid username or password.' });
     }
 
+    const { canSwitchRoles, switchableRoles } = resolveSwitchableRoles(account);
+
     return res.status(200).json({
       username: account.username,
       role: account.access_role,
@@ -86,6 +129,8 @@ export default async function handler(req: any, res: any) {
       profilePicture: account.profile_picture ?? null,
       mustChangePassword:
         account.access_role === 'official' && verifyPassword('123456', account.password_hash),
+      canSwitchRoles,
+      switchableRoles,
     });
   } catch (error: any) {
     return res.status(500).json({
