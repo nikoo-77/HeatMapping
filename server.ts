@@ -1925,9 +1925,9 @@ loadEmployees()
       const role = String(req.body?.role || req.query.role || req.header('x-user-role') || '')
         .trim()
         .toLowerCase();
-      if (role !== 'admin' && role !== 'manager') {
+      if (role !== 'admin') {
         return res.status(403).json({
-          message: 'Only manager or admin accounts can resolve or reopen incidents.',
+          message: 'Only admin accounts can resolve or reopen incidents.',
         });
       }
 

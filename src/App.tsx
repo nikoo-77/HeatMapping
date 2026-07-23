@@ -2294,8 +2294,8 @@ export default function App() {
     const report = calamityReports.find((r) => r.id === reportId);
     if (!report) return;
 
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') {
-      pushLog('ACCESS DENIED: Only managers and admins can resolve incidents.', 'err');
+    if (currentUser.role !== 'admin') {
+      pushLog('ACCESS DENIED: Only admins can resolve or reopen incidents.', 'err');
       return;
     }
 
@@ -2306,7 +2306,7 @@ export default function App() {
       if (!confirmed) return;
     }
 
-    const role = currentUser.role === 'admin' ? 'admin' : 'manager';
+    const role = 'admin';
 
     try {
       const res = await fetch(`/api/incidents/${encodeURIComponent(reportId)}/resolve`, {
@@ -2346,7 +2346,7 @@ export default function App() {
           setActiveZoneRegion(null);
         }
         pushLog(
-          `✅ INCIDENT RESOLVED: "${report.incidentName}" marked finished by ${role}. Saved to incident log.`,
+          `✅ INCIDENT RESOLVED: "${report.incidentName}" marked finished by admin. Saved to incident log.`,
           'success'
         );
         setIncidentStatusFilter('Resolved');
@@ -5795,27 +5795,29 @@ export default function App() {
                                 : 'No employees were in zone at time of filing.'}
                             </span>
                           )}
-                          {!isResolved ? (
-                            <button
-                              type="button"
-                              onClick={() => handleResolveIncident(r.id, 'resolve')}
-                              className="flex items-center gap-1.5 text-[11px] font-black text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-700 px-3 py-1.5 rounded-lg transition cursor-pointer shadow-sm active:scale-95"
-                              title="Mark this incident finished and save it to the database log"
-                            >
-                              <CheckCircle className="w-3.5 h-3.5" />
-                              Mark Finished
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleResolveIncident(r.id, 'reopen')}
-                              className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg transition cursor-pointer"
-                              title="Reopen this incident"
-                            >
-                              <RefreshCw className="w-3.5 h-3.5" />
-                              Reopen
-                            </button>
-                          )}
+                          {currentUser.role === 'admin' ? (
+                            !isResolved ? (
+                              <button
+                                type="button"
+                                onClick={() => handleResolveIncident(r.id, 'resolve')}
+                                className="flex items-center gap-1.5 text-[11px] font-black text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-700 px-3 py-1.5 rounded-lg transition cursor-pointer shadow-sm active:scale-95"
+                                title="Mark this incident finished and save it to the database log"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                Mark Finished
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleResolveIncident(r.id, 'reopen')}
+                                className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg transition cursor-pointer"
+                                title="Reopen this incident"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                Reopen
+                              </button>
+                            )
+                          ) : null}
                         </div>
                       </div>
 
