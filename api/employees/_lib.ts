@@ -62,10 +62,10 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function getSupabaseClient() {
   const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+  const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseSecretKey) {
-    throw new Error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY in environment variables.');
+    throw new Error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) in environment variables.');
   }
 
   if (!supabaseClient) {
@@ -332,10 +332,12 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
 async function attachProfilePictures(employees: Employee[]): Promise<Employee[]> {
   try {
     const supabase = getSupabaseClient();
-    const { data, error } = await supabase
+    const response = await supabase
       .from('accounts')
       .select('employee_id, profile_picture')
       .not('profile_picture', 'is', null);
+    const data = (response.data ?? []) as Array<{ employee_id?: string; profile_picture?: string | null }>;
+    const error = response.error;
 
     if (error || !data || data.length === 0) {
       return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
@@ -428,6 +430,6 @@ export function getHealth() {
   return {
     ok: true,
     hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
-    hasSupabaseSecretKey: Boolean(process.env.SUPABASE_SECRET_KEY),
+    hasSupabaseSecretKey: Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY),
   };
 }

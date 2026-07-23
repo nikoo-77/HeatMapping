@@ -157,6 +157,7 @@ export default function InteractiveMap({
 
   // Layer switches
   const [activeLayers, setActiveLayers] = useState({
+    showHeatmap: false,
     showOnlyAffected: false,
     showLocalRoads: true,
     showSafetyLandmarks: true,
@@ -577,6 +578,66 @@ export default function InteractiveMap({
         return true;
       }).slice(0, maxMarkers);
 
+      if (activeLayers.showHeatmap) {
+        const heatBuckets = new Map<string, { lat: number; lng: number; count: number }>();
+        const heatStep = currentZoom >= 13 ? 0.0018 : currentZoom >= 11 ? 0.0035 : currentZoom >= 9 ? 0.006 : 0.010;
+
+        visibleEmployees.forEach((emp) => {
+          const empGps = emp.gpsLat && emp.gpsLng
+            ? { lat: emp.gpsLat, lng: emp.gpsLng }
+            : customToLatLng(emp.lng, emp.lat);
+          const bucketLat = Math.round(empGps.lat / heatStep) * heatStep;
+          const bucketLng = Math.round(empGps.lng / heatStep) * heatStep;
+          const key = `${bucketLat.toFixed(4)}:${bucketLng.toFixed(4)}`;
+          const bucket = heatBuckets.get(key);
+          if (bucket) {
+            bucket.count += 1;
+            bucket.lat = (bucket.lat * (bucket.count - 1) + empGps.lat) / bucket.count;
+            bucket.lng = (bucket.lng * (bucket.count - 1) + empGps.lng) / bucket.count;
+          } else {
+            heatBuckets.set(key, { lat: empGps.lat, lng: empGps.lng, count: 1 });
+          }
+        });
+
+        const palette = (count: number) => {
+          if (count >= 14) return { fill: '#7c3aed', core: '#ef4444' };
+          if (count >= 10) return { fill: '#ef4444', core: '#f97316' };
+          if (count >= 6) return { fill: '#f97316', core: '#facc15' };
+          if (count >= 3) return { fill: '#facc15', core: '#22c55e' };
+          return { fill: '#38bdf8', core: '#7dd3fc' };
+        };
+
+        Array.from(heatBuckets.values()).forEach((bucket) => {
+          const intensity = Math.min(1, bucket.count / 16);
+          const radius = 12000 + bucket.count * 2200;
+          const colors = palette(bucket.count);
+
+          [1.0, 0.64, 0.34].forEach((multiplier, index) => {
+            const fillOpacity = index === 0 ? 0.26 + intensity * 0.18 : index === 1 ? 0.16 + intensity * 0.10 : 0.08 + intensity * 0.06;
+            L.circle([bucket.lat, bucket.lng], {
+              radius: radius * multiplier,
+              color: 'transparent',
+              fillColor: index === 2 ? colors.core : colors.fill,
+              fillOpacity,
+              weight: 0,
+              interactive: false,
+            }).addTo(empLayer);
+          });
+
+          L.circleMarker([bucket.lat, bucket.lng], {
+            radius: 5 + bucket.count * 0.6,
+            color: '#ffffff',
+            weight: 1.5,
+            fillColor: '#0f172a',
+            fillOpacity: 0.75,
+            opacity: 1,
+            interactive: false,
+          }).addTo(empLayer).bindTooltip(`${bucket.count} employees`, { direction: 'top', offset: [0, -6] });
+        });
+
+        return;
+      }
+
       visibleEmployees.forEach((emp) => {
         const empGps = emp.gpsLat && emp.gpsLng
           ? { lat: emp.gpsLat, lng: emp.gpsLng }
@@ -657,7 +718,7 @@ export default function InteractiveMap({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity, selectedRegion, teamFocusMode, trackPoints, corridorKm, impactScope, zoneIslandGroup, zoneRegion, activeDisaster.id]);
+  }, [mapViewportVersion, currentZoom, employees, epicenter, selectedEmployee, simulationActive, activeLayers.showHeatmap, activeLayers.showOnlyAffected, selectedIslandGroup, selectedCity, selectedRegion, teamFocusMode, trackPoints, corridorKm, impactScope, zoneIslandGroup, zoneRegion, activeDisaster.id]);
 
   // --- MOCK SVG CHOP MAP HANDLERS (As secondary fallback diagram mode) ---
   const handleMapClickOnMock = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -684,6 +745,16 @@ export default function InteractiveMap({
       {/* Mini layers bar above map container */}
       <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-3 text-xs font-mono text-slate-600 shrink-0">
         <div className="flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-1.5 cursor-pointer py-0.5 text-[10px] uppercase font-bold text-slate-700 select-none">
+            <input
+              type="checkbox"
+              checked={activeLayers.showHeatmap}
+              onChange={(e) => setActiveLayers(prev => ({ ...prev, showHeatmap: e.target.checked }))}
+              className="accent-[#002060] cursor-pointer h-3 w-3"
+            />
+            <span>Density Heatmap</span>
+          </label>
+
           <label className="flex items-center gap-1.5 cursor-pointer py-0.5 text-[10px] uppercase font-bold text-slate-700 select-none">
             <input
               type="checkbox"

@@ -17,8 +17,8 @@ const ALLOWED_PROFILE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SECRET_KEY;
-  if (!url || !key) throw new Error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY.');
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY).');
   return createClient(url, key);
 }
 
