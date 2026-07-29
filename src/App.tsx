@@ -31,7 +31,7 @@ import {
   AlertOctagon, Sparkles, Map as MapIcon, Compass, Radio, Users, Battery, Search, HelpCircle, AlertTriangle,
   FileWarning, X, MapPin, Crosshair, LayoutDashboard, BookUser, ClipboardList, FileSpreadsheet, Plus, MoreVertical, Trash2,
   HeartHandshake, Siren, ShieldCheck, TrendingUp, DollarSign, Clock, ChevronRight, BadgeCheck, Zap, Layers,
-  Paperclip, Eye, Download, KeyRound
+  Paperclip, Eye, Download, KeyRound, Pencil
 } from 'lucide-react';
 
 // ── Government Calamity Links Footer ─────────────────────────────────────────
@@ -440,20 +440,23 @@ export default function App() {
   const [dirIsland, setDirIsland] = useState<'All' | 'Luzon' | 'Visayas' | 'Mindanao'>('All');
   const [dirRegion, setDirRegion] = useState<string>('All');
   const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [empFormSaving, setEmpFormSaving] = useState(false);
+  const [empFormError, setEmpFormError] = useState('');
   const [dirActionsMenuId, setDirActionsMenuId] = useState<string | null>(null);
   /** When set, Overview map shows only this employee's pin (avoids rendering all FTEs). */
   const [mapSoloEmployeeId, setMapSoloEmployeeId] = useState<string | null>(null);
-  const [newEmpForm, setNewEmpForm] = useState({
+  const emptyEmpForm = {
+    employeeId: '',
     name: '',
-    role: 'Data Analyst',
-    department: 'AI Operations',
-    phone: '',
     email: '',
+    department: '',
     address: '',
-    islandGroup: 'Luzon' as 'Luzon' | 'Visayas' | 'Mindanao',
-    gpsLat: 14.5995,
-    gpsLng: 120.9842,
-  });
+    phone: '',
+    managersId: '',
+    managersName: '',
+  };
+  const [newEmpForm, setNewEmpForm] = useState(emptyEmpForm);
 
   // ── Calamity Report History ──────────────────────────────────────────────
   const [calamityReports, setCalamityReports] = useState<CalamityReportRecord[]>(() => readCalamityReportsFromStorage());
@@ -1353,67 +1356,123 @@ export default function App() {
   };
 
   const handleAddEmployee = (newEmp: Employee) => {
-    setEmployees((prev) => [newEmp, ...prev]);
+    setEmployees((prev) => {
+      const without = prev.filter((e) => e.id !== newEmp.id);
+      return [newEmp, ...without];
+    });
     pushLog(`Registered new staff residence coordinates: ${newEmp.name} in ${newEmp.address}.`, 'success');
   };
 
-  const gpsToGridCoords = (gpsLat: number, gpsLng: number) => {
-    const LAT_MIN = 4.5, LAT_MAX = 21.5;
-    const LNG_MIN = 116.0, LNG_MAX = 127.0;
-    const gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
-    const gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
-    return {
-      gridX: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
-      gridY: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
-    };
+  const openAddEmployeeModal = () => {
+    setEditingEmployeeId(null);
+    setEmpFormError('');
+    setNewEmpForm(emptyEmpForm);
+    setShowAddEmployeeModal(true);
   };
 
-  const handleCreateEmployeeFromDirectory = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newEmpForm.name.trim()) return;
-
-    const { gridX, gridY } = gpsToGridCoords(newEmpForm.gpsLat, newEmpForm.gpsLng);
-    const nameParts = newEmpForm.name.trim().split(/\s+/);
-    const firstName = nameParts[0] ?? '';
-    const lastName = nameParts.slice(1).join(' ') || (nameParts[0] ?? '');
-    const avatar = (firstName[0] ?? '') + (lastName[0] ?? '');
-    const autoEmail = newEmpForm.email.trim() ||
-      `${firstName.toLowerCase()}.${lastName.toLowerCase().replace(/\s+/g, '')}@innodata.com`;
-
-    const newEmp: Employee = {
-      id: `emp-custom-${Date.now()}`,
-      name: newEmpForm.name.trim(),
-      role: newEmpForm.role.trim() || 'Data Analyst',
-      department: newEmpForm.department,
-      lat: gridY,
-      lng: gridX,
-      gpsLat: Number(newEmpForm.gpsLat),
-      gpsLng: Number(newEmpForm.gpsLng),
-      carrier: 'Globe',
-      normalSignalStrength: -75,
-      battery: Math.round(50 + Math.random() * 50),
-      status: 'Green',
-      phone: newEmpForm.phone.trim() || undefined,
-      email: autoEmail,
-      avatar: avatar.toUpperCase() || 'EM',
-      address: newEmpForm.address.trim() || `${newEmpForm.islandGroup}, PH`,
-      islandGroup: newEmpForm.islandGroup,
-      team: viewerRole,
-    };
-
-    handleAddEmployee(newEmp);
-    setShowAddEmployeeModal(false);
+  const openEditEmployeeModal = (emp: Employee) => {
+    setEditingEmployeeId(emp.id);
+    setEmpFormError('');
     setNewEmpForm({
-      name: '',
-      role: 'Data Analyst',
-      department: 'AI Operations',
-      phone: '',
-      email: '',
-      address: '',
-      islandGroup: 'Luzon',
-      gpsLat: 14.5995,
-      gpsLng: 120.9842,
+      employeeId: emp.id,
+      name: emp.name ?? '',
+      email: emp.email ?? '',
+      department: emp.department ?? '',
+      address: emp.address === 'Needs Update' ? '' : (emp.address ?? ''),
+      phone: emp.phone ?? '',
+      managersId: emp.managerId ?? '',
+      managersName: emp.managerName ?? '',
     });
+    setDirActionsMenuId(null);
+    setShowAddEmployeeModal(true);
+  };
+
+  const handleCreateEmployeeFromDirectory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmpFormError('');
+
+    const employeeId = newEmpForm.employeeId.trim();
+    const name = newEmpForm.name.trim();
+    const email = newEmpForm.email.trim().toLowerCase();
+    const department = newEmpForm.department.trim();
+    const address = newEmpForm.address.trim();
+    const phone = newEmpForm.phone.trim();
+    const managersId = newEmpForm.managersId.trim();
+    const managersName = newEmpForm.managersName.trim();
+
+    if (!name || !email) {
+      setEmpFormError('Employee name and email are required.');
+      return;
+    }
+    if (!editingEmployeeId && !employeeId) {
+      setEmpFormError('Employee ID is required.');
+      return;
+    }
+
+    setEmpFormSaving(true);
+    try {
+      const isEdit = Boolean(editingEmployeeId);
+      const res = await fetch(
+        isEdit ? `/api/employees/${encodeURIComponent(editingEmployeeId!)}` : '/api/employees',
+        {
+          method: isEdit ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employeeId,
+            name,
+            email,
+            department,
+            address,
+            phone,
+            managersId,
+            managersName,
+          }),
+        }
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.message || body?.detail || `Failed to ${isEdit ? 'update' : 'create'} employee.`);
+      }
+
+      const saved: Employee | undefined = body.employee;
+      if (saved?.id) {
+        setEmployees((prev) => {
+          const without = prev.filter((e) => e.id !== saved.id);
+          return [saved, ...without];
+        });
+        if (saved.email) {
+          setOfficialAccountEmails((prev) =>
+            Array.from(new Set([...prev, saved.email.trim().toLowerCase()]))
+          );
+        }
+      } else {
+        await reloadEmployeesFromServer();
+      }
+
+      setShowAddEmployeeModal(false);
+      setEditingEmployeeId(null);
+      setNewEmpForm(emptyEmpForm);
+
+      if (isEdit) {
+        pushLog(
+          body.accountCreated
+            ? `Updated ${name} and created login (${email}) with default password 123456.`
+            : `Updated employee ${name} (${employeeId || editingEmployeeId}).`,
+          'success'
+        );
+      } else {
+        pushLog(
+          `Created employee ${name} (${employeeId}). Login: ${email} / default password 123456 — must change on first login.`,
+          'success'
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Save failed.';
+      setEmpFormError(message);
+      pushLog(message, 'err');
+    } finally {
+      setEmpFormSaving(false);
+    }
   };
 
   const handleRemoveEmployee = (employeeId: string, employeeName: string) => {
@@ -5141,7 +5200,7 @@ export default function App() {
                 </div>
                 {!isManagerUser && (
                 <button
-                  onClick={() => setShowAddEmployeeModal(true)}
+                  onClick={openAddEmployeeModal}
                   className="bg-[#002060] hover:bg-[#003399] text-white text-xs font-black px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition active:scale-95 shadow-sm"
                 >
                   <Plus className="w-4 h-4" />
@@ -5405,6 +5464,17 @@ export default function App() {
                                 className="absolute right-5 top-full mt-1 z-20 min-w-[160px] bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-left"
                                 onMouseDown={(e) => e.stopPropagation()}
                               >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditEmployeeModal(emp);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-[#002060] hover:bg-[#ebf1fc] transition-colors cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 shrink-0" />
+                                  Edit Employee
+                                </button>
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -6888,12 +6958,12 @@ export default function App() {
         </div>{/* end page content */}
       </div>{/* end body row */}
 
-      {/* ── Add Employee Modal ───────────────────────────────────────────── */}
+      {/* ── Add / Edit Employee Modal ───────────────────────────────────── */}
       {showAddEmployeeModal && (
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           style={{ background: 'rgba(0,10,40,0.70)', backdropFilter: 'blur(6px)' }}
-          onClick={() => setShowAddEmployeeModal(false)}
+          onClick={() => !empFormSaving && setShowAddEmployeeModal(false)}
         >
           <div
             className="bg-white rounded-2xl shadow-2xl border border-blue-100 w-full max-w-lg max-h-[92vh] overflow-y-auto flex flex-col"
@@ -6902,27 +6972,69 @@ export default function App() {
             <div className="bg-gradient-to-r from-[#002060] via-[#003399] to-[#0055cc] px-6 py-4 flex items-center justify-between rounded-t-2xl shrink-0">
               <div className="flex items-center gap-3">
                 <div className="bg-white/15 p-2 rounded-lg border border-white/20">
-                  <Plus className="w-5 h-5 text-white" />
+                  {editingEmployeeId ? <Pencil className="w-5 h-5 text-white" /> : <Plus className="w-5 h-5 text-white" />}
                 </div>
                 <div>
-                  <h2 className="text-white font-black text-base tracking-tight">Add Employee</h2>
-                  <p className="text-blue-200 text-xs font-medium">Register a new personnel record</p>
+                  <h2 className="text-white font-black text-base tracking-tight">
+                    {editingEmployeeId ? 'Update Employee' : 'Add Employee'}
+                  </h2>
+                  <p className="text-blue-200 text-xs font-medium">
+                    {editingEmployeeId
+                      ? 'Save changes to Employee Details and keep their login account in sync'
+                      : 'Creates the employee record and a login account (default password 123456)'}
+                  </p>
                 </div>
               </div>
               <button
+                type="button"
+                disabled={empFormSaving}
                 onClick={() => setShowAddEmployeeModal(false)}
-                className="text-white/60 hover:text-white hover:bg-white/15 p-2 rounded-lg transition-all cursor-pointer border border-transparent hover:border-white/20"
+                className="text-white/60 hover:text-white hover:bg-white/15 p-2 rounded-lg transition-all cursor-pointer border border-transparent hover:border-white/20 disabled:opacity-50"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleCreateEmployeeFromDirectory} className="p-6 flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Employee ID *</label>
+                  <input
+                    type="text"
+                    required
+                    disabled={Boolean(editingEmployeeId) || empFormSaving}
+                    placeholder="e.g. 10482"
+                    value={newEmpForm.employeeId}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, employeeId: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Department *</label>
+                  <input
+                    type="text"
+                    required
+                    disabled={empFormSaving}
+                    list="admin-emp-departments"
+                    placeholder="e.g. AI Operations"
+                    value={newEmpForm.department}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, department: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <datalist id="admin-emp-departments">
+                    {Array.from(new Set(employees.map(e => e.department).filter(Boolean))).sort().map(d => (
+                      <option key={d} value={d} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Full Name *</label>
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Employee Name *</label>
                 <input
                   type="text"
                   required
+                  disabled={empFormSaving}
                   placeholder="e.g. Maria Clara Lopez"
                   value={newEmpForm.name}
                   onChange={e => setNewEmpForm(prev => ({ ...prev, name: e.target.value }))}
@@ -6930,59 +7042,30 @@ export default function App() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Role</label>
-                  <input
-                    type="text"
-                    placeholder="Data Analyst"
-                    value={newEmpForm.role}
-                    onChange={e => setNewEmpForm(prev => ({ ...prev, role: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Department</label>
-                  <select
-                    value={newEmpForm.department}
-                    onChange={e => setNewEmpForm(prev => ({ ...prev, department: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                  >
-                    {['AI Operations', 'GIS & Remote Sensing', 'Valuation Services', 'Real Estate Analytics', 'Data Engineering', 'QC & Audit', 'Solutions Group', 'Infrastructure Management', 'People Operations', 'Finance', 'Security', 'Field Services'].map(d => (
-                      <option key={d}>{d}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Phone</label>
-                  <input
-                    type="text"
-                    placeholder="0917 123 4567"
-                    value={newEmpForm.phone}
-                    onChange={e => setNewEmpForm(prev => ({ ...prev, phone: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Email</label>
-                  <input
-                    type="email"
-                    placeholder="name@innodata.com"
-                    value={newEmpForm.email}
-                    onChange={e => setNewEmpForm(prev => ({ ...prev, email: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Employee Email (login) *</label>
+                <input
+                  type="email"
+                  required
+                  disabled={empFormSaving}
+                  placeholder="name@innodata.com"
+                  value={newEmpForm.email}
+                  onChange={e => setNewEmpForm(prev => ({ ...prev, email: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {!editingEmployeeId && (
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    Login password starts as <span className="font-black text-[#002060]">123456</span>; they must change it after first login.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Residential Address</label>
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Complete Address</label>
                 <input
                   type="text"
-                  placeholder="e.g. Makati CBD, Makati City, Metro Manila"
+                  disabled={empFormSaving}
+                  placeholder="e.g. Lahug, Cebu City, Cebu"
                   value={newEmpForm.address}
                   onChange={e => setNewEmpForm(prev => ({ ...prev, address: e.target.value }))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -6990,64 +7073,68 @@ export default function App() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Island Group</label>
-                <div className="flex gap-2">
-                  {(['Luzon', 'Visayas', 'Mindanao'] as const).map(ig => {
-                    const defaults = { Luzon: { lat: 14.5995, lng: 120.9842 }, Visayas: { lat: 10.3157, lng: 123.8854 }, Mindanao: { lat: 7.0708, lng: 125.6087 } };
-                    return (
-                      <button
-                        key={ig}
-                        type="button"
-                        onClick={() => setNewEmpForm(prev => ({ ...prev, islandGroup: ig, gpsLat: defaults[ig].lat, gpsLng: defaults[ig].lng }))}
-                        className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                          newEmpForm.islandGroup === ig
-                            ? 'border-[#002060] bg-blue-50 text-[#002060] ring-1 ring-blue-300'
-                            : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
-                        }`}
-                      >
-                        {ig}
-                      </button>
-                    );
-                  })}
-                </div>
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Mobile Number</label>
+                <input
+                  type="text"
+                  disabled={empFormSaving}
+                  placeholder="0917 123 4567"
+                  value={newEmpForm.phone}
+                  onChange={e => setNewEmpForm(prev => ({ ...prev, phone: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">GPS Latitude</label>
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Manager&apos;s ID</label>
                   <input
-                    type="number"
-                    step="0.00001"
-                    value={newEmpForm.gpsLat}
-                    onChange={e => setNewEmpForm(prev => ({ ...prev, gpsLat: parseFloat(e.target.value) || 0 }))}
+                    type="text"
+                    disabled={empFormSaving}
+                    placeholder="Manager employee ID"
+                    value={newEmpForm.managersId}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, managersId: e.target.value }))}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">GPS Longitude</label>
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Manager&apos;s Name</label>
                   <input
-                    type="number"
-                    step="0.00001"
-                    value={newEmpForm.gpsLng}
-                    onChange={e => setNewEmpForm(prev => ({ ...prev, gpsLng: parseFloat(e.target.value) || 0 }))}
+                    type="text"
+                    disabled={empFormSaving}
+                    placeholder="Manager full name"
+                    value={newEmpForm.managersName}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, managersName: e.target.value }))}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
+              <p className="text-[10px] text-slate-500 -mt-2">
+                Assigning a Manager ID places this employee under that manager&apos;s team.
+              </p>
+
+              {empFormError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                  {empFormError}
+                </div>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
+                  disabled={empFormSaving}
                   onClick={() => setShowAddEmployeeModal(false)}
-                  className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-lg text-xs transition cursor-pointer"
+                  className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-lg text-xs transition cursor-pointer disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-[#002060] hover:bg-[#003399] text-white font-bold py-2.5 rounded-lg text-xs transition cursor-pointer active:scale-95"
+                  disabled={empFormSaving}
+                  className="flex-1 bg-[#002060] hover:bg-[#003399] text-white font-bold py-2.5 rounded-lg text-xs transition cursor-pointer active:scale-95 disabled:opacity-60"
                 >
-                  Save Employee
+                  {empFormSaving
+                    ? (editingEmployeeId ? 'Saving…' : 'Creating…')
+                    : (editingEmployeeId ? 'Save Changes' : 'Create Employee & Account')}
                 </button>
               </div>
             </form>

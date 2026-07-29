@@ -566,139 +566,172 @@ async function loadEmployees(): Promise<Employee[]> {
   console.log(`Fetched ${allRows.length} raw rows from Supabase.`);
 
   const employees: Employee[] = [];
-
   for (const row of allRows) {
-    const empId = row['Employee ID'];
-    if (!empId) continue;
-
-    const fullName = (row['Employee Name'] ?? '').trim();
-    const city = (row['PERMANENT - CITY/MUNICIPALITY'] ?? '').trim();
-    const province = (row['PERMANENT - PROVINCE'] ?? '').trim();
-    const completeAddress = (row['COMPLETE ADDRESS'] ?? '').trim();
-    const houseNo = (row['PERMANENT- HOUSE NUMBER'] ?? '').trim();
-    const street = (row['PERMANENT - STREET'] ?? '').trim();
-    const barangay = (row['PERMANENT - BARANGAY'] ?? '').trim();
-    const regionLabel = (row['PERMANENT - REGION'] ?? '').trim();
-
-    // ── Detect whether this employee has any location data at all ─────────────
-    const hasLocationData = !!(city || province || regionLabel ||
-      completeAddress || houseNo || street || barangay);
-
-    // Build full address string
-    const addressParts = [houseNo, street, barangay, city, province].filter(Boolean);
-    const addressStr = hasLocationData
-      ? (completeAddress || addressParts.join(', ') || `${city}, ${province}`)
-      : 'Needs Update';
-
-    // GPS coordinates — only derive when we have actual location data
-    // Without this guard, empty-address employees all fall to the NCR default coords
-    let gpsLat: number | undefined;
-    let gpsLng: number | undefined;
-    let gridY = 0;
-    let gridX = 0;
-    let knownCityCoords: { lat: number; lng: number } | null = null;
-
-    if (hasLocationData) {
-      knownCityCoords = getGpsForCity(city, province);
-      const seed = hashString(empId);
-      const scatter = 0.015;
-      // Unknown city/province: pin near Cebu (Region VII HQ) for map display only —
-      // region field is resolved separately and must not inherit NCR from a GPS default.
-      const base = knownCityCoords ?? { lat: 10.3157, lng: 123.8854 };
-      gpsLat = base.lat + (seededRandom(seed) - 0.5) * scatter;
-      gpsLng = base.lng + (seededRandom(seed + 1) - 0.5) * scatter;
-
-      const LAT_MIN = 4.5, LAT_MAX = 21.5;
-      const LNG_MIN = 116.0, LNG_MAX = 127.0;
-      gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
-      gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
-    }
-
-    // Island group — undefined when no location data
-    const islandGroup = hasLocationData
-      ? getIslandGroup(city, province || regionLabel)
-      : undefined;
-
-    // ── Region: trust the database value first, then city/province resolver.
-    // Never GPS-default into NCR when the address/region column is empty.
-    let region: string | undefined;
-    if (!hasLocationData) {
-      region = 'NEEDS_UPDATE';
-    } else {
-      const regionFromDb = parseRegionLabel(regionLabel);
-      region =
-        regionFromDb ??
-        resolveEmployeeRegion({
-          city,
-          province,
-          facility: row['Facility'] ?? undefined,
-          address: addressStr !== 'Needs Update' ? addressStr : completeAddress || undefined,
-          // Only use GPS when we recognized the city/province (avoids NCR dump)
-          gpsLat: knownCityCoords ? gpsLat : undefined,
-          gpsLng: knownCityCoords ? gpsLng : undefined,
-        }) ??
-        'NEEDS_UPDATE';
-    }
-
-    // Avatar initials from name
-    const nameParts = fullName.split(' ').filter(Boolean);
-    const avatar = nameParts.length >= 2
-      ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
-      : fullName.slice(0, 2).toUpperCase();
-
-    // Phone cleanup
-    const rawPhone = (row['MOBILE NUMBER'] ?? '').trim();
-    const cleanPhone = rawPhone && !rawPhone.toUpperCase().includes('FOR UPDATE') ? rawPhone : undefined;
-
-    // Email — prefer official, fall back to personal
-    const officialEmail = (row['OFFICIAL EMAIL'] ?? '').trim();
-    const personalEmail = (row['PERSONAL EMAIL'] ?? '').trim();
-    const email = officialEmail || personalEmail || '';
-
-    // Designation → role
-    const designation = (row['Designation'] ?? 'Employee').trim();
-
-    // DU → department
-    const department = (row['DU'] ?? 'Unknown').trim() || 'Unknown';
-
-    // Manager check and access role
-    const managersId = (row['Managers ID'] ?? '').trim();
-    const managerName = ((row['Manager\'s Name'] ?? row['Managers Name']) ?? '').trim();
-    const isManager = row['PeopleManager/Individual Contributor']
-      ? row['PeopleManager/Individual Contributor']!.toLowerCase().includes('manager')
-      : false;
-    const rawRole = (row['role'] ?? '').trim().toLowerCase();
-    const accessRole = rawRole === 'manager' || isManager ? 'manager' : 'employee';
-
-    const empSeed = hashString(empId);
-    employees.push({
-      id: String(empId),
-      name: fullName || 'Unknown Employee',
-      role: designation,
-      accessRole,
-      department,
-      lat: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
-      lng: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
-      gpsLat: gpsLat != null ? parseFloat(gpsLat.toFixed(5)) : undefined,
-      gpsLng: gpsLng != null ? parseFloat(gpsLng.toFixed(5)) : undefined,
-      carrier: (['Globe', 'Smart', 'DITO'] as const)[Math.floor(seededRandom(empSeed + 2) * 3)],
-      normalSignalStrength: -120 + Math.round(seededRandom(empSeed + 3) * 60),
-      battery: Math.round(20 + seededRandom(empSeed + 4) * 80),
-      status: seededRandom(empSeed + 5) > 0.92 ? 'Yellow' : 'Green',
-      phone: cleanPhone,
-      email,
-      avatar,
-      address: addressStr,
-      islandGroup,
-      region,
-      managerId: managersId || undefined,
-      managerName: managerName || undefined,
-      team: isManager ? 'Manager' : 'HR/CSR',
-      facility: row['Facility'] ?? undefined,
-    });
+    const emp = mapSupabaseRowToEmployee(row);
+    if (emp) employees.push(emp);
   }
 
   return employees;
+}
+
+function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee | null {
+  const empId = row['Employee ID'];
+  if (!empId) return null;
+
+  const fullName = (row['Employee Name'] ?? '').trim();
+  const city = (row['PERMANENT - CITY/MUNICIPALITY'] ?? '').trim();
+  const province = (row['PERMANENT - PROVINCE'] ?? '').trim();
+  const completeAddress = (row['COMPLETE ADDRESS'] ?? '').trim();
+  const houseNo = (row['PERMANENT- HOUSE NUMBER'] ?? '').trim();
+  const street = (row['PERMANENT - STREET'] ?? '').trim();
+  const barangay = (row['PERMANENT - BARANGAY'] ?? '').trim();
+  const regionLabel = (row['PERMANENT - REGION'] ?? '').trim();
+
+  const hasLocationData = !!(city || province || regionLabel ||
+    completeAddress || houseNo || street || barangay);
+
+  const addressParts = [houseNo, street, barangay, city, province].filter(Boolean);
+  const addressStr = hasLocationData
+    ? (completeAddress || addressParts.join(', ') || `${city}, ${province}`)
+    : 'Needs Update';
+
+  let gpsLat: number | undefined;
+  let gpsLng: number | undefined;
+  let gridY = 0;
+  let gridX = 0;
+  let knownCityCoords: { lat: number; lng: number } | null = null;
+
+  if (hasLocationData) {
+    knownCityCoords = getGpsForCity(city, province);
+    const seed = hashString(String(empId));
+    const scatter = 0.015;
+    const base = knownCityCoords ?? { lat: 10.3157, lng: 123.8854 };
+    gpsLat = base.lat + (seededRandom(seed) - 0.5) * scatter;
+    gpsLng = base.lng + (seededRandom(seed + 1) - 0.5) * scatter;
+
+    const LAT_MIN = 4.5, LAT_MAX = 21.5;
+    const LNG_MIN = 116.0, LNG_MAX = 127.0;
+    gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
+    gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+  }
+
+  const islandGroup = hasLocationData
+    ? getIslandGroup(city, province || regionLabel)
+    : undefined;
+
+  let region: string | undefined;
+  if (!hasLocationData) {
+    region = 'NEEDS_UPDATE';
+  } else {
+    const regionFromDb = parseRegionLabel(regionLabel);
+    region =
+      regionFromDb ??
+      resolveEmployeeRegion({
+        city,
+        province,
+        facility: row['Facility'] ?? undefined,
+        address: addressStr !== 'Needs Update' ? addressStr : completeAddress || undefined,
+        gpsLat: knownCityCoords ? gpsLat : undefined,
+        gpsLng: knownCityCoords ? gpsLng : undefined,
+      }) ??
+      'NEEDS_UPDATE';
+  }
+
+  const nameParts = fullName.split(' ').filter(Boolean);
+  const avatar = nameParts.length >= 2
+    ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+    : fullName.slice(0, 2).toUpperCase();
+
+  const rawPhone = (row['MOBILE NUMBER'] ?? '').trim();
+  const cleanPhone = rawPhone && !rawPhone.toUpperCase().includes('FOR UPDATE') ? rawPhone : undefined;
+
+  const officialEmail = (row['OFFICIAL EMAIL'] ?? '').trim();
+  const personalEmail = (row['PERSONAL EMAIL'] ?? '').trim();
+  const email = officialEmail || personalEmail || '';
+
+  const designation = (row['Designation'] ?? 'Employee').trim();
+  const department = (row['DU'] ?? 'Unknown').trim() || 'Unknown';
+
+  const managersId = (row['Managers ID'] ?? '').trim();
+  const managerName = ((row["Manager's Name"] ?? row['Managers Name']) ?? '').trim();
+  const isManager = row['PeopleManager/Individual Contributor']
+    ? row['PeopleManager/Individual Contributor']!.toLowerCase().includes('manager')
+    : false;
+  const rawRole = (row['role'] ?? '').trim().toLowerCase();
+  const accessRole = rawRole === 'manager' || isManager ? 'manager' : 'employee';
+
+  const empSeed = hashString(String(empId));
+  return {
+    id: String(empId),
+    name: fullName || 'Unknown Employee',
+    role: designation,
+    accessRole,
+    department,
+    lat: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
+    lng: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
+    gpsLat: gpsLat != null ? parseFloat(gpsLat.toFixed(5)) : undefined,
+    gpsLng: gpsLng != null ? parseFloat(gpsLng.toFixed(5)) : undefined,
+    carrier: (['Globe', 'Smart', 'DITO'] as const)[Math.floor(seededRandom(empSeed + 2) * 3)],
+    normalSignalStrength: -120 + Math.round(seededRandom(empSeed + 3) * 60),
+    battery: Math.round(20 + seededRandom(empSeed + 4) * 80),
+    status: seededRandom(empSeed + 5) > 0.92 ? 'Yellow' : 'Green',
+    phone: cleanPhone,
+    email,
+    avatar,
+    address: addressStr,
+    islandGroup,
+    region,
+    managerId: managersId || undefined,
+    managerName: managerName || undefined,
+    team: isManager ? 'Manager' : 'HR/CSR',
+    facility: row['Facility'] ?? undefined,
+  };
+}
+
+const DEFAULT_EMPLOYEE_PASSWORD = '123456';
+
+type AdminEmployeePayload = {
+  employeeId?: string;
+  name?: string;
+  email?: string;
+  department?: string;
+  address?: string;
+  phone?: string;
+  managersId?: string;
+  managersName?: string;
+  designation?: string;
+};
+
+function buildEmployeeDetailsRow(payload: Required<Pick<AdminEmployeePayload, 'employeeId' | 'name' | 'email'>> & AdminEmployeePayload): Record<string, string> {
+  const managersId = (payload.managersId ?? '').trim();
+  const managersName = (payload.managersName ?? '').trim();
+  return {
+    'Employee ID': payload.employeeId.trim(),
+    'Employee Name': payload.name.trim(),
+    'OFFICIAL EMAIL': payload.email.trim().toLowerCase(),
+    'DU': (payload.department ?? '').trim() || 'Unknown',
+    'COMPLETE ADDRESS': (payload.address ?? '').trim(),
+    'MOBILE NUMBER': (payload.phone ?? '').trim(),
+    'Managers ID': managersId,
+    'Managers Name': managersName,
+    'Designation': (payload.designation ?? '').trim() || 'Employee',
+    'PeopleManager/Individual Contributor': 'Individual Contributor',
+  };
+}
+
+async function ensureEmployeeLoginAccount(emp: Employee, overwritePassword: boolean): Promise<void> {
+  const username = accountUsernameForEmployee(emp);
+  if (!username) {
+    throw new Error('Employee email is required to create a login account.');
+  }
+  await upsertAccount({
+    username,
+    password: DEFAULT_EMPLOYEE_PASSWORD,
+    accessRole: emp.accessRole === 'manager' ? 'manager' : 'official',
+    employeeId: emp.id,
+    displayName: emp.name,
+    overwritePassword,
+  });
 }
 
 // ── In-memory cache of loaded employees (service-role key bypasses Supabase RLS) ──
@@ -2411,18 +2444,200 @@ loadEmployees()
         if (gcashNumber !== undefined)   (allEmployees[idx] as any).gcashNumber = gcashNumber.trim();
         if (bankAccountDetails !== undefined) (allEmployees[idx] as any).bankAccountDetails = bankAccountDetails.trim();
         if (address !== undefined)       allEmployees[idx].address = address.trim();
+        if (contactNumber !== undefined) allEmployees[idx].phone = contactNumber.trim() || undefined;
       }
 
       return res.json({ message: 'Profile updated successfully.', employeeId: empId });
     });
 
-    // Manager-scoped detail/update (write).
-    app.patch('/api/employees/:id', (req, res) => {
-      const { name, id } = readManagerFromRequest(req);
-      if (!name) return res.status(401).json({ message: 'Manager identity required.' });
-      const denied = enforceManagerAccess(req.params.id, name, id);
-      if (denied) return res.status(denied.status).json({ message: denied.message });
-      res.json({ message: 'Employee updated.', employeeId: req.params.id });
+    // Admin create employee + auto-create login account (default password 123456).
+    app.post('/api/employees', async (req, res) => {
+      try {
+        const body = (req.body ?? {}) as AdminEmployeePayload;
+        const employeeId = String(body.employeeId ?? '').trim();
+        const name = String(body.name ?? '').trim();
+        const email = String(body.email ?? '').trim().toLowerCase();
+        const department = String(body.department ?? '').trim();
+        const address = String(body.address ?? '').trim();
+        const phone = String(body.phone ?? '').trim();
+        const managersId = String(body.managersId ?? '').trim();
+        const managersName = String(body.managersName ?? '').trim();
+        const designation = String(body.designation ?? 'Employee').trim() || 'Employee';
+
+        if (!employeeId || !name || !email) {
+          return res.status(400).json({ message: 'Employee ID, name, and email are required.' });
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return res.status(400).json({ message: 'A valid login email is required.' });
+        }
+        if (allEmployees.some((e) => e.id === employeeId)) {
+          return res.status(409).json({ message: `Employee ID ${employeeId} already exists.` });
+        }
+        if (allEmployees.some((e) => e.email?.trim().toLowerCase() === email)) {
+          return res.status(409).json({ message: `Email ${email} is already used by another employee.` });
+        }
+
+        const row = buildEmployeeDetailsRow({
+          employeeId,
+          name,
+          email,
+          department,
+          address,
+          phone,
+          managersId,
+          managersName,
+          designation,
+        });
+
+        const { data: inserted, error } = await supabase
+          .from('Employee Details')
+          .insert(row)
+          .select('*')
+          .limit(1);
+
+        if (error || !inserted?.length) {
+          console.error('Create employee failed:', error?.message);
+          return res.status(500).json({ message: 'Failed to create employee.', detail: error?.message });
+        }
+
+        const mapped = mapSupabaseRowToEmployee(inserted[0] as SupabaseEmployeeRow);
+        if (!mapped) {
+          return res.status(500).json({ message: 'Employee created but could not be mapped.' });
+        }
+
+        await ensureEmployeeLoginAccount(mapped, true);
+
+        allEmployees = [mapped, ...allEmployees.filter((e) => e.id !== mapped.id)];
+        allEmployees = await attachProfilePictures(allEmployees);
+
+        return res.status(201).json({
+          message: 'Employee created. Login account ready with default password 123456.',
+          employee: allEmployees.find((e) => e.id === mapped.id) ?? mapped,
+          defaultPassword: DEFAULT_EMPLOYEE_PASSWORD,
+          mustChangePassword: true,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('Create employee error:', message);
+        return res.status(500).json({ message: 'Failed to create employee.', detail: message });
+      }
+    });
+
+    // Admin update employee details (+ ensure login account exists / email synced).
+    app.patch('/api/employees/:id', async (req, res) => {
+      try {
+        const empId = String(req.params.id ?? '').trim();
+        const existing = allEmployees.find((e) => e.id === empId);
+        if (!existing) return res.status(404).json({ message: 'Employee not found.' });
+
+        // Manager-scoped write (legacy): managers may only touch their reports, limited fields.
+        const { name: mgrName, id: mgrId } = readManagerFromRequest(req);
+        if (mgrName) {
+          const denied = enforceManagerAccess(empId, mgrName, mgrId);
+          if (denied) return res.status(denied.status).json({ message: denied.message });
+        }
+
+        const body = (req.body ?? {}) as AdminEmployeePayload;
+        const name = body.name !== undefined ? String(body.name).trim() : existing.name;
+        const email = body.email !== undefined
+          ? String(body.email).trim().toLowerCase()
+          : (existing.email ?? '').trim().toLowerCase();
+        const department = body.department !== undefined ? String(body.department).trim() : existing.department;
+        const address = body.address !== undefined ? String(body.address).trim() : existing.address;
+        const phone = body.phone !== undefined ? String(body.phone).trim() : (existing.phone ?? '');
+        const managersId = body.managersId !== undefined ? String(body.managersId).trim() : (existing.managerId ?? '');
+        const managersName = body.managersName !== undefined ? String(body.managersName).trim() : (existing.managerName ?? '');
+        const designation = body.designation !== undefined
+          ? String(body.designation).trim() || 'Employee'
+          : existing.role;
+
+        if (!name || !email) {
+          return res.status(400).json({ message: 'Name and email are required.' });
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return res.status(400).json({ message: 'A valid login email is required.' });
+        }
+        if (allEmployees.some((e) => e.id !== empId && e.email?.trim().toLowerCase() === email)) {
+          return res.status(409).json({ message: `Email ${email} is already used by another employee.` });
+        }
+
+        const dbUpdate = buildEmployeeDetailsRow({
+          employeeId: empId,
+          name,
+          email,
+          department,
+          address,
+          phone,
+          managersId,
+          managersName,
+          designation,
+        });
+        // Do not overwrite primary key column on update
+        delete (dbUpdate as any)['Employee ID'];
+
+        const { data: updatedRows, error } = await supabase
+          .from('Employee Details')
+          .update(dbUpdate)
+          .eq('Employee ID', empId)
+          .select('*')
+          .limit(1);
+
+        if (error) {
+          console.error('Update employee failed:', error.message);
+          return res.status(500).json({ message: 'Failed to update employee.', detail: error.message });
+        }
+
+        const sourceRow = (updatedRows?.[0] as SupabaseEmployeeRow | undefined) ?? {
+          'Employee ID': empId,
+          'Employee Name': name,
+          'OFFICIAL EMAIL': email,
+          'DU': department,
+          'COMPLETE ADDRESS': address,
+          'MOBILE NUMBER': phone,
+          'Managers ID': managersId,
+          'Managers Name': managersName,
+          'Designation': designation,
+        };
+
+        const mapped = mapSupabaseRowToEmployee(sourceRow);
+        if (!mapped) {
+          return res.status(500).json({ message: 'Employee updated but could not be mapped.' });
+        }
+
+        // Preserve runtime safety fields from the previous cache entry
+        mapped.status = existing.status;
+        mapped.contacted = existing.contacted;
+        mapped.unresponsive = existing.unresponsive;
+        mapped.safetyMessage = existing.safetyMessage;
+        mapped.rescueDispatched = existing.rescueDispatched;
+        mapped.profilePicture = existing.profilePicture;
+
+        // Ensure an account exists; sync username/email but do not reset password for existing accounts
+        const { data: existingAccount } = await supabase
+          .from('accounts')
+          .select('employee_id')
+          .eq('employee_id', empId)
+          .maybeSingle();
+        await ensureEmployeeLoginAccount(mapped, !existingAccount?.employee_id);
+
+        const idx = allEmployees.findIndex((e) => e.id === empId);
+        if (idx !== -1) allEmployees[idx] = mapped;
+        else allEmployees = [mapped, ...allEmployees];
+        allEmployees = await attachProfilePictures(allEmployees);
+
+        return res.json({
+          message: existingAccount?.employee_id
+            ? 'Employee updated.'
+            : 'Employee updated and login account created with default password 123456.',
+          employee: allEmployees.find((e) => e.id === empId) ?? mapped,
+          accountCreated: !existingAccount?.employee_id,
+          defaultPassword: existingAccount?.employee_id ? undefined : DEFAULT_EMPLOYEE_PASSWORD,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('Update employee error:', message);
+        return res.status(500).json({ message: 'Failed to update employee.', detail: message });
+      }
     });
 
     if (!process.env.VERCEL) {

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { resolveEmployeeRegion, parseRegionLabel } from '../../lib/regionResolver.js';
+import { randomBytes, scryptSync } from 'crypto';
 
 type AccessRole = 'employee' | 'manager';
 type IslandGroup = 'Luzon' | 'Visayas' | 'Mindanao';
@@ -590,6 +591,248 @@ export async function updateEmployeeProfile(empId: string, payload: { contactNum
 
   await getEmployees(true);
   return { updated: true };
+}
+
+const DEFAULT_EMPLOYEE_PASSWORD = '123456';
+
+type AdminEmployeePayload = {
+  employeeId?: string;
+  name?: string;
+  email?: string;
+  department?: string;
+  address?: string;
+  phone?: string;
+  managersId?: string;
+  managersName?: string;
+  designation?: string;
+};
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString('hex');
+  const hash = scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function buildEmployeeDetailsRow(payload: {
+  employeeId: string;
+  name: string;
+  email: string;
+  department?: string;
+  address?: string;
+  phone?: string;
+  managersId?: string;
+  managersName?: string;
+  designation?: string;
+}): Record<string, string> {
+  const managersId = (payload.managersId ?? '').trim();
+  const managersName = (payload.managersName ?? '').trim();
+  return {
+    'Employee ID': payload.employeeId.trim(),
+    'Employee Name': payload.name.trim(),
+    'OFFICIAL EMAIL': payload.email.trim().toLowerCase(),
+    'DU': (payload.department ?? '').trim() || 'Unknown',
+    'COMPLETE ADDRESS': (payload.address ?? '').trim(),
+    'MOBILE NUMBER': (payload.phone ?? '').trim(),
+    'Managers ID': managersId,
+    'Managers Name': managersName,
+    'Designation': (payload.designation ?? '').trim() || 'Employee',
+    'PeopleManager/Individual Contributor': 'Individual Contributor',
+  };
+}
+
+async function upsertEmployeeAccount(input: {
+  employeeId: string;
+  username: string;
+  displayName: string;
+  accessRole: 'manager' | 'official';
+  overwritePassword: boolean;
+}) {
+  const supabase = getSupabaseClient();
+  const username = input.username.trim().toLowerCase();
+  const employeeId = input.employeeId.trim();
+
+  const { data: existing, error: findError } = await supabase
+    .from('accounts')
+    .select('employee_id')
+    .eq('employee_id', employeeId)
+    .maybeSingle();
+  if (findError) throw new Error(findError.message);
+
+  if (existing?.employee_id) {
+    const patch: Record<string, unknown> = {
+      username,
+      access_role: input.accessRole,
+      display_name: input.displayName,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    };
+    if (input.overwritePassword) patch.password_hash = hashPassword(DEFAULT_EMPLOYEE_PASSWORD);
+    const { error } = await supabase.from('accounts').update(patch).eq('employee_id', employeeId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await supabase.from('accounts').insert({
+    employee_id: employeeId,
+    username,
+    password_hash: hashPassword(DEFAULT_EMPLOYEE_PASSWORD),
+    access_role: input.accessRole,
+    display_name: input.displayName,
+    is_active: true,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function createEmployee(payload: AdminEmployeePayload) {
+  const employeeId = String(payload.employeeId ?? '').trim();
+  const name = String(payload.name ?? '').trim();
+  const email = String(payload.email ?? '').trim().toLowerCase();
+  const department = String(payload.department ?? '').trim();
+  const address = String(payload.address ?? '').trim();
+  const phone = String(payload.phone ?? '').trim();
+  const managersId = String(payload.managersId ?? '').trim();
+  const managersName = String(payload.managersName ?? '').trim();
+  const designation = String(payload.designation ?? 'Employee').trim() || 'Employee';
+
+  if (!employeeId || !name || !email) {
+    const err: any = new Error('Employee ID, name, and email are required.');
+    err.status = 400;
+    throw err;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    const err: any = new Error('A valid login email is required.');
+    err.status = 400;
+    throw err;
+  }
+
+  const existing = await getEmployees();
+  if (existing.some((e) => e.id === employeeId)) {
+    const err: any = new Error(`Employee ID ${employeeId} already exists.`);
+    err.status = 409;
+    throw err;
+  }
+  if (existing.some((e) => e.email?.trim().toLowerCase() === email)) {
+    const err: any = new Error(`Email ${email} is already used by another employee.`);
+    err.status = 409;
+    throw err;
+  }
+
+  const row = buildEmployeeDetailsRow({
+    employeeId, name, email, department, address, phone, managersId, managersName, designation,
+  });
+  const supabase = getSupabaseClient();
+  const { data: inserted, error } = await supabase
+    .from('Employee Details')
+    .insert(row)
+    .select('*')
+    .limit(1);
+
+  if (error || !inserted?.length) {
+    const err: any = new Error('Failed to create employee.');
+    err.status = 500;
+    err.detail = error?.message;
+    throw err;
+  }
+
+  await upsertEmployeeAccount({
+    employeeId,
+    username: email,
+    displayName: name,
+    accessRole: 'official',
+    overwritePassword: true,
+  });
+
+  const employees = await getEmployees(true);
+  const employee = employees.find((e) => e.id === employeeId) ?? mapRowsToEmployees(inserted as SupabaseEmployeeRow[])[0];
+
+  return {
+    message: 'Employee created. Login account ready with default password 123456.',
+    employee,
+    defaultPassword: DEFAULT_EMPLOYEE_PASSWORD,
+    mustChangePassword: true,
+  };
+}
+
+export async function updateEmployeeAdmin(empId: string, payload: AdminEmployeePayload) {
+  const employees = await getEmployees();
+  const existing = employees.find((e) => e.id === empId);
+  if (!existing) {
+    const err: any = new Error('Employee not found.');
+    err.status = 404;
+    throw err;
+  }
+
+  const name = payload.name !== undefined ? String(payload.name).trim() : existing.name;
+  const email = payload.email !== undefined
+    ? String(payload.email).trim().toLowerCase()
+    : (existing.email ?? '').trim().toLowerCase();
+  const department = payload.department !== undefined ? String(payload.department).trim() : existing.department;
+  const address = payload.address !== undefined ? String(payload.address).trim() : existing.address;
+  const phone = payload.phone !== undefined ? String(payload.phone).trim() : (existing.phone ?? '');
+  const managersId = payload.managersId !== undefined ? String(payload.managersId).trim() : (existing.managerId ?? '');
+  const managersName = payload.managersName !== undefined ? String(payload.managersName).trim() : (existing.managerName ?? '');
+  const designation = payload.designation !== undefined
+    ? String(payload.designation).trim() || 'Employee'
+    : existing.role;
+
+  if (!name || !email) {
+    const err: any = new Error('Name and email are required.');
+    err.status = 400;
+    throw err;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    const err: any = new Error('A valid login email is required.');
+    err.status = 400;
+    throw err;
+  }
+  if (employees.some((e) => e.id !== empId && e.email?.trim().toLowerCase() === email)) {
+    const err: any = new Error(`Email ${email} is already used by another employee.`);
+    err.status = 409;
+    throw err;
+  }
+
+  const dbUpdate = buildEmployeeDetailsRow({
+    employeeId: empId, name, email, department, address, phone, managersId, managersName, designation,
+  });
+  delete (dbUpdate as any)['Employee ID'];
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from('Employee Details')
+    .update(dbUpdate)
+    .eq('Employee ID', empId);
+  if (error) {
+    const err: any = new Error('Failed to update employee.');
+    err.status = 500;
+    err.detail = error.message;
+    throw err;
+  }
+
+  const { data: existingAccount } = await supabase
+    .from('accounts')
+    .select('employee_id')
+    .eq('employee_id', empId)
+    .maybeSingle();
+
+  await upsertEmployeeAccount({
+    employeeId: empId,
+    username: email,
+    displayName: name,
+    accessRole: existing.accessRole === 'manager' ? 'manager' : 'official',
+    overwritePassword: !existingAccount?.employee_id,
+  });
+
+  const refreshed = await getEmployees(true);
+  const employee = refreshed.find((e) => e.id === empId);
+
+  return {
+    message: existingAccount?.employee_id
+      ? 'Employee updated.'
+      : 'Employee updated and login account created with default password 123456.',
+    employee,
+    accountCreated: !existingAccount?.employee_id,
+    defaultPassword: existingAccount?.employee_id ? undefined : DEFAULT_EMPLOYEE_PASSWORD,
+  };
 }
 
 export function getHealth() {
