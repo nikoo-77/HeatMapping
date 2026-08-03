@@ -1,4 +1,5 @@
 import { AidAttachmentRow, AidAssistanceRequestRow, getSupabaseClient, mapAidRequestToResponse } from '../_lib.js';
+import { loadEmployees } from '../../employees/_lib.js';
 
 export default async function handler(req: any, res: any) {
   try {
@@ -62,8 +63,14 @@ export default async function handler(req: any, res: any) {
       .eq('aid_assistance_id', id)
       .order('uploaded_at', { ascending: false });
 
+    const employees = await loadEmployees();
+    const employee = employees.find((entry) => entry.id === updated.employee_id);
+
     return res.status(200).json(
-      mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[], 'Luzon')
+      mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[], 'Luzon', {
+        gcashNumber: employee?.gcashNumber,
+        bankAccountDetails: employee?.bankAccountDetails,
+      })
     );
   } catch (error: any) {
     return res.status(500).json({

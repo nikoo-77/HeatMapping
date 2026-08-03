@@ -43,6 +43,8 @@ interface Employee {
   email: string;
   avatar: string;
   profilePicture?: string | null;
+  gcashNumber?: string;
+  bankAccountDetails?: string;
   address?: string;
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
   region?: string;
@@ -54,6 +56,7 @@ interface Employee {
   unresponsive?: boolean;
   safetyMessage?: string;
   lastResponseRecv?: string;
+  rescueDispatched?: boolean;
 }
 
 // Raw row shape from Supabase "Employee Details" table
@@ -80,6 +83,12 @@ interface SupabaseEmployeeRow {
   'OFFICIAL EMAIL'?: string | null;
   'PERSONAL EMAIL'?: string | null;
   'MOBILE NUMBER'?: string | null;
+  'GCASH NUMBER'?: string | null;
+  'GCash Number'?: string | null;
+  gcash_number?: string | null;
+  'BANK ACCOUNT DETAILS'?: string | null;
+  'Bank Account Details'?: string | null;
+  bank_account_details?: string | null;
   role?: string | null;
   'Manager\'s Name'?: string | null;
 }
@@ -575,6 +584,7 @@ async function loadEmployees(): Promise<Employee[]> {
 }
 
 function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee | null {
+  const rowRecord = row as unknown as Record<string, unknown>;
   const empId = row['Employee ID'];
   if (!empId) return null;
 
@@ -644,6 +654,8 @@ function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee | null {
 
   const rawPhone = (row['MOBILE NUMBER'] ?? '').trim();
   const cleanPhone = rawPhone && !rawPhone.toUpperCase().includes('FOR UPDATE') ? rawPhone : undefined;
+  const gcashNumber = pickText(rowRecord, ['GCASH NUMBER', 'GCash Number', 'gcash_number']);
+  const bankAccountDetails = pickText(rowRecord, ['BANK ACCOUNT DETAILS', 'Bank Account Details', 'bank_account_details']);
 
   const officialEmail = (row['OFFICIAL EMAIL'] ?? '').trim();
   const personalEmail = (row['PERSONAL EMAIL'] ?? '').trim();
@@ -676,6 +688,8 @@ function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee | null {
     battery: Math.round(20 + seededRandom(empSeed + 4) * 80),
     status: seededRandom(empSeed + 5) > 0.92 ? 'Yellow' : 'Green',
     phone: cleanPhone,
+    gcashNumber,
+    bankAccountDetails,
     email,
     avatar,
     address: addressStr,
@@ -745,8 +759,38 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
       .select('employee_id, profile_picture')
       .not('profile_picture', 'is', null);
 
+    const paymentById = new Map<string, { gcashNumber?: string; bankAccountDetails?: string }>();
+    try {
+      const payment = await supabase
+        .from('accounts')
+        .select('employee_id, gcash_number, bank_account_details');
+      const paymentRows = (payment.data ?? []) as Array<{
+        employee_id?: string;
+        gcash_number?: string | null;
+        bank_account_details?: string | null;
+      }>;
+      for (const row of paymentRows) {
+        const id = String(row.employee_id ?? '').trim();
+        if (!id) continue;
+        const gcashNumber = typeof row.gcash_number === 'string' ? row.gcash_number.trim() : '';
+        const bankAccountDetails = typeof row.bank_account_details === 'string' ? row.bank_account_details.trim() : '';
+        if (!gcashNumber && !bankAccountDetails) continue;
+        paymentById.set(id, {
+          gcashNumber: gcashNumber || undefined,
+          bankAccountDetails: bankAccountDetails || undefined,
+        });
+      }
+    } catch {
+      // Optional columns may not exist in all environments.
+    }
+
     if (error || !data?.length) {
-      return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
+      return employees.map((emp) => ({
+        ...emp,
+        profilePicture: emp.profilePicture ?? null,
+        gcashNumber: paymentById.get(emp.id)?.gcashNumber ?? emp.gcashNumber,
+        bankAccountDetails: paymentById.get(emp.id)?.bankAccountDetails ?? emp.bankAccountDetails,
+      }));
     }
 
     const byId = new Map<string, string>();
@@ -759,6 +803,8 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
     return employees.map((emp) => ({
       ...emp,
       profilePicture: byId.get(emp.id) ?? null,
+      gcashNumber: paymentById.get(emp.id)?.gcashNumber ?? emp.gcashNumber,
+      bankAccountDetails: paymentById.get(emp.id)?.bankAccountDetails ?? emp.bankAccountDetails,
     }));
   } catch (err) {
     console.warn('Could not attach profile pictures:', err instanceof Error ? err.message : err);
@@ -807,6 +853,17 @@ function normalizeIncidentSnapshotPayload(value: unknown): IncidentSnapshotPaylo
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function pickText(row: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (text) return text;
+    }
+  }
+  return undefined;
 }
 
 function roundTo(value: number, digits: number): number {
@@ -1274,7 +1331,11 @@ function buildAidRequestCode(): string {
   return `AID-${ts.slice(-8)}`;
 }
 
-function mapAidRequestToResponse(row: AidAssistanceRequestRow, attachments: AidAttachmentRow[]) {
+function mapAidRequestToResponse(
+  row: AidAssistanceRequestRow,
+  attachments: AidAttachmentRow[],
+  applicantPaymentDetails?: { gcashNumber?: string; bankAccountDetails?: string }
+) {
   return {
     id: row.id,
     requestCode: row.request_code,
@@ -1290,6 +1351,8 @@ function mapAidRequestToResponse(row: AidAssistanceRequestRow, attachments: AidA
     damageType: row.damage_type,
     filedDate: new Date(row.submitted_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
     islandGroup: 'Luzon',
+    applicantGcashNumber: applicantPaymentDetails?.gcashNumber,
+    applicantBankAccountDetails: applicantPaymentDetails?.bankAccountDetails,
     managerReview: {
       decision: row.manager_decision ?? 'Pending',
       remarks: row.manager_remarks ?? undefined,
@@ -2093,7 +2156,10 @@ loadEmployees()
 
       const response = requestRows.map((row) => {
         const employee = allEmployees.find((emp) => emp.id === row.employee_id);
-        const mapped = mapAidRequestToResponse(row, grouped.get(row.id) ?? []);
+        const mapped = mapAidRequestToResponse(row, grouped.get(row.id) ?? [], {
+          gcashNumber: employee?.gcashNumber,
+          bankAccountDetails: employee?.bankAccountDetails,
+        });
         return {
           ...mapped,
           islandGroup: employee?.islandGroup ?? 'Luzon',
@@ -2245,7 +2311,12 @@ loadEmployees()
         savedAttachments.push(insertedAttachmentRows[0] as AidAttachmentRow);
       }
 
-      return res.status(201).json(mapAidRequestToResponse(requestRow, savedAttachments));
+      return res.status(201).json(
+        mapAidRequestToResponse(requestRow, savedAttachments, {
+          gcashNumber: employee.gcashNumber,
+          bankAccountDetails: employee.bankAccountDetails,
+        })
+      );
     });
 
     app.patch('/api/aid-assistance/:id/manager-review', async (req, res) => {
@@ -2315,7 +2386,13 @@ loadEmployees()
         .eq('aid_assistance_id', id)
         .order('uploaded_at', { ascending: false });
 
-      return res.json(mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[]));
+      const reviewedEmployee = allEmployees.find((emp) => emp.id === updated.employee_id);
+      return res.json(
+        mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[], {
+          gcashNumber: reviewedEmployee?.gcashNumber,
+          bankAccountDetails: reviewedEmployee?.bankAccountDetails,
+        })
+      );
     });
 
     app.patch('/api/aid-assistance/:id/admin-review', async (req, res) => {
@@ -2379,7 +2456,13 @@ loadEmployees()
         .eq('aid_assistance_id', id)
         .order('uploaded_at', { ascending: false });
 
-      return res.json(mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[]));
+      const reviewedEmployee = allEmployees.find((emp) => emp.id === updated.employee_id);
+      return res.json(
+        mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[], {
+          gcashNumber: reviewedEmployee?.gcashNumber,
+          bankAccountDetails: reviewedEmployee?.bankAccountDetails,
+        })
+      );
     });
 
     // Manager-scoped check-in (write). Rejects with 403 if target isn't a direct report.

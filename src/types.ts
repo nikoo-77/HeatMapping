@@ -48,6 +48,8 @@ export interface AidApplication {
   filedDate: string;
   department: string;
   islandGroup: string;
+  applicantGcashNumber?: string;
+  applicantBankAccountDetails?: string;
   managerReview?: {
     decision: 'Approved' | 'Rejected' | 'Pending';
     remarks?: string;

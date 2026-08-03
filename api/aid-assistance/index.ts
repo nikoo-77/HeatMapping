@@ -175,7 +175,10 @@ export default async function handler(req: any, res: any) {
       savedAttachments.push(insertedAttachmentRows[0] as AidAttachmentRow);
     }
 
-    const response = mapAidRequestToResponse(requestRow, savedAttachments, 'Luzon');
+    const response = mapAidRequestToResponse(requestRow, savedAttachments, 'Luzon', {
+      gcashNumber: employee.gcashNumber,
+      bankAccountDetails: employee.bankAccountDetails,
+    });
     return res.status(201).json(response);
   } catch (error: any) {
     return res.status(500).json({

@@ -60,6 +60,8 @@ export type AidRequestResponse = {
   damageType: 'Major' | 'Minor';
   filedDate: string;
   islandGroup: 'Luzon' | 'Visayas' | 'Mindanao';
+  applicantGcashNumber?: string;
+  applicantBankAccountDetails?: string;
   managerReview: {
     decision: 'Approved' | 'Rejected' | 'Pending';
     remarks?: string;
@@ -115,7 +117,8 @@ export function buildAidRequestCode(): string {
 export function mapAidRequestToResponse(
   row: AidAssistanceRequestRow,
   attachments: AidAttachmentRow[],
-  islandGroup: 'Luzon' | 'Visayas' | 'Mindanao' = 'Luzon'
+  islandGroup: 'Luzon' | 'Visayas' | 'Mindanao' = 'Luzon',
+  applicantPaymentDetails?: { gcashNumber?: string; bankAccountDetails?: string }
 ): AidRequestResponse {
   return {
     id: row.id,
@@ -132,6 +135,8 @@ export function mapAidRequestToResponse(
     damageType: row.damage_type,
     filedDate: new Date(row.submitted_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
     islandGroup,
+    applicantGcashNumber: applicantPaymentDetails?.gcashNumber,
+    applicantBankAccountDetails: applicantPaymentDetails?.bankAccountDetails,
     managerReview: {
       decision: row.manager_decision ?? 'Pending',
       remarks: row.manager_remarks ?? undefined,
@@ -285,7 +290,15 @@ export async function getAidRequestsByRole(params: {
   const employees = await loadEmployees();
   return requestRows.map((row) => {
     const employee = employees.find((emp) => emp.id === row.employee_id);
-    return mapAidRequestToResponse(row, grouped.get(row.id) ?? [], employee?.islandGroup ?? 'Luzon');
+    return mapAidRequestToResponse(
+      row,
+      grouped.get(row.id) ?? [],
+      employee?.islandGroup ?? 'Luzon',
+      {
+        gcashNumber: employee?.gcashNumber,
+        bankAccountDetails: employee?.bankAccountDetails,
+      }
+    );
   });
 }
 

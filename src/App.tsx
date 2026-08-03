@@ -7683,6 +7683,22 @@ export default function App() {
                 </div>
               </section>
 
+              {parseAidTypes(selectedAidApplication.aidType).includes('Cash') && (
+                <section className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 md:col-span-2">
+                  <p className="text-xs font-black uppercase tracking-widest text-blue-700">Cash Disbursement Details</p>
+                  <div className="mt-3 text-sm text-slate-700 space-y-1">
+                    <p>
+                      <span className="font-semibold">GCash Number:</span>{' '}
+                      {selectedAidApplication.applicantGcashNumber || employees.find((e) => e.id === selectedAidApplication.employeeId)?.gcashNumber || 'Not provided'}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Bank Account Details:</span>{' '}
+                      {selectedAidApplication.applicantBankAccountDetails || employees.find((e) => e.id === selectedAidApplication.employeeId)?.bankAccountDetails || 'Not provided'}
+                    </p>
+                  </div>
+                </section>
+              )}
+
               <section className="rounded-xl border border-slate-200 p-4 md:col-span-2">
                 <p className="text-xs font-black uppercase tracking-widest text-slate-500">Supporting Attachments</p>
                 <div className="mt-3 space-y-2">

@@ -25,6 +25,8 @@ export interface Employee {
   email: string;
   avatar: string;
   profilePicture?: string | null;
+  gcashNumber?: string;
+  bankAccountDetails?: string;
   address: string;
   islandGroup?: IslandGroup;
   region?: string;
@@ -54,6 +56,12 @@ interface SupabaseEmployeeRow {
   'OFFICIAL EMAIL'?: string | null;
   'PERSONAL EMAIL'?: string | null;
   'MOBILE NUMBER'?: string | null;
+  'GCASH NUMBER'?: string | null;
+  'GCash Number'?: string | null;
+  gcash_number?: string | null;
+  'BANK ACCOUNT DETAILS'?: string | null;
+  'Bank Account Details'?: string | null;
+  bank_account_details?: string | null;
   role?: string | null;
 }
 
@@ -272,6 +280,17 @@ function composeFullName(row: EmpPersonalDetailsRow): string {
   return parts.join(' ');
 }
 
+function pickText(row: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (text) return text;
+    }
+  }
+  return undefined;
+}
+
 async function queryAllRowsFromNormalizedTables(): Promise<SupabaseEmployeeRow[]> {
   const [personalRows, infoRows, contactRows, addressRows, departmentRows] = await Promise.all([
     queryTableRowsIfPresent<EmpPersonalDetailsRow>('emp_personal_details'),
@@ -379,6 +398,7 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
   const employees: Employee[] = [];
 
   for (const row of rows) {
+    const rowRecord = row as Record<string, unknown>;
     const empId = row['Employee ID'];
     if (!empId) continue;
 
@@ -446,6 +466,8 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
 
     const rawPhone = (row['MOBILE NUMBER'] ?? '').trim();
     const cleanPhone = rawPhone && !rawPhone.toUpperCase().includes('FOR UPDATE') ? rawPhone : undefined;
+    const gcashNumber = pickText(rowRecord, ['GCASH NUMBER', 'GCash Number', 'gcash_number']);
+    const bankAccountDetails = pickText(rowRecord, ['BANK ACCOUNT DETAILS', 'Bank Account Details', 'bank_account_details']);
 
     const officialEmail = (row['OFFICIAL EMAIL'] ?? '').trim();
     const personalEmail = (row['PERSONAL EMAIL'] ?? '').trim();
@@ -480,6 +502,8 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
       battery: Math.round(20 + seededRandom(empSeed + 4) * 80),
       status: seededRandom(empSeed + 5) > 0.92 ? 'Yellow' : 'Green',
       phone: cleanPhone,
+      gcashNumber,
+      bankAccountDetails,
       email,
       avatar,
       address,
@@ -499,19 +523,41 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
 async function attachProfilePictures(employees: Employee[]): Promise<Employee[]> {
   try {
     const supabase = getSupabaseClient();
-    const response = await supabase
+    const profileResponse = await supabase
       .from('accounts')
       .select('employee_id, profile_picture')
       .not('profile_picture', 'is', null);
-    const data = (response.data ?? []) as Array<{ employee_id?: string; profile_picture?: string | null }>;
-    const error = response.error;
+    const profileData = (profileResponse.data ?? []) as Array<{ employee_id?: string; profile_picture?: string | null }>;
+    const profileError = profileResponse.error;
 
-    if (error || !data || data.length === 0) {
-      return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
+    const paymentById = new Map<string, { gcashNumber?: string; bankAccountDetails?: string }>();
+    try {
+      const paymentResponse = await supabase
+        .from('accounts')
+        .select('employee_id, gcash_number, bank_account_details');
+      const paymentRows = (paymentResponse.data ?? []) as Array<{
+        employee_id?: string;
+        gcash_number?: string | null;
+        bank_account_details?: string | null;
+      }>;
+
+      for (const row of paymentRows) {
+        const id = String(row.employee_id ?? '').trim();
+        if (!id) continue;
+        const gcashNumber = typeof row.gcash_number === 'string' ? row.gcash_number.trim() : '';
+        const bankAccountDetails = typeof row.bank_account_details === 'string' ? row.bank_account_details.trim() : '';
+        if (!gcashNumber && !bankAccountDetails) continue;
+        paymentById.set(id, {
+          gcashNumber: gcashNumber || undefined,
+          bankAccountDetails: bankAccountDetails || undefined,
+        });
+      }
+    } catch {
+      // Optional columns may not exist yet; keep existing values from employee rows.
     }
 
     const byId = new Map<string, string>();
-    for (const row of data) {
+    for (const row of profileData) {
       const id = String((row as { employee_id?: string }).employee_id ?? '').trim();
       const url =
         typeof (row as { profile_picture?: string | null }).profile_picture === 'string'
@@ -522,7 +568,9 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
 
     return employees.map((emp) => ({
       ...emp,
-      profilePicture: byId.get(emp.id) ?? null,
+      profilePicture: (profileError ? emp.profilePicture : byId.get(emp.id)) ?? emp.profilePicture ?? null,
+      gcashNumber: paymentById.get(emp.id)?.gcashNumber ?? emp.gcashNumber,
+      bankAccountDetails: paymentById.get(emp.id)?.bankAccountDetails ?? emp.bankAccountDetails,
     }));
   } catch {
     return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
