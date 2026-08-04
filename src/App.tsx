@@ -652,7 +652,7 @@ export default function App() {
 
   // Seeded employee database distributed across the three Philippine island groups
   const [employees, setEmployees] = useState<Employee[]>(() => {
-    const CACHE_VERSION = 'regions-v4'; // bump when region assignment logic changes
+    const CACHE_VERSION = 'regions-v5-account-gps'; // bump when GPS merge / region logic changes
     const savedVersion = localStorage.getItem('island_map_employees_version');
     if (savedVersion !== CACHE_VERSION) {
       localStorage.removeItem('island_map_employees');
@@ -2688,7 +2688,7 @@ export default function App() {
 
   const applySavedHomeLocation = (latitude: number, longitude: number) => {
     const empId = currentUser.employeeId;
-    if (!empId) return;
+    const emailKey = currentUser.username.trim().toLowerCase();
     const LAT_MIN = 4.5;
     const LAT_MAX = 21.5;
     const LNG_MIN = 116.0;
@@ -2698,17 +2698,18 @@ export default function App() {
     const gridLat = parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2));
     const gridLng = parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2));
     setEmployees((prev) =>
-      prev.map((emp) =>
-        emp.id === empId
-          ? {
-              ...emp,
-              gpsLat: parseFloat(latitude.toFixed(6)),
-              gpsLng: parseFloat(longitude.toFixed(6)),
-              lat: gridLat,
-              lng: gridLng,
-            }
-          : emp
-      )
+      prev.map((emp) => {
+        const matchesId = !!empId && emp.id === empId;
+        const matchesEmail = !!emailKey && emp.email?.trim().toLowerCase() === emailKey;
+        if (!matchesId && !matchesEmail) return emp;
+        return {
+          ...emp,
+          gpsLat: parseFloat(latitude.toFixed(6)),
+          gpsLng: parseFloat(longitude.toFixed(6)),
+          lat: gridLat,
+          lng: gridLng,
+        };
+      })
     );
   };
 

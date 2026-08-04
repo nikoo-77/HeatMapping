@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { clearEmployeesCache } from '../../employees/_lib.js';
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL;
@@ -59,33 +60,75 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ message: 'This account cannot store a home map pin.' });
     }
 
+    const employeeId = String(account.employee_id).trim();
+    const username = String(account.username ?? '').trim().toLowerCase();
     const now = new Date().toISOString();
-    const { error } = await supabase
-      .from('accounts')
-      .update({
-        latitude,
-        longitude,
-        location_set_at: now,
-        updated_at: now,
-      })
-      .eq('employee_id', account.employee_id);
+    const attempts: Array<Record<string, unknown>> = [
+      { latitude, longitude, location_set_at: now, updated_at: now },
+      { latitude, longitude, updated_at: now },
+      { latitude, longitude },
+    ];
 
-    if (error) {
-      const hint = /latitude|longitude|location_set_at/i.test(error.message)
-        ? ' Run supabase/migrations/20260804_accounts_location.sql in Supabase first.'
-        : '';
+    let saved: { employee_id: string; username?: string; latitude: number | null; longitude: number | null } | null =
+      null;
+    let lastError = '';
+
+    for (const patch of attempts) {
+      let result = await supabase
+        .from('accounts')
+        .update(patch)
+        .eq('employee_id', employeeId)
+        .select('employee_id, username, latitude, longitude')
+        .maybeSingle();
+
+      if ((result.error || !result.data) && username) {
+        result = await supabase
+          .from('accounts')
+          .update(patch)
+          .eq('username', username)
+          .select('employee_id, username, latitude, longitude')
+          .maybeSingle();
+      }
+
+      if (!result.error && result.data) {
+        saved = result.data as {
+          employee_id: string;
+          username?: string;
+          latitude: number | null;
+          longitude: number | null;
+        };
+        break;
+      }
+      lastError = result.error?.message ?? 'No account row was updated.';
+      if (result.error && !/location_set_at|updated_at|column/i.test(result.error.message)) {
+        break;
+      }
+    }
+
+    if (!saved) {
       return res.status(500).json({
-        message: `Failed to save location.${hint}`,
-        detail: error.message,
+        message:
+          'Failed to save location to the database. Confirm accounts.latitude and accounts.longitude exist.',
+        detail: lastError,
       });
     }
 
+    const savedLat = Number(saved.latitude);
+    const savedLng = Number(saved.longitude);
+    if (!Number.isFinite(savedLat) || !Number.isFinite(savedLng)) {
+      return res.status(500).json({
+        message: 'Location update did not persist latitude/longitude.',
+      });
+    }
+
+    clearEmployeesCache();
+
     return res.status(200).json({
       message: 'Home location saved.',
-      employeeId: account.employee_id,
-      username: account.username,
-      latitude,
-      longitude,
+      employeeId: String(saved.employee_id || employeeId).trim(),
+      username: saved.username ?? account.username,
+      latitude: savedLat,
+      longitude: savedLng,
       locationSetAt: now,
     });
   } catch (error: any) {

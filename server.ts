@@ -751,64 +751,128 @@ async function ensureEmployeeLoginAccount(emp: Employee, overwritePassword: bool
 // ── In-memory cache of loaded employees (service-role key bypasses Supabase RLS) ──
 let allEmployees: Employee[] = [];
 
+type AccountExtrasRow = {
+  employee_id?: string;
+  username?: string | null;
+  profile_picture?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+function normalizeLookupKey(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+/** Paginate accounts so GPS pins are not lost when the table exceeds Supabase's 1000-row page. */
+async function loadAccountExtras(): Promise<AccountExtrasRow[]> {
+  const rows: AccountExtrasRow[] = [];
+  let from = 0;
+  const pageSize = 1000;
+
+  // Prefer lat/lng; fall back if location columns are missing from schema cache.
+  let selectCols = 'employee_id, username, profile_picture, latitude, longitude';
+  let triedLegacy = false;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('accounts')
+      .select(selectCols)
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      if (!triedLegacy && /latitude|longitude/i.test(error.message)) {
+        console.warn(
+          'accounts.latitude/longitude not readable — pins will not load until columns exist:',
+          error.message
+        );
+        selectCols = 'employee_id, username, profile_picture';
+        triedLegacy = true;
+        from = 0;
+        rows.length = 0;
+        continue;
+      }
+      throw new Error(error.message);
+    }
+
+    if (!data?.length) break;
+    rows.push(...(data as AccountExtrasRow[]));
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 /** Merge accounts.profile_picture + confirmed GPS + payment fields onto employee records. */
 async function attachProfilePictures(employees: Employee[]): Promise<Employee[]> {
   try {
-    const { data, error } = await supabase
-      .from('accounts')
-      .select('employee_id, profile_picture, latitude, longitude');
+    const data = await loadAccountExtras();
 
     const paymentById = new Map<string, { gcashNumber?: string; bankAccountDetails?: string }>();
     try {
-      const payment = await supabase
-        .from('accounts')
-        .select('employee_id, gcash_number, bank_account_details');
-      const paymentRows = (payment.data ?? []) as Array<{
-        employee_id?: string;
-        gcash_number?: string | null;
-        bank_account_details?: string | null;
-      }>;
-      for (const row of paymentRows) {
-        const id = String(row.employee_id ?? '').trim();
-        if (!id) continue;
-        const gcashNumber = typeof row.gcash_number === 'string' ? row.gcash_number.trim() : '';
-        const bankAccountDetails = typeof row.bank_account_details === 'string' ? row.bank_account_details.trim() : '';
-        if (!gcashNumber && !bankAccountDetails) continue;
-        paymentById.set(id, {
-          gcashNumber: gcashNumber || undefined,
-          bankAccountDetails: bankAccountDetails || undefined,
-        });
+      let payFrom = 0;
+      const pageSize = 1000;
+      while (true) {
+        const payment = await supabase
+          .from('accounts')
+          .select('employee_id, username, gcash_number, bank_account_details')
+          .range(payFrom, payFrom + pageSize - 1);
+        if (payment.error) break;
+        const paymentRows = (payment.data ?? []) as Array<{
+          employee_id?: string;
+          username?: string | null;
+          gcash_number?: string | null;
+          bank_account_details?: string | null;
+        }>;
+        if (!paymentRows.length) break;
+        for (const row of paymentRows) {
+          const id = String(row.employee_id ?? '').trim();
+          const username = normalizeLookupKey(row.username);
+          const gcashNumber = typeof row.gcash_number === 'string' ? row.gcash_number.trim() : '';
+          const bankAccountDetails = typeof row.bank_account_details === 'string' ? row.bank_account_details.trim() : '';
+          if (!gcashNumber && !bankAccountDetails) continue;
+          const paymentInfo = {
+            gcashNumber: gcashNumber || undefined,
+            bankAccountDetails: bankAccountDetails || undefined,
+          };
+          if (id) paymentById.set(normalizeLookupKey(id), paymentInfo);
+          if (username) paymentById.set(username, paymentInfo);
+        }
+        if (paymentRows.length < pageSize) break;
+        payFrom += pageSize;
       }
     } catch {
       // Optional columns may not exist in all environments.
     }
 
     const picById = new Map<string, string>();
-    const gpsById = new Map<string, { lat: number; lng: number }>();
-    if (!error && data?.length) {
-      for (const row of data) {
-        const id = String((row as { employee_id?: string }).employee_id ?? '').trim();
-        if (!id) continue;
-        const url =
-          typeof (row as { profile_picture?: string | null }).profile_picture === 'string'
-            ? String((row as { profile_picture: string }).profile_picture).trim()
-            : '';
-        if (url) picById.set(id, url);
+    const gpsByKey = new Map<string, { lat: number; lng: number }>();
+    for (const row of data) {
+      const id = String(row.employee_id ?? '').trim();
+      const username = normalizeLookupKey(row.username);
+      const url = typeof row.profile_picture === 'string' ? String(row.profile_picture).trim() : '';
+      if (url) {
+        if (id) picById.set(normalizeLookupKey(id), url);
+        if (username) picById.set(username, url);
+      }
 
-        const lat = Number((row as { latitude?: number | null }).latitude);
-        const lng = Number((row as { longitude?: number | null }).longitude);
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
-          gpsById.set(id, { lat, lng });
-        }
+      const lat = Number(row.latitude);
+      const lng = Number(row.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) {
+        const gps = { lat, lng };
+        if (id) gpsByKey.set(normalizeLookupKey(id), gps);
+        if (username) gpsByKey.set(username, gps);
       }
     }
 
     return employees.map((emp) => {
-      const payment = paymentById.get(emp.id);
-      const gps = gpsById.get(emp.id);
+      const empIdKey = normalizeLookupKey(emp.id);
+      const emailKey = normalizeLookupKey(emp.email);
+      const payment = paymentById.get(empIdKey) ?? (emailKey ? paymentById.get(emailKey) : undefined);
+      const gps = gpsByKey.get(empIdKey) ?? (emailKey ? gpsByKey.get(emailKey) : undefined);
       const base: Employee = {
         ...emp,
-        profilePicture: picById.get(emp.id) ?? emp.profilePicture ?? null,
+        profilePicture: picById.get(empIdKey) ?? (emailKey ? picById.get(emailKey) : undefined) ?? emp.profilePicture ?? null,
         gcashNumber: payment?.gcashNumber ?? emp.gcashNumber,
         bankAccountDetails: payment?.bankAccountDetails ?? emp.bankAccountDetails,
       };
@@ -848,17 +912,22 @@ function setEmployeeProfilePicture(employeeId: string, profilePicture: string | 
   }
 }
 
-function setEmployeeGps(employeeId: string, gpsLat: number, gpsLng: number) {
-  const idx = allEmployees.findIndex((e) => e.id === employeeId);
-  if (idx < 0) return;
+function setEmployeeGps(employeeId: string, gpsLat: number, gpsLng: number, email?: string | null) {
+  const idKey = normalizeLookupKey(employeeId);
+  const emailKey = normalizeLookupKey(email);
   const grid = gpsToGridCoords(gpsLat, gpsLng);
-  allEmployees[idx] = {
-    ...allEmployees[idx],
+  const nextGps = {
     gpsLat: parseFloat(gpsLat.toFixed(6)),
     gpsLng: parseFloat(gpsLng.toFixed(6)),
     lat: grid.lat,
     lng: grid.lng,
   };
+  allEmployees = allEmployees.map((emp) => {
+    const matchesId = normalizeLookupKey(emp.id) === idKey && !!idKey;
+    const matchesEmail = !!emailKey && normalizeLookupKey(emp.email) === emailKey;
+    if (!matchesId && !matchesEmail) return emp;
+    return { ...emp, ...nextGps };
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1934,35 +2003,81 @@ app.post('/api/account/location', async (req, res) => {
       return res.status(400).json({ message: 'This account cannot store a home map pin.' });
     }
 
+    const employeeId = String(account.employee_id).trim();
+    const username = String(account.username ?? '').trim().toLowerCase();
     const now = new Date().toISOString();
-    const { error } = await supabase
-      .from('accounts')
-      .update({
-        latitude,
-        longitude,
-        location_set_at: now,
-        updated_at: now,
-      })
-      .eq('employee_id', account.employee_id);
 
-    if (error) {
-      const hint = /latitude|longitude|location_set_at/i.test(error.message)
-        ? ' Run supabase/migrations/20260804_accounts_location.sql in Supabase first.'
-        : '';
+    // Prefer full payload; fall back if optional columns are missing.
+    const attempts: Array<Record<string, unknown>> = [
+      { latitude, longitude, location_set_at: now, updated_at: now },
+      { latitude, longitude, updated_at: now },
+      { latitude, longitude },
+    ];
+
+    let saved: { employee_id: string; username?: string; latitude: number | null; longitude: number | null } | null = null;
+    let lastError = '';
+
+    for (const patch of attempts) {
+      // Match by employee_id first, then username (covers ID formatting mismatches).
+      let result = await supabase
+        .from('accounts')
+        .update(patch)
+        .eq('employee_id', employeeId)
+        .select('employee_id, username, latitude, longitude')
+        .maybeSingle();
+
+      if ((result.error || !result.data) && username) {
+        result = await supabase
+          .from('accounts')
+          .update(patch)
+          .eq('username', username)
+          .select('employee_id, username, latitude, longitude')
+          .maybeSingle();
+      }
+
+      if (!result.error && result.data) {
+        saved = result.data as {
+          employee_id: string;
+          username?: string;
+          latitude: number | null;
+          longitude: number | null;
+        };
+        break;
+      }
+      lastError = result.error?.message ?? 'No account row was updated.';
+      // Only retry when optional columns are the problem.
+      if (result.error && !/location_set_at|updated_at|column/i.test(result.error.message)) {
+        break;
+      }
+    }
+
+    if (!saved) {
       return res.status(500).json({
-        message: `Failed to save location.${hint}`,
-        detail: error.message,
+        message:
+          'Failed to save location to the database. Confirm accounts.latitude and accounts.longitude exist, then try again.',
+        detail: lastError,
+        employeeId,
+        username,
       });
     }
 
-    setEmployeeGps(account.employee_id, latitude, longitude);
+    const savedLat = Number(saved.latitude);
+    const savedLng = Number(saved.longitude);
+    if (!Number.isFinite(savedLat) || !Number.isFinite(savedLng)) {
+      return res.status(500).json({
+        message: 'Location update did not persist latitude/longitude. Check the accounts table columns.',
+      });
+    }
+
+    const savedEmployeeId = String(saved.employee_id || employeeId).trim();
+    setEmployeeGps(savedEmployeeId, savedLat, savedLng, saved.username ?? account.username);
 
     return res.json({
       message: 'Home location saved.',
-      employeeId: account.employee_id,
-      username: account.username,
-      latitude,
-      longitude,
+      employeeId: savedEmployeeId,
+      username: saved.username ?? account.username,
+      latitude: savedLat,
+      longitude: savedLng,
       locationSetAt: now,
     });
   } catch (err) {

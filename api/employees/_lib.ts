@@ -532,71 +532,130 @@ function gpsToGridCoords(gpsLat: number, gpsLng: number): { lat: number; lng: nu
   };
 }
 
+type AccountExtrasRow = {
+  employee_id?: string;
+  username?: string | null;
+  profile_picture?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+function normalizeLookupKey(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+async function loadAccountExtras(): Promise<AccountExtrasRow[]> {
+  const supabase = getSupabaseClient();
+  const rows: AccountExtrasRow[] = [];
+  let from = 0;
+  const pageSize = 1000;
+  let selectCols = 'employee_id, username, profile_picture, latitude, longitude';
+  let triedLegacy = false;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('accounts')
+      .select(selectCols)
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      if (!triedLegacy && /latitude|longitude/i.test(error.message)) {
+        selectCols = 'employee_id, username, profile_picture';
+        triedLegacy = true;
+        from = 0;
+        rows.length = 0;
+        continue;
+      }
+      throw new Error(error.message);
+    }
+
+    if (!data?.length) break;
+    rows.push(...(data as AccountExtrasRow[]));
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 /** Merge accounts.profile_picture + confirmed GPS + payment fields onto employee records. */
 async function attachProfilePictures(employees: Employee[]): Promise<Employee[]> {
   try {
     const supabase = getSupabaseClient();
-    const { data, error } = await supabase
-      .from('accounts')
-      .select('employee_id, profile_picture, latitude, longitude');
+    const data = await loadAccountExtras();
 
     const paymentById = new Map<string, { gcashNumber?: string; bankAccountDetails?: string }>();
     try {
-      const paymentResponse = await supabase
-        .from('accounts')
-        .select('employee_id, gcash_number, bank_account_details');
-      const paymentRows = (paymentResponse.data ?? []) as Array<{
-        employee_id?: string;
-        gcash_number?: string | null;
-        bank_account_details?: string | null;
-      }>;
+      let payFrom = 0;
+      const pageSize = 1000;
+      while (true) {
+        const paymentResponse = await supabase
+          .from('accounts')
+          .select('employee_id, username, gcash_number, bank_account_details')
+          .range(payFrom, payFrom + pageSize - 1);
+        if (paymentResponse.error) break;
+        const paymentRows = (paymentResponse.data ?? []) as Array<{
+          employee_id?: string;
+          username?: string | null;
+          gcash_number?: string | null;
+          bank_account_details?: string | null;
+        }>;
+        if (!paymentRows.length) break;
 
-      for (const row of paymentRows) {
-        const id = String(row.employee_id ?? '').trim();
-        if (!id) continue;
-        const gcashNumber = typeof row.gcash_number === 'string' ? row.gcash_number.trim() : '';
-        const bankAccountDetails = typeof row.bank_account_details === 'string' ? row.bank_account_details.trim() : '';
-        if (!gcashNumber && !bankAccountDetails) continue;
-        paymentById.set(id, {
-          gcashNumber: gcashNumber || undefined,
-          bankAccountDetails: bankAccountDetails || undefined,
-        });
+        for (const row of paymentRows) {
+          const id = String(row.employee_id ?? '').trim();
+          const username = normalizeLookupKey(row.username);
+          const gcashNumber = typeof row.gcash_number === 'string' ? row.gcash_number.trim() : '';
+          const bankAccountDetails = typeof row.bank_account_details === 'string' ? row.bank_account_details.trim() : '';
+          if (!gcashNumber && !bankAccountDetails) continue;
+          const payment = {
+            gcashNumber: gcashNumber || undefined,
+            bankAccountDetails: bankAccountDetails || undefined,
+          };
+          if (id) paymentById.set(normalizeLookupKey(id), payment);
+          if (username) paymentById.set(username, payment);
+        }
+        if (paymentRows.length < pageSize) break;
+        payFrom += pageSize;
       }
     } catch {
       // Optional columns may not exist yet; keep existing values from employee rows.
     }
 
     const picById = new Map<string, string>();
-    const gpsById = new Map<string, { lat: number; lng: number }>();
-    if (!error && data?.length) {
-      for (const row of data as Array<{
-        employee_id?: string;
-        profile_picture?: string | null;
-        latitude?: number | null;
-        longitude?: number | null;
-      }>) {
-        const id = String(row.employee_id ?? '').trim();
-        if (!id) continue;
-        const url = typeof row.profile_picture === 'string' ? row.profile_picture.trim() : '';
-        if (url) picById.set(id, url);
-        const lat = Number(row.latitude);
-        const lng = Number(row.longitude);
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
-          gpsById.set(id, { lat, lng });
-        }
+    const gpsByKey = new Map<string, { lat: number; lng: number }>();
+    for (const row of data) {
+      const id = String(row.employee_id ?? '').trim();
+      const username = normalizeLookupKey(row.username);
+      const url = typeof row.profile_picture === 'string' ? row.profile_picture.trim() : '';
+      if (url) {
+        if (id) picById.set(normalizeLookupKey(id), url);
+        if (username) picById.set(username, url);
+      }
+      const lat = Number(row.latitude);
+      const lng = Number(row.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) {
+        const gps = { lat, lng };
+        if (id) gpsByKey.set(normalizeLookupKey(id), gps);
+        if (username) gpsByKey.set(username, gps);
       }
     }
 
     return employees.map((emp) => {
-      const payment = paymentById.get(emp.id);
-      const gps = gpsById.get(emp.id);
+      const empIdKey = normalizeLookupKey(emp.id);
+      const emailKey = normalizeLookupKey(emp.email);
+      const payment = paymentById.get(empIdKey) ?? (emailKey ? paymentById.get(emailKey) : undefined);
+      const gps = gpsByKey.get(empIdKey) ?? (emailKey ? gpsByKey.get(emailKey) : undefined);
       const base: Employee = {
         ...emp,
-        profilePicture: picById.get(emp.id) ?? emp.profilePicture ?? null,
+        profilePicture: picById.get(empIdKey) ?? (emailKey ? picById.get(emailKey) : undefined) ?? emp.profilePicture ?? null,
         gcashNumber: payment?.gcashNumber ?? emp.gcashNumber,
         bankAccountDetails: payment?.bankAccountDetails ?? emp.bankAccountDetails,
       };
-      if (!gps) return base;
+      if (!gps) {
+        // No confirmed account pin — keep address/city scatter coordinates.
+        return base;
+      }
       const grid = gpsToGridCoords(gps.lat, gps.lng);
       return {
         ...base,
@@ -613,14 +672,19 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
 
 export async function getEmployees(forceRefresh = false): Promise<Employee[]> {
   if (!forceRefresh && cache && Date.now() < cache.expiresAt) {
-    // Still refresh photos so uploads appear without waiting for full cache expiry.
+    // Always re-merge accounts GPS/photos so newly saved pins appear immediately.
     return attachProfilePictures(cache.data);
   }
 
   const rows = await queryAllRows();
-  const data = await attachProfilePictures(mapRowsToEmployees(rows));
-  cache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
-  return data;
+  // Cache RAW mapped rows (city scatter only). Confirmed GPS is applied on every read.
+  const mapped = mapRowsToEmployees(rows);
+  cache = { data: mapped, expiresAt: Date.now() + CACHE_TTL_MS };
+  return attachProfilePictures(mapped);
+}
+
+export function clearEmployeesCache() {
+  cache = null;
 }
 
 export function readManagerFromRequest(req: any): { name: string; id?: string } {
