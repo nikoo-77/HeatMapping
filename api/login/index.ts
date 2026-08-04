@@ -12,6 +12,8 @@ interface AccountRow {
   display_name: string | null;
   profile_picture: string | null;
   is_active: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 function normalizeAccountText(value: string | null | undefined): string {
@@ -91,20 +93,42 @@ export default async function handler(req: any, res: any) {
     }
 
     const supabase = getSupabase();
+    const selectCols =
+      'employee_id, username, password_hash, access_role, display_name, profile_picture, is_active, latitude, longitude';
     let { data, error } = await supabase
       .from('accounts')
-      .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
+      .select(selectCols)
       .eq('username', identifier)
       .maybeSingle();
+
+    // Older DBs without location columns
+    if (error && /latitude|longitude/i.test(error.message)) {
+      const legacy = await supabase
+        .from('accounts')
+        .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
+        .eq('username', identifier)
+        .maybeSingle();
+      data = legacy.data;
+      error = legacy.error;
+    }
 
     if (!data && !error) {
       const byEmp = await supabase
         .from('accounts')
-        .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
+        .select(selectCols)
         .eq('employee_id', String(req.body?.identifier ?? req.body?.username ?? '').trim())
         .maybeSingle();
       data = byEmp.data;
       error = byEmp.error;
+      if (error && /latitude|longitude/i.test(error.message)) {
+        const legacy = await supabase
+          .from('accounts')
+          .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
+          .eq('employee_id', String(req.body?.identifier ?? req.body?.username ?? '').trim())
+          .maybeSingle();
+        data = legacy.data;
+        error = legacy.error;
+      }
     }
 
     if (error) {
@@ -127,8 +151,15 @@ export default async function handler(req: any, res: any) {
       employeeId: account.employee_id,
       displayName: account.display_name ?? account.username,
       profilePicture: account.profile_picture ?? null,
+      latitude: account.latitude ?? null,
+      longitude: account.longitude ?? null,
       mustChangePassword:
         account.access_role === 'official' && verifyPassword('123456', account.password_hash),
+      mustSetLocation:
+        account.access_role === 'official' &&
+        (account.latitude == null || account.longitude == null ||
+          !Number.isFinite(Number(account.latitude)) ||
+          !Number.isFinite(Number(account.longitude))),
       canSwitchRoles,
       switchableRoles,
     });

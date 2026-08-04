@@ -751,13 +751,12 @@ async function ensureEmployeeLoginAccount(emp: Employee, overwritePassword: bool
 // ── In-memory cache of loaded employees (service-role key bypasses Supabase RLS) ──
 let allEmployees: Employee[] = [];
 
-/** Merge accounts.profile_picture onto employee records by employee_id. */
+/** Merge accounts.profile_picture + confirmed GPS + payment fields onto employee records. */
 async function attachProfilePictures(employees: Employee[]): Promise<Employee[]> {
   try {
     const { data, error } = await supabase
       .from('accounts')
-      .select('employee_id, profile_picture')
-      .not('profile_picture', 'is', null);
+      .select('employee_id, profile_picture, latitude, longitude');
 
     const paymentById = new Map<string, { gcashNumber?: string; bankAccountDetails?: string }>();
     try {
@@ -784,32 +783,62 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
       // Optional columns may not exist in all environments.
     }
 
-    if (error || !data?.length) {
-      return employees.map((emp) => ({
+    const picById = new Map<string, string>();
+    const gpsById = new Map<string, { lat: number; lng: number }>();
+    if (!error && data?.length) {
+      for (const row of data) {
+        const id = String((row as { employee_id?: string }).employee_id ?? '').trim();
+        if (!id) continue;
+        const url =
+          typeof (row as { profile_picture?: string | null }).profile_picture === 'string'
+            ? String((row as { profile_picture: string }).profile_picture).trim()
+            : '';
+        if (url) picById.set(id, url);
+
+        const lat = Number((row as { latitude?: number | null }).latitude);
+        const lng = Number((row as { longitude?: number | null }).longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          gpsById.set(id, { lat, lng });
+        }
+      }
+    }
+
+    return employees.map((emp) => {
+      const payment = paymentById.get(emp.id);
+      const gps = gpsById.get(emp.id);
+      const base: Employee = {
         ...emp,
-        profilePicture: emp.profilePicture ?? null,
-        gcashNumber: paymentById.get(emp.id)?.gcashNumber ?? emp.gcashNumber,
-        bankAccountDetails: paymentById.get(emp.id)?.bankAccountDetails ?? emp.bankAccountDetails,
-      }));
-    }
-
-    const byId = new Map<string, string>();
-    for (const row of data) {
-      const id = String(row.employee_id ?? '').trim();
-      const url = typeof row.profile_picture === 'string' ? row.profile_picture.trim() : '';
-      if (id && url) byId.set(id, url);
-    }
-
-    return employees.map((emp) => ({
-      ...emp,
-      profilePicture: byId.get(emp.id) ?? null,
-      gcashNumber: paymentById.get(emp.id)?.gcashNumber ?? emp.gcashNumber,
-      bankAccountDetails: paymentById.get(emp.id)?.bankAccountDetails ?? emp.bankAccountDetails,
-    }));
+        profilePicture: picById.get(emp.id) ?? emp.profilePicture ?? null,
+        gcashNumber: payment?.gcashNumber ?? emp.gcashNumber,
+        bankAccountDetails: payment?.bankAccountDetails ?? emp.bankAccountDetails,
+      };
+      if (!gps) return base;
+      const grid = gpsToGridCoords(gps.lat, gps.lng);
+      return {
+        ...base,
+        gpsLat: parseFloat(gps.lat.toFixed(6)),
+        gpsLng: parseFloat(gps.lng.toFixed(6)),
+        lat: grid.lat,
+        lng: grid.lng,
+      };
+    });
   } catch (err) {
-    console.warn('Could not attach profile pictures:', err instanceof Error ? err.message : err);
+    console.warn('Could not attach account profile/location fields:', err instanceof Error ? err.message : err);
     return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
   }
+}
+
+function gpsToGridCoords(gpsLat: number, gpsLng: number): { lat: number; lng: number } {
+  const LAT_MIN = 4.5;
+  const LAT_MAX = 21.5;
+  const LNG_MIN = 116.0;
+  const LNG_MAX = 127.0;
+  const gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
+  const gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+  return {
+    lat: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
+    lng: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
+  };
 }
 
 function setEmployeeProfilePicture(employeeId: string, profilePicture: string | null) {
@@ -817,6 +846,19 @@ function setEmployeeProfilePicture(employeeId: string, profilePicture: string | 
   if (idx >= 0) {
     allEmployees[idx] = { ...allEmployees[idx], profilePicture };
   }
+}
+
+function setEmployeeGps(employeeId: string, gpsLat: number, gpsLng: number) {
+  const idx = allEmployees.findIndex((e) => e.id === employeeId);
+  if (idx < 0) return;
+  const grid = gpsToGridCoords(gpsLat, gpsLng);
+  allEmployees[idx] = {
+    ...allEmployees[idx],
+    gpsLat: parseFloat(gpsLat.toFixed(6)),
+    gpsLng: parseFloat(gpsLng.toFixed(6)),
+    lat: grid.lat,
+    lng: grid.lng,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1401,6 +1443,9 @@ interface AccountRow {
   display_name: string | null;
   profile_picture: string | null;
   is_active: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+  location_set_at?: string | null;
 }
 
 function normalizeAccountText(value: string | null | undefined): string {
@@ -1640,29 +1685,54 @@ async function syncAccountsFromEmployees(employees: Employee[]): Promise<void> {
 
 async function findAccountByUsername(username: string): Promise<AccountRow | null> {
   const normalized = username.trim().toLowerCase();
+  const selectCols =
+    'employee_id, username, password_hash, access_role, display_name, profile_picture, is_active, latitude, longitude, location_set_at';
   const { data, error } = await supabase
     .from('accounts')
-    .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
+    .select(selectCols)
     .eq('username', normalized)
     .maybeSingle();
 
   if (error) {
-    throw new Error(error.message);
+    // Older DBs without location columns — fall back so login still works.
+    if (/latitude|longitude|location_set_at/i.test(error.message)) {
+      const { data: legacy, error: legacyError } = await supabase
+        .from('accounts')
+        .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
+        .eq('username', normalized)
+        .maybeSingle();
+      if (legacyError) throw new Error(legacyError.message);
+      if (legacy) return dataWithNullLocation(legacy as AccountRow);
+    } else {
+      throw new Error(error.message);
+    }
   }
   if (data) return data as AccountRow;
 
-  // Allow login with employee ID when username was not an email match.
   const empId = username.trim();
   const { data: byEmp, error: empError } = await supabase
     .from('accounts')
-    .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
+    .select(selectCols)
     .eq('employee_id', empId)
     .maybeSingle();
 
   if (empError) {
+    if (/latitude|longitude|location_set_at/i.test(empError.message)) {
+      const { data: legacy, error: legacyError } = await supabase
+        .from('accounts')
+        .select('employee_id, username, password_hash, access_role, display_name, profile_picture, is_active')
+        .eq('employee_id', empId)
+        .maybeSingle();
+      if (legacyError) throw new Error(legacyError.message);
+      return legacy ? dataWithNullLocation(legacy as AccountRow) : null;
+    }
     throw new Error(empError.message);
   }
   return (byEmp as AccountRow | null) ?? null;
+}
+
+function dataWithNullLocation(row: AccountRow): AccountRow {
+  return { ...row, latitude: null, longitude: null, location_set_at: null };
 }
 
 // Login is registered immediately so auth works even while employee sync runs.
@@ -1694,9 +1764,17 @@ app.post('/api/login', async (req, res) => {
       employeeId: account.employee_id ?? employee?.id ?? null,
       displayName: account.display_name ?? employee?.name ?? account.username,
       profilePicture: account.profile_picture ?? null,
+      latitude: account.latitude ?? null,
+      longitude: account.longitude ?? null,
       // Prompt employees still on the seeded default to change password after login.
       mustChangePassword:
         account.access_role === 'official' && verifyPassword('123456', account.password_hash),
+      // Prompt employees who have never confirmed a precise home pin.
+      mustSetLocation:
+        account.access_role === 'official' &&
+        (account.latitude == null || account.longitude == null ||
+          !Number.isFinite(Number(account.latitude)) ||
+          !Number.isFinite(Number(account.longitude))),
       canSwitchRoles,
       switchableRoles,
     });
@@ -1828,6 +1906,69 @@ app.delete('/api/account/profile-picture', async (req, res) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Profile picture removal failed.';
     return res.status(500).json({ message, detail: message });
+  }
+});
+
+/** Save employee-confirmed home GPS pin to accounts.latitude / accounts.longitude. */
+app.post('/api/account/location', async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier ?? req.body?.username ?? '').trim();
+    const latitude = Number(req.body?.latitude);
+    const longitude = Number(req.body?.longitude);
+
+    if (!identifier) {
+      return res.status(400).json({ message: 'Account identifier is required.' });
+    }
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return res.status(400).json({ message: 'Valid latitude and longitude are required.' });
+    }
+    if (latitude < 4.5 || latitude > 21.5 || longitude < 116 || longitude > 127) {
+      return res.status(400).json({ message: 'Location must be inside the Philippines.' });
+    }
+
+    const account = await findAccountByUsername(identifier);
+    if (!account || !account.is_active) {
+      return res.status(401).json({ message: 'Account not found or inactive.' });
+    }
+    if (!account.employee_id || account.employee_id === 'ADMIN' || account.employee_id === 'MANAGER') {
+      return res.status(400).json({ message: 'This account cannot store a home map pin.' });
+    }
+
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from('accounts')
+      .update({
+        latitude,
+        longitude,
+        location_set_at: now,
+        updated_at: now,
+      })
+      .eq('employee_id', account.employee_id);
+
+    if (error) {
+      const hint = /latitude|longitude|location_set_at/i.test(error.message)
+        ? ' Run supabase/migrations/20260804_accounts_location.sql in Supabase first.'
+        : '';
+      return res.status(500).json({
+        message: `Failed to save location.${hint}`,
+        detail: error.message,
+      });
+    }
+
+    setEmployeeGps(account.employee_id, latitude, longitude);
+
+    return res.json({
+      message: 'Home location saved.',
+      employeeId: account.employee_id,
+      username: account.username,
+      latitude,
+      longitude,
+      locationSetAt: now,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Location save failed.';
+    console.error('Account location error:', message);
+    return res.status(500).json({ message: 'Location save failed.', detail: message });
   }
 });
 

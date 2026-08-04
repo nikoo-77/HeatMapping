@@ -519,16 +519,26 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
   return employees;
 }
 
-/** Merge accounts.profile_picture onto employee records by employee_id. */
+function gpsToGridCoords(gpsLat: number, gpsLng: number): { lat: number; lng: number } {
+  const LAT_MIN = 4.5;
+  const LAT_MAX = 21.5;
+  const LNG_MIN = 116.0;
+  const LNG_MAX = 127.0;
+  const gridY = ((LAT_MAX - gpsLat) / (LAT_MAX - LAT_MIN)) * 100;
+  const gridX = ((gpsLng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+  return {
+    lat: parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2)),
+    lng: parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2)),
+  };
+}
+
+/** Merge accounts.profile_picture + confirmed GPS + payment fields onto employee records. */
 async function attachProfilePictures(employees: Employee[]): Promise<Employee[]> {
   try {
     const supabase = getSupabaseClient();
-    const profileResponse = await supabase
+    const { data, error } = await supabase
       .from('accounts')
-      .select('employee_id, profile_picture')
-      .not('profile_picture', 'is', null);
-    const profileData = (profileResponse.data ?? []) as Array<{ employee_id?: string; profile_picture?: string | null }>;
-    const profileError = profileResponse.error;
+      .select('employee_id, profile_picture, latitude, longitude');
 
     const paymentById = new Map<string, { gcashNumber?: string; bankAccountDetails?: string }>();
     try {
@@ -556,22 +566,46 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
       // Optional columns may not exist yet; keep existing values from employee rows.
     }
 
-    const byId = new Map<string, string>();
-    for (const row of profileData) {
-      const id = String((row as { employee_id?: string }).employee_id ?? '').trim();
-      const url =
-        typeof (row as { profile_picture?: string | null }).profile_picture === 'string'
-          ? (row as { profile_picture: string }).profile_picture.trim()
-          : '';
-      if (id && url) byId.set(id, url);
+    const picById = new Map<string, string>();
+    const gpsById = new Map<string, { lat: number; lng: number }>();
+    if (!error && data?.length) {
+      for (const row of data as Array<{
+        employee_id?: string;
+        profile_picture?: string | null;
+        latitude?: number | null;
+        longitude?: number | null;
+      }>) {
+        const id = String(row.employee_id ?? '').trim();
+        if (!id) continue;
+        const url = typeof row.profile_picture === 'string' ? row.profile_picture.trim() : '';
+        if (url) picById.set(id, url);
+        const lat = Number(row.latitude);
+        const lng = Number(row.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          gpsById.set(id, { lat, lng });
+        }
+      }
     }
 
-    return employees.map((emp) => ({
-      ...emp,
-      profilePicture: (profileError ? emp.profilePicture : byId.get(emp.id)) ?? emp.profilePicture ?? null,
-      gcashNumber: paymentById.get(emp.id)?.gcashNumber ?? emp.gcashNumber,
-      bankAccountDetails: paymentById.get(emp.id)?.bankAccountDetails ?? emp.bankAccountDetails,
-    }));
+    return employees.map((emp) => {
+      const payment = paymentById.get(emp.id);
+      const gps = gpsById.get(emp.id);
+      const base: Employee = {
+        ...emp,
+        profilePicture: picById.get(emp.id) ?? emp.profilePicture ?? null,
+        gcashNumber: payment?.gcashNumber ?? emp.gcashNumber,
+        bankAccountDetails: payment?.bankAccountDetails ?? emp.bankAccountDetails,
+      };
+      if (!gps) return base;
+      const grid = gpsToGridCoords(gps.lat, gps.lng);
+      return {
+        ...base,
+        gpsLat: parseFloat(gps.lat.toFixed(6)),
+        gpsLng: parseFloat(gps.lng.toFixed(6)),
+        lat: grid.lat,
+        lng: grid.lng,
+      };
+    });
   } catch {
     return employees.map((emp) => ({ ...emp, profilePicture: emp.profilePicture ?? null }));
   }

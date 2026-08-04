@@ -23,6 +23,7 @@ import EmployeeRollCall from './components/EmployeeRollCall';
 import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
 import LoginPage from './components/LoginPage';
 import ChangePasswordModal from './components/ChangePasswordModal';
+import SetLocationModal from './components/SetLocationModal';
 import UserAccountMenu from './components/UserAccountMenu';
 import ProfilePictureUploader from './components/ProfilePictureUploader';
 import PersonAvatar from './components/PersonAvatar';
@@ -431,6 +432,9 @@ export default function App() {
   const [editProfileSuccess, setEditProfileSuccess] = useState(false);
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [showLocationPrompt, setShowLocationPrompt] = useState(false);
+  const [showSetLocationModal, setShowSetLocationModal] = useState(false);
+  const [pendingMustSetLocation, setPendingMustSetLocation] = useState(false);
 
   // ── Page navigation ─────────────────────────────────────────────────────
   const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'manager-aid' | 'executive' | 'risk-map' | 'team-overview' | 'account-settings'>('dashboard');
@@ -2644,8 +2648,14 @@ export default function App() {
       setCanSwitchRoles(allowRoleSwitch);
       setSwitchableRoles(normalizedSwitchableRoles);
       setIsAuthenticated(true);
-      setShowPasswordPrompt(role === 'official' && body.mustChangePassword === true);
+      const needPassword = role === 'official' && body.mustChangePassword === true;
+      const needLocation = role === 'official' && body.mustSetLocation === true;
+      setPendingMustSetLocation(needLocation);
+      setShowPasswordPrompt(needPassword);
       setShowChangePasswordModal(false);
+      // If password prompt is also required, show location after that flow finishes.
+      setShowLocationPrompt(!needPassword && needLocation);
+      setShowSetLocationModal(false);
     } catch (error) {
       const message =
         error instanceof TypeError
@@ -2659,6 +2669,38 @@ export default function App() {
     }
   };
 
+  const applySavedHomeLocation = (latitude: number, longitude: number) => {
+    const empId = currentUser.employeeId;
+    if (!empId) return;
+    const LAT_MIN = 4.5;
+    const LAT_MAX = 21.5;
+    const LNG_MIN = 116.0;
+    const LNG_MAX = 127.0;
+    const gridY = ((LAT_MAX - latitude) / (LAT_MAX - LAT_MIN)) * 100;
+    const gridX = ((longitude - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
+    const gridLat = parseFloat(Math.max(0, Math.min(100, gridY)).toFixed(2));
+    const gridLng = parseFloat(Math.max(0, Math.min(100, gridX)).toFixed(2));
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        emp.id === empId
+          ? {
+              ...emp,
+              gpsLat: parseFloat(latitude.toFixed(6)),
+              gpsLng: parseFloat(longitude.toFixed(6)),
+              lat: gridLat,
+              lng: gridLng,
+            }
+          : emp
+      )
+    );
+  };
+
+  const openLocationAfterPassword = () => {
+    if (pendingMustSetLocation) {
+      setShowLocationPrompt(true);
+    }
+  };
+
   const handleLogout = () => {
     setIsAuthenticated(false);
     setAuthError('');
@@ -2667,6 +2709,9 @@ export default function App() {
     setSwitchableRoles(['official']);
     setShowPasswordPrompt(false);
     setShowChangePasswordModal(false);
+    setShowLocationPrompt(false);
+    setShowSetLocationModal(false);
+    setPendingMustSetLocation(false);
   };
 
   const handleRoleSwitch = (nextRole: AppRole) => {
@@ -2677,6 +2722,8 @@ export default function App() {
     setCurrentUser((prev) => ({ ...prev, role: nextRole }));
     setShowPasswordPrompt(false);
     setShowChangePasswordModal(false);
+    setShowLocationPrompt(false);
+    setShowSetLocationModal(false);
     setEmployeePortalPage('dashboard');
     setActivePage(nextRole === 'manager' ? 'team-overview' : 'dashboard');
     pushLog(`Access mode switched to ${nextRole}.`, 'info');
@@ -4053,6 +4100,30 @@ export default function App() {
                             Change password
                           </button>
                         </div>
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Home map pin</p>
+                            <p className="mt-2 text-sm font-semibold text-slate-900">
+                              {currentEmployee?.gpsLat != null && currentEmployee?.gpsLng != null
+                                ? `${currentEmployee.gpsLat.toFixed(5)}°N, ${currentEmployee.gpsLng.toFixed(5)}°E`
+                                : 'Not set yet'}
+                            </p>
+                            <p className="mt-2 text-sm text-slate-600">
+                              Pin your exact house so the heat map and calamity alerts use precise coordinates instead of a city-level address.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowLocationPrompt(false);
+                              setShowSetLocationModal(true);
+                            }}
+                            className="rounded-xl bg-[#001f4b] hover:bg-[#00172f] px-5 py-2.5 text-sm font-semibold text-white transition-all active:scale-95 shrink-0 inline-flex items-center gap-2"
+                          >
+                            <MapPin className="w-4 h-4" />
+                            {currentEmployee?.gpsLat != null ? 'Update map pin' : 'Set map pin'}
+                          </button>
+                        </div>
                       </div>
                     </section>
 
@@ -4314,11 +4385,18 @@ export default function App() {
           open={showPasswordPrompt}
           username={currentUser.username}
           promptMode
-          onClose={() => setShowPasswordPrompt(false)}
-          onSkip={() => setShowPasswordPrompt(false)}
+          onClose={() => {
+            setShowPasswordPrompt(false);
+            openLocationAfterPassword();
+          }}
+          onSkip={() => {
+            setShowPasswordPrompt(false);
+            openLocationAfterPassword();
+          }}
           onSuccess={() => {
             setShowPasswordPrompt(false);
             setEmployeePortalMessage('Password updated successfully and saved to your account.');
+            openLocationAfterPassword();
           }}
         />
         <ChangePasswordModal
@@ -4328,6 +4406,39 @@ export default function App() {
           onSuccess={() => {
             setShowChangePasswordModal(false);
             setEmployeePortalMessage('Password updated successfully and saved to your account.');
+          }}
+        />
+        <SetLocationModal
+          open={showLocationPrompt}
+          username={currentUser.username}
+          employeeId={currentUser.employeeId}
+          promptMode
+          initialLat={currentEmployee?.gpsLat ?? null}
+          initialLng={currentEmployee?.gpsLng ?? null}
+          onClose={() => setShowLocationPrompt(false)}
+          onSkip={() => {
+            setShowLocationPrompt(false);
+            setPendingMustSetLocation(false);
+          }}
+          onSuccess={({ latitude, longitude }) => {
+            setShowLocationPrompt(false);
+            setPendingMustSetLocation(false);
+            applySavedHomeLocation(latitude, longitude);
+            setEmployeePortalMessage('Home location saved. Your map pin is now precise.');
+          }}
+        />
+        <SetLocationModal
+          open={showSetLocationModal}
+          username={currentUser.username}
+          employeeId={currentUser.employeeId}
+          initialLat={currentEmployee?.gpsLat ?? null}
+          initialLng={currentEmployee?.gpsLng ?? null}
+          onClose={() => setShowSetLocationModal(false)}
+          onSuccess={({ latitude, longitude }) => {
+            setShowSetLocationModal(false);
+            setPendingMustSetLocation(false);
+            applySavedHomeLocation(latitude, longitude);
+            setEmployeePortalMessage('Home location updated successfully.');
           }}
         />
         {/* Government Links Footer — Employee Portal */}
@@ -6750,6 +6861,32 @@ export default function App() {
                     Change password
                   </button>
                 </div>
+                {currentUser.employeeId && (
+                  <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Home map pin</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">
+                        {currentEmployee?.gpsLat != null && currentEmployee?.gpsLng != null
+                          ? `${currentEmployee.gpsLat.toFixed(5)}°N, ${currentEmployee.gpsLng.toFixed(5)}°E`
+                          : 'Not set yet'}
+                      </p>
+                      <p className="mt-2 text-sm text-slate-600">
+                        Pin your exact house so workforce mapping uses precise coordinates.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLocationPrompt(false);
+                        setShowSetLocationModal(true);
+                      }}
+                      className="rounded-xl bg-[#001f4b] hover:bg-[#00172f] px-5 py-2.5 text-sm font-semibold text-white transition-all active:scale-95 shrink-0 inline-flex items-center gap-2"
+                    >
+                      <MapPin className="w-4 h-4" />
+                      {currentEmployee?.gpsLat != null ? 'Update map pin' : 'Set map pin'}
+                    </button>
+                  </div>
+                )}
               </div>
             </section>
           </div>
@@ -7763,6 +7900,20 @@ export default function App() {
         onSuccess={() => {
           setShowChangePasswordModal(false);
           pushLog('Password updated successfully and saved to your account.', 'success');
+        }}
+      />
+      <SetLocationModal
+        open={showSetLocationModal}
+        username={currentUser.username}
+        employeeId={currentUser.employeeId}
+        initialLat={currentEmployee?.gpsLat ?? null}
+        initialLng={currentEmployee?.gpsLng ?? null}
+        onClose={() => setShowSetLocationModal(false)}
+        onSuccess={({ latitude, longitude }) => {
+          setShowSetLocationModal(false);
+          setPendingMustSetLocation(false);
+          applySavedHomeLocation(latitude, longitude);
+          pushLog('Home location updated successfully.', 'success');
         }}
       />
 
