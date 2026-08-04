@@ -24,6 +24,7 @@ import { exportCalamityReportEmployees } from './utils/exportEmployeeReport';
 import LoginPage from './components/LoginPage';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import SetLocationModal from './components/SetLocationModal';
+import ComposeEmailModal from './components/ComposeEmailModal';
 import UserAccountMenu from './components/UserAccountMenu';
 import ProfilePictureUploader from './components/ProfilePictureUploader';
 import PersonAvatar from './components/PersonAvatar';
@@ -435,6 +436,12 @@ export default function App() {
   const [showLocationPrompt, setShowLocationPrompt] = useState(false);
   const [showSetLocationModal, setShowSetLocationModal] = useState(false);
   const [pendingMustSetLocation, setPendingMustSetLocation] = useState(false);
+  const [composeEmailTarget, setComposeEmailTarget] = useState<{
+    id: string;
+    name: string;
+    email: string;
+  } | null>(null);
+  const [composeEmailDefaults, setComposeEmailDefaults] = useState({ subject: '', body: '' });
 
   // ── Page navigation ─────────────────────────────────────────────────────
   const [activePage, setActivePage] = useState<'dashboard' | 'directory' | 'incidents' | 'safety' | 'aid' | 'manager-aid' | 'executive' | 'risk-map' | 'team-overview' | 'account-settings'>('dashboard');
@@ -1037,7 +1044,6 @@ export default function App() {
     }
 
     const activeIncident = calamityReports.find((report) => !resolvedReports[report.id]) ?? calamityReports[0] ?? null;
-
     const senderName = currentEmployee?.name ?? currentUser.username ?? 'Response Team';
     const incidentLabel = activeIncident?.incidentName ?? 'current incident';
     const subject = `Safety Check-In: ${incidentLabel}`;
@@ -1054,13 +1060,20 @@ export default function App() {
       'Thank you.',
     ].join('\n');
 
-    const mailtoUrl = `mailto:${target.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailtoUrl;
+    setComposeEmailDefaults({ subject, body });
+    setComposeEmailTarget({
+      id: target.id,
+      name: target.name,
+      email: target.email.trim(),
+    });
+  };
 
+  const handleComposeEmailSent = (payload: { employeeId: string; subject: string }) => {
+    const target = employees.find((emp) => emp.id === payload.employeeId);
     const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setEmployees((prev) =>
       prev.map((emp) => {
-        if (emp.id !== employeeId) return emp;
+        if (emp.id !== payload.employeeId) return emp;
         return {
           ...emp,
           status: 'Yellow' as SafetyStatus,
@@ -1072,7 +1085,11 @@ export default function App() {
         };
       })
     );
-    pushLog(`EMAIL COMPOSE OPENED: Mail client opened for ${target.name}. Status: AWAITING REPLY`, 'info');
+    pushLog(
+      `EMAIL DRAFT OPENED: Compose opened for ${target?.name ?? payload.employeeId} (${payload.subject}). Waiting for manager to click Send in their mail client.`,
+      'info'
+    );
+    setComposeEmailTarget(null);
   };
 
   const handleSendCheckInAllAffected = () => {
@@ -2712,6 +2729,7 @@ export default function App() {
     setShowLocationPrompt(false);
     setShowSetLocationModal(false);
     setPendingMustSetLocation(false);
+    setComposeEmailTarget(null);
   };
 
   const handleRoleSwitch = (nextRole: AppRole) => {
@@ -7915,6 +7933,15 @@ export default function App() {
           applySavedHomeLocation(latitude, longitude);
           pushLog('Home location updated successfully.', 'success');
         }}
+      />
+      <ComposeEmailModal
+        open={composeEmailTarget != null}
+        target={composeEmailTarget}
+        defaultSubject={composeEmailDefaults.subject}
+        defaultBody={composeEmailDefaults.body}
+        fromLabel={currentEmployee?.name ?? currentUser.username ?? 'Crisis Response Team'}
+        onClose={() => setComposeEmailTarget(null)}
+        onSent={handleComposeEmailSent}
       />
 
       {/* Government Links Footer — visible on all dashboard pages */}

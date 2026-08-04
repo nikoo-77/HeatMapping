@@ -2048,7 +2048,7 @@ loadEmployees()
 
     app.post('/api/check-in/email', async (_req, res) => {
       return res.status(410).json({
-        message: 'SMTP check-in endpoint is disabled. The app now uses mailto from the browser.',
+        message: 'Server SMTP is disabled. Compose in the app and send via the manager’s mail client (mailto).',
       });
     });
 
