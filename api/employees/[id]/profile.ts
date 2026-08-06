@@ -22,6 +22,9 @@ export default async function handler(req: any, res: any) {
 
     await updateEmployeeProfile(empId, {
       contactNumber: typeof body.contactNumber === 'string' ? body.contactNumber : undefined,
+      gcashNumber: typeof body.gcashNumber === 'string' ? body.gcashNumber : undefined,
+      gcashAccountName: typeof body.gcashAccountName === 'string' ? body.gcashAccountName : undefined,
+      bankAccountDetails: typeof body.bankAccountDetails === 'string' ? body.bankAccountDetails : undefined,
       address: typeof body.address === 'string' ? body.address : undefined,
     });
 
@@ -31,6 +34,7 @@ export default async function handler(req: any, res: any) {
       updated: {
         contactNumber: typeof body.contactNumber === 'string' ? body.contactNumber : undefined,
         gcashNumber: typeof body.gcashNumber === 'string' ? body.gcashNumber : undefined,
+        gcashAccountName: typeof body.gcashAccountName === 'string' ? body.gcashAccountName : undefined,
         bankAccountDetails: typeof body.bankAccountDetails === 'string' ? body.bankAccountDetails : undefined,
         address: typeof body.address === 'string' ? body.address : undefined,
       },

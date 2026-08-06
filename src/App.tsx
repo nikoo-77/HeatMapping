@@ -425,6 +425,7 @@ export default function App() {
   const [editProfileForm, setEditProfileForm] = useState({
     contactNumber: '',
     gcashNumber: '',
+    gcashAccountName: '',
     bankAccountDetails: '',
     address: '',
   });
@@ -3235,6 +3236,7 @@ export default function App() {
         body: JSON.stringify({
           contactNumber: editProfileForm.contactNumber || undefined,
           gcashNumber: editProfileForm.gcashNumber || undefined,
+          gcashAccountName: editProfileForm.gcashAccountName || undefined,
           bankAccountDetails: editProfileForm.bankAccountDetails || undefined,
           address: editProfileForm.address || undefined,
         }),
@@ -3251,6 +3253,7 @@ export default function App() {
                 ...emp,
                 contactNumber: editProfileForm.contactNumber || emp.contactNumber,
                 gcashNumber: editProfileForm.gcashNumber || emp.gcashNumber,
+                gcashAccountName: editProfileForm.gcashAccountName || emp.gcashAccountName,
                 bankAccountDetails: editProfileForm.bankAccountDetails || emp.bankAccountDetails,
                 address: editProfileForm.address || emp.address,
               }
@@ -4022,6 +4025,7 @@ export default function App() {
                             setEditProfileForm({
                               contactNumber: currentEmployee?.contactNumber ?? currentEmployee?.phone ?? '',
                               gcashNumber: currentEmployee?.gcashNumber ?? '',
+                              gcashAccountName: currentEmployee?.gcashAccountName ?? '',
                               bankAccountDetails: currentEmployee?.bankAccountDetails ?? '',
                               address: currentEmployee?.address ?? '',
                             });
@@ -4076,6 +4080,10 @@ export default function App() {
                         <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
                           <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">GCash Number</p>
                           <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.gcashNumber ?? 'Not provided'}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">GCash Account Name</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{currentEmployee?.gcashAccountName ?? 'Not provided'}</p>
                         </div>
                         <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
                           <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">Bank Account Details</p>
@@ -4179,6 +4187,10 @@ export default function App() {
                                 <input id="edit-gcash-number" type="tel" value={editProfileForm.gcashNumber} onChange={(e) => setEditProfileForm((prev) => ({ ...prev, gcashNumber: e.target.value }))} placeholder="e.g. 09XX-XXX-XXXX" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-[#001f4b] transition-all" />
                               </label>
                             </div>
+                            <label className="block">
+                              <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 block mb-1.5">GCash Account Name</span>
+                              <input id="edit-gcash-account-name" type="text" value={editProfileForm.gcashAccountName} onChange={(e) => setEditProfileForm((prev) => ({ ...prev, gcashAccountName: e.target.value }))} placeholder="e.g. JUAN DELA CRUZ" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-[#001f4b] transition-all" />
+                            </label>
                             <label className="block">
                               <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 block mb-1.5">Bank Account Details</span>
                               <input id="edit-bank-account" type="text" value={editProfileForm.bankAccountDetails} onChange={(e) => setEditProfileForm((prev) => ({ ...prev, bankAccountDetails: e.target.value }))} placeholder="e.g. BDO 0012-3456-7890" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-[#001f4b] transition-all" />
@@ -7846,6 +7858,10 @@ export default function App() {
                     <p>
                       <span className="font-semibold">GCash Number:</span>{' '}
                       {selectedAidApplication.applicantGcashNumber || employees.find((e) => e.id === selectedAidApplication.employeeId)?.gcashNumber || 'Not provided'}
+                    </p>
+                    <p>
+                      <span className="font-semibold">GCash Account Name:</span>{' '}
+                      {selectedAidApplication.applicantGcashAccountName || employees.find((e) => e.id === selectedAidApplication.employeeId)?.gcashAccountName || 'Not provided'}
                     </p>
                     <p>
                       <span className="font-semibold">Bank Account Details:</span>{' '}

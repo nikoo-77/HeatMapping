@@ -44,6 +44,7 @@ interface Employee {
   avatar: string;
   profilePicture?: string | null;
   gcashNumber?: string;
+  gcashAccountName?: string;
   bankAccountDetails?: string;
   address?: string;
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
@@ -86,6 +87,9 @@ interface SupabaseEmployeeRow {
   'GCASH NUMBER'?: string | null;
   'GCash Number'?: string | null;
   gcash_number?: string | null;
+  'GCASH ACCOUNT NAME'?: string | null;
+  'GCash Account Name'?: string | null;
+  gcash_account_name?: string | null;
   'BANK ACCOUNT DETAILS'?: string | null;
   'Bank Account Details'?: string | null;
   bank_account_details?: string | null;
@@ -655,6 +659,7 @@ function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee | null {
   const rawPhone = (row['MOBILE NUMBER'] ?? '').trim();
   const cleanPhone = rawPhone && !rawPhone.toUpperCase().includes('FOR UPDATE') ? rawPhone : undefined;
   const gcashNumber = pickText(rowRecord, ['GCASH NUMBER', 'GCash Number', 'gcash_number']);
+  const gcashAccountName = pickText(rowRecord, ['GCASH ACCOUNT NAME', 'GCash Account Name', 'gcash_account_name']);
   const bankAccountDetails = pickText(rowRecord, ['BANK ACCOUNT DETAILS', 'Bank Account Details', 'bank_account_details']);
 
   const officialEmail = (row['OFFICIAL EMAIL'] ?? '').trim();
@@ -689,6 +694,7 @@ function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee | null {
     status: seededRandom(empSeed + 5) > 0.92 ? 'Yellow' : 'Green',
     phone: cleanPhone,
     gcashNumber,
+    gcashAccountName,
     bankAccountDetails,
     email,
     avatar,
@@ -808,20 +814,32 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
   try {
     const data = await loadAccountExtras();
 
-    const paymentById = new Map<string, { gcashNumber?: string; bankAccountDetails?: string }>();
+    const paymentById = new Map<string, { gcashNumber?: string; gcashAccountName?: string; bankAccountDetails?: string }>();
     try {
       let payFrom = 0;
       const pageSize = 1000;
+      let paymentSelectCols = 'employee_id, username, gcash_number, gcash_account_name, bank_account_details';
+      let triedLegacyPaymentCols = false;
       while (true) {
         const payment = await supabase
           .from('accounts')
-          .select('employee_id, username, gcash_number, bank_account_details')
+          .select(paymentSelectCols)
           .range(payFrom, payFrom + pageSize - 1);
-        if (payment.error) break;
+        if (payment.error) {
+          if (!triedLegacyPaymentCols && /gcash_account_name/i.test(payment.error.message)) {
+            paymentSelectCols = 'employee_id, username, gcash_number, bank_account_details';
+            triedLegacyPaymentCols = true;
+            payFrom = 0;
+            paymentById.clear();
+            continue;
+          }
+          break;
+        }
         const paymentRows = (payment.data ?? []) as Array<{
           employee_id?: string;
           username?: string | null;
           gcash_number?: string | null;
+          gcash_account_name?: string | null;
           bank_account_details?: string | null;
         }>;
         if (!paymentRows.length) break;
@@ -829,10 +847,12 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
           const id = String(row.employee_id ?? '').trim();
           const username = normalizeLookupKey(row.username);
           const gcashNumber = typeof row.gcash_number === 'string' ? row.gcash_number.trim() : '';
+          const gcashAccountName = typeof row.gcash_account_name === 'string' ? row.gcash_account_name.trim() : '';
           const bankAccountDetails = typeof row.bank_account_details === 'string' ? row.bank_account_details.trim() : '';
-          if (!gcashNumber && !bankAccountDetails) continue;
+          if (!gcashNumber && !gcashAccountName && !bankAccountDetails) continue;
           const paymentInfo = {
             gcashNumber: gcashNumber || undefined,
+            gcashAccountName: gcashAccountName || undefined,
             bankAccountDetails: bankAccountDetails || undefined,
           };
           if (id) paymentById.set(normalizeLookupKey(id), paymentInfo);
@@ -874,6 +894,7 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
         ...emp,
         profilePicture: picById.get(empIdKey) ?? (emailKey ? picById.get(emailKey) : undefined) ?? emp.profilePicture ?? null,
         gcashNumber: payment?.gcashNumber ?? emp.gcashNumber,
+        gcashAccountName: payment?.gcashAccountName ?? emp.gcashAccountName,
         bankAccountDetails: payment?.bankAccountDetails ?? emp.bankAccountDetails,
       };
       if (!gps) return base;
@@ -1445,7 +1466,7 @@ function buildAidRequestCode(): string {
 function mapAidRequestToResponse(
   row: AidAssistanceRequestRow,
   attachments: AidAttachmentRow[],
-  applicantPaymentDetails?: { gcashNumber?: string; bankAccountDetails?: string }
+  applicantPaymentDetails?: { gcashNumber?: string; gcashAccountName?: string; bankAccountDetails?: string }
 ) {
   return {
     id: row.id,
@@ -1463,6 +1484,7 @@ function mapAidRequestToResponse(
     filedDate: new Date(row.submitted_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
     islandGroup: 'Luzon',
     applicantGcashNumber: applicantPaymentDetails?.gcashNumber,
+    applicantGcashAccountName: applicantPaymentDetails?.gcashAccountName,
     applicantBankAccountDetails: applicantPaymentDetails?.bankAccountDetails,
     managerReview: {
       decision: row.manager_decision ?? 'Pending',
@@ -2414,6 +2436,7 @@ loadEmployees()
         const employee = allEmployees.find((emp) => emp.id === row.employee_id);
         const mapped = mapAidRequestToResponse(row, grouped.get(row.id) ?? [], {
           gcashNumber: employee?.gcashNumber,
+          gcashAccountName: employee?.gcashAccountName,
           bankAccountDetails: employee?.bankAccountDetails,
         });
         return {
@@ -2570,6 +2593,7 @@ loadEmployees()
       return res.status(201).json(
         mapAidRequestToResponse(requestRow, savedAttachments, {
           gcashNumber: employee.gcashNumber,
+          gcashAccountName: employee.gcashAccountName,
           bankAccountDetails: employee.bankAccountDetails,
         })
       );
@@ -2646,6 +2670,7 @@ loadEmployees()
       return res.json(
         mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[], {
           gcashNumber: reviewedEmployee?.gcashNumber,
+          gcashAccountName: reviewedEmployee?.gcashAccountName,
           bankAccountDetails: reviewedEmployee?.bankAccountDetails,
         })
       );
@@ -2716,6 +2741,7 @@ loadEmployees()
       return res.json(
         mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[], {
           gcashNumber: reviewedEmployee?.gcashNumber,
+          gcashAccountName: reviewedEmployee?.gcashAccountName,
           bankAccountDetails: reviewedEmployee?.bankAccountDetails,
         })
       );
@@ -2740,13 +2766,14 @@ loadEmployees()
     });
 
     // Self-service profile update — employee edits their own contact/address details.
-    // Accepts: contactNumber, gcashNumber, bankAccountDetails, address
+    // Accepts: contactNumber, gcashNumber, gcashAccountName, bankAccountDetails, address
     // Identity is verified by matching the employee ID to the email provided in the request.
     app.patch('/api/employees/:id/profile', async (req, res) => {
       const empId = req.params.id;
-      const { contactNumber, gcashNumber, bankAccountDetails, address } = req.body as {
+      const { contactNumber, gcashNumber, gcashAccountName, bankAccountDetails, address } = req.body as {
         contactNumber?: string;
         gcashNumber?: string;
+        gcashAccountName?: string;
         bankAccountDetails?: string;
         address?: string;
       };
@@ -2776,11 +2803,40 @@ loadEmployees()
         }
       }
 
+      const accountPatchBase: Record<string, string> = {};
+      if (gcashNumber !== undefined) accountPatchBase.gcash_number = gcashNumber.trim();
+      if (gcashAccountName !== undefined) accountPatchBase.gcash_account_name = gcashAccountName.trim();
+      if (bankAccountDetails !== undefined) accountPatchBase.bank_account_details = bankAccountDetails.trim();
+
+      if (Object.keys(accountPatchBase).length > 0) {
+        const attempts: Array<Record<string, unknown>> = [
+          { ...accountPatchBase, updated_at: new Date().toISOString() },
+          { ...accountPatchBase },
+          {
+            ...(gcashNumber !== undefined ? { gcash_number: gcashNumber.trim() } : {}),
+            ...(bankAccountDetails !== undefined ? { bank_account_details: bankAccountDetails.trim() } : {}),
+          },
+        ];
+
+        for (const patch of attempts) {
+          if (Object.keys(patch).length === 0) continue;
+          const result = await supabase
+            .from('accounts')
+            .update(patch)
+            .eq('employee_id', empId)
+            .select('employee_id')
+            .maybeSingle();
+          if (!result.error) break;
+          if (!/gcash_account_name|updated_at|column/i.test(result.error.message)) break;
+        }
+      }
+
       // Reflect changes in the in-memory cache so subsequent GET /api/employees is fresh
       const idx = allEmployees.findIndex((e) => e.id === empId);
       if (idx !== -1) {
         if (contactNumber !== undefined) (allEmployees[idx] as any).contactNumber = contactNumber.trim();
         if (gcashNumber !== undefined)   (allEmployees[idx] as any).gcashNumber = gcashNumber.trim();
+        if (gcashAccountName !== undefined) (allEmployees[idx] as any).gcashAccountName = gcashAccountName.trim();
         if (bankAccountDetails !== undefined) (allEmployees[idx] as any).bankAccountDetails = bankAccountDetails.trim();
         if (address !== undefined)       allEmployees[idx].address = address.trim();
         if (contactNumber !== undefined) allEmployees[idx].phone = contactNumber.trim() || undefined;

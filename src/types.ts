@@ -49,6 +49,7 @@ export interface AidApplication {
   department: string;
   islandGroup: string;
   applicantGcashNumber?: string;
+  applicantGcashAccountName?: string;
   applicantBankAccountDetails?: string;
   managerReview?: {
     decision: 'Approved' | 'Rejected' | 'Pending';
@@ -99,6 +100,7 @@ export interface Employee {
   userId?: string;
   contactNumber?: string;
   gcashNumber?: string;
+  gcashAccountName?: string;
   bankAccountDetails?: string;
   address?: string; // Primary address
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';

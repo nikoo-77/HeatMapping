@@ -74,6 +74,7 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json(
       mapAidRequestToResponse(updated, (attachmentRows ?? []) as AidAttachmentRow[], 'Luzon', {
         gcashNumber: employee?.gcashNumber,
+        gcashAccountName: employee?.gcashAccountName,
         bankAccountDetails: employee?.bankAccountDetails,
       })
     );

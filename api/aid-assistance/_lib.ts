@@ -61,6 +61,7 @@ export type AidRequestResponse = {
   filedDate: string;
   islandGroup: 'Luzon' | 'Visayas' | 'Mindanao';
   applicantGcashNumber?: string;
+  applicantGcashAccountName?: string;
   applicantBankAccountDetails?: string;
   managerReview: {
     decision: 'Approved' | 'Rejected' | 'Pending';
@@ -118,7 +119,7 @@ export function mapAidRequestToResponse(
   row: AidAssistanceRequestRow,
   attachments: AidAttachmentRow[],
   islandGroup: 'Luzon' | 'Visayas' | 'Mindanao' = 'Luzon',
-  applicantPaymentDetails?: { gcashNumber?: string; bankAccountDetails?: string }
+  applicantPaymentDetails?: { gcashNumber?: string; gcashAccountName?: string; bankAccountDetails?: string }
 ): AidRequestResponse {
   return {
     id: row.id,
@@ -136,6 +137,7 @@ export function mapAidRequestToResponse(
     filedDate: new Date(row.submitted_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
     islandGroup,
     applicantGcashNumber: applicantPaymentDetails?.gcashNumber,
+    applicantGcashAccountName: applicantPaymentDetails?.gcashAccountName,
     applicantBankAccountDetails: applicantPaymentDetails?.bankAccountDetails,
     managerReview: {
       decision: row.manager_decision ?? 'Pending',
@@ -296,6 +298,7 @@ export async function getAidRequestsByRole(params: {
       employee?.islandGroup ?? 'Luzon',
       {
         gcashNumber: employee?.gcashNumber,
+        gcashAccountName: employee?.gcashAccountName,
         bankAccountDetails: employee?.bankAccountDetails,
       }
     );

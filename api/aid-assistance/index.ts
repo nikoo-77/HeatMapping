@@ -177,6 +177,7 @@ export default async function handler(req: any, res: any) {
 
     const response = mapAidRequestToResponse(requestRow, savedAttachments, 'Luzon', {
       gcashNumber: employee.gcashNumber,
+      gcashAccountName: employee.gcashAccountName,
       bankAccountDetails: employee.bankAccountDetails,
     });
     return res.status(201).json(response);

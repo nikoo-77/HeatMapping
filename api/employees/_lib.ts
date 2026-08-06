@@ -26,6 +26,7 @@ export interface Employee {
   avatar: string;
   profilePicture?: string | null;
   gcashNumber?: string;
+  gcashAccountName?: string;
   bankAccountDetails?: string;
   address: string;
   islandGroup?: IslandGroup;
@@ -59,6 +60,9 @@ interface SupabaseEmployeeRow {
   'GCASH NUMBER'?: string | null;
   'GCash Number'?: string | null;
   gcash_number?: string | null;
+  'GCASH ACCOUNT NAME'?: string | null;
+  'GCash Account Name'?: string | null;
+  gcash_account_name?: string | null;
   'BANK ACCOUNT DETAILS'?: string | null;
   'Bank Account Details'?: string | null;
   bank_account_details?: string | null;
@@ -467,6 +471,7 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
     const rawPhone = (row['MOBILE NUMBER'] ?? '').trim();
     const cleanPhone = rawPhone && !rawPhone.toUpperCase().includes('FOR UPDATE') ? rawPhone : undefined;
     const gcashNumber = pickText(rowRecord, ['GCASH NUMBER', 'GCash Number', 'gcash_number']);
+    const gcashAccountName = pickText(rowRecord, ['GCASH ACCOUNT NAME', 'GCash Account Name', 'gcash_account_name']);
     const bankAccountDetails = pickText(rowRecord, ['BANK ACCOUNT DETAILS', 'Bank Account Details', 'bank_account_details']);
 
     const officialEmail = (row['OFFICIAL EMAIL'] ?? '').trim();
@@ -503,6 +508,7 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
       status: seededRandom(empSeed + 5) > 0.92 ? 'Yellow' : 'Green',
       phone: cleanPhone,
       gcashNumber,
+      gcashAccountName,
       bankAccountDetails,
       email,
       avatar,
@@ -584,20 +590,32 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
     const supabase = getSupabaseClient();
     const data = await loadAccountExtras();
 
-    const paymentById = new Map<string, { gcashNumber?: string; bankAccountDetails?: string }>();
+    const paymentById = new Map<string, { gcashNumber?: string; gcashAccountName?: string; bankAccountDetails?: string }>();
     try {
       let payFrom = 0;
       const pageSize = 1000;
+      let paymentSelectCols = 'employee_id, username, gcash_number, gcash_account_name, bank_account_details';
+      let triedLegacyPaymentCols = false;
       while (true) {
         const paymentResponse = await supabase
           .from('accounts')
-          .select('employee_id, username, gcash_number, bank_account_details')
+          .select(paymentSelectCols)
           .range(payFrom, payFrom + pageSize - 1);
-        if (paymentResponse.error) break;
+        if (paymentResponse.error) {
+          if (!triedLegacyPaymentCols && /gcash_account_name/i.test(paymentResponse.error.message)) {
+            paymentSelectCols = 'employee_id, username, gcash_number, bank_account_details';
+            triedLegacyPaymentCols = true;
+            payFrom = 0;
+            paymentById.clear();
+            continue;
+          }
+          break;
+        }
         const paymentRows = (paymentResponse.data ?? []) as Array<{
           employee_id?: string;
           username?: string | null;
           gcash_number?: string | null;
+          gcash_account_name?: string | null;
           bank_account_details?: string | null;
         }>;
         if (!paymentRows.length) break;
@@ -606,10 +624,12 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
           const id = String(row.employee_id ?? '').trim();
           const username = normalizeLookupKey(row.username);
           const gcashNumber = typeof row.gcash_number === 'string' ? row.gcash_number.trim() : '';
+          const gcashAccountName = typeof row.gcash_account_name === 'string' ? row.gcash_account_name.trim() : '';
           const bankAccountDetails = typeof row.bank_account_details === 'string' ? row.bank_account_details.trim() : '';
-          if (!gcashNumber && !bankAccountDetails) continue;
+          if (!gcashNumber && !gcashAccountName && !bankAccountDetails) continue;
           const payment = {
             gcashNumber: gcashNumber || undefined,
+            gcashAccountName: gcashAccountName || undefined,
             bankAccountDetails: bankAccountDetails || undefined,
           };
           if (id) paymentById.set(normalizeLookupKey(id), payment);
@@ -650,6 +670,7 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
         ...emp,
         profilePicture: picById.get(empIdKey) ?? (emailKey ? picById.get(emailKey) : undefined) ?? emp.profilePicture ?? null,
         gcashNumber: payment?.gcashNumber ?? emp.gcashNumber,
+        gcashAccountName: payment?.gcashAccountName ?? emp.gcashAccountName,
         bankAccountDetails: payment?.bankAccountDetails ?? emp.bankAccountDetails,
       };
       if (!gps) {
@@ -717,26 +738,61 @@ export function parseRequestBody(req: any): Record<string, any> {
   return (req.body ?? {}) as Record<string, any>;
 }
 
-export async function updateEmployeeProfile(empId: string, payload: { contactNumber?: string; address?: string }) {
+export async function updateEmployeeProfile(empId: string, payload: {
+  contactNumber?: string;
+  address?: string;
+  gcashNumber?: string;
+  gcashAccountName?: string;
+  bankAccountDetails?: string;
+}) {
   const supabase = getSupabaseClient();
   const dbUpdate: Record<string, string> = {};
 
   if (typeof payload.contactNumber === 'string') dbUpdate['MOBILE NUMBER'] = payload.contactNumber.trim();
   if (typeof payload.address === 'string') dbUpdate['COMPLETE ADDRESS'] = payload.address.trim();
+  const hasEmployeeDetailsUpdate = Object.keys(dbUpdate).length > 0;
 
-  if (Object.keys(dbUpdate).length === 0) {
-    return { updated: false };
+  if (hasEmployeeDetailsUpdate) {
+    const { error } = await (supabase as any)
+      .from('Employee Details')
+      .update(dbUpdate)
+      .eq('Employee ID', empId);
+
+    if (error) throw new Error(`Supabase update failed: ${error.message}`);
   }
 
-  const { error } = await (supabase as any)
-    .from('Employee Details')
-    .update(dbUpdate)
-    .eq('Employee ID', empId);
+  // Payment metadata is stored in public.accounts and may have optional columns by environment.
+  const accountPatchBase: Record<string, string> = {};
+  if (typeof payload.gcashNumber === 'string') accountPatchBase.gcash_number = payload.gcashNumber.trim();
+  if (typeof payload.gcashAccountName === 'string') accountPatchBase.gcash_account_name = payload.gcashAccountName.trim();
+  if (typeof payload.bankAccountDetails === 'string') accountPatchBase.bank_account_details = payload.bankAccountDetails.trim();
 
-  if (error) throw new Error(`Supabase update failed: ${error.message}`);
+  const hasAccountPatch = Object.keys(accountPatchBase).length > 0;
+  if (hasAccountPatch) {
+    const accountAttempts: Array<Record<string, unknown>> = [
+      { ...accountPatchBase, updated_at: new Date().toISOString() },
+      { ...accountPatchBase },
+      {
+        ...(typeof payload.gcashNumber === 'string' ? { gcash_number: payload.gcashNumber.trim() } : {}),
+        ...(typeof payload.bankAccountDetails === 'string' ? { bank_account_details: payload.bankAccountDetails.trim() } : {}),
+      },
+    ];
+
+    for (const patch of accountAttempts) {
+      if (Object.keys(patch).length === 0) continue;
+      const result = await (supabase as any)
+        .from('accounts')
+        .update(patch)
+        .eq('employee_id', empId)
+        .select('employee_id')
+        .maybeSingle();
+      if (!result.error) break;
+      if (!/gcash_account_name|updated_at|column/i.test(result.error.message)) break;
+    }
+  }
 
   await getEmployees(true);
-  return { updated: true };
+  return { updated: hasEmployeeDetailsUpdate || hasAccountPatch };
 }
 
 const DEFAULT_EMPLOYEE_PASSWORD = '123456';
