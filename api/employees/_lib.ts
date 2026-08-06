@@ -766,6 +766,9 @@ export async function updateEmployeeProfile(empId: string, payload: {
   if (typeof payload.gcashNumber === 'string') accountPatchBase.gcash_number = payload.gcashNumber.trim();
   if (typeof payload.gcashAccountName === 'string') accountPatchBase.gcash_account_name = payload.gcashAccountName.trim();
   if (typeof payload.bankAccountDetails === 'string') accountPatchBase.bank_account_details = payload.bankAccountDetails.trim();
+  const employees = await getEmployees();
+  const target = employees.find((emp) => emp.id === empId);
+  const usernameCandidate = (target?.email ?? '').trim().toLowerCase();
 
   const hasAccountPatch = Object.keys(accountPatchBase).length > 0;
   if (hasAccountPatch) {
@@ -780,14 +783,25 @@ export async function updateEmployeeProfile(empId: string, payload: {
 
     for (const patch of accountAttempts) {
       if (Object.keys(patch).length === 0) continue;
-      const result = await (supabase as any)
+      let result = await (supabase as any)
         .from('accounts')
         .update(patch)
         .eq('employee_id', empId)
         .select('employee_id')
         .maybeSingle();
-      if (!result.error) break;
-      if (!/gcash_account_name|updated_at|column/i.test(result.error.message)) break;
+
+      if ((!result.data || result.error) && usernameCandidate) {
+        result = await (supabase as any)
+          .from('accounts')
+          .update(patch)
+          .eq('username', usernameCandidate)
+          .select('employee_id')
+          .maybeSingle();
+      }
+
+      if (!result.error && result.data) break;
+      const errMessage = result.error?.message ?? 'No accounts row was updated.';
+      if (!/gcash_account_name|updated_at|column/i.test(errMessage)) break;
     }
   }
 

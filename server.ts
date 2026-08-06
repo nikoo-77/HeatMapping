@@ -2807,6 +2807,7 @@ loadEmployees()
       if (gcashNumber !== undefined) accountPatchBase.gcash_number = gcashNumber.trim();
       if (gcashAccountName !== undefined) accountPatchBase.gcash_account_name = gcashAccountName.trim();
       if (bankAccountDetails !== undefined) accountPatchBase.bank_account_details = bankAccountDetails.trim();
+      const usernameCandidate = (target.email ?? '').trim().toLowerCase();
 
       if (Object.keys(accountPatchBase).length > 0) {
         const attempts: Array<Record<string, unknown>> = [
@@ -2820,14 +2821,24 @@ loadEmployees()
 
         for (const patch of attempts) {
           if (Object.keys(patch).length === 0) continue;
-          const result = await supabase
+          let result = await supabase
             .from('accounts')
             .update(patch)
             .eq('employee_id', empId)
             .select('employee_id')
             .maybeSingle();
-          if (!result.error) break;
-          if (!/gcash_account_name|updated_at|column/i.test(result.error.message)) break;
+          if ((!result.data || result.error) && usernameCandidate) {
+            result = await supabase
+              .from('accounts')
+              .update(patch)
+              .eq('username', usernameCandidate)
+              .select('employee_id')
+              .maybeSingle();
+          }
+
+          if (!result.error && result.data) break;
+          const errMessage = result.error?.message ?? 'No accounts row was updated.';
+          if (!/gcash_account_name|updated_at|column/i.test(errMessage)) break;
         }
       }
 
