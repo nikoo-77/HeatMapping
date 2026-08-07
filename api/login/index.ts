@@ -154,7 +154,7 @@ export default async function handler(req: any, res: any) {
       latitude: account.latitude ?? null,
       longitude: account.longitude ?? null,
       mustChangePassword:
-        account.access_role === 'official' && verifyPassword('123456', account.password_hash),
+        account.access_role !== 'admin' && verifyPassword('123456', account.password_hash),
       mustSetLocation:
         account.access_role === 'official' &&
         (account.latitude == null || account.longitude == null ||

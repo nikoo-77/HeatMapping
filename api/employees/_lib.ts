@@ -811,6 +811,8 @@ export async function updateEmployeeProfile(empId: string, payload: {
 
 const DEFAULT_EMPLOYEE_PASSWORD = '123456';
 
+type AdminAccessRole = 'official' | 'manager';
+
 type AdminEmployeePayload = {
   employeeId?: string;
   name?: string;
@@ -821,7 +823,15 @@ type AdminEmployeePayload = {
   managersId?: string;
   managersName?: string;
   designation?: string;
+  accessRole?: AdminAccessRole;
 };
+
+function normalizeAdminAccessRole(value: unknown, fallback: AdminAccessRole = 'official'): AdminAccessRole {
+  const role = String(value ?? '').trim().toLowerCase();
+  if (role === 'manager') return 'manager';
+  if (role === 'official') return 'official';
+  return fallback;
+}
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');
@@ -839,9 +849,13 @@ function buildEmployeeDetailsRow(payload: {
   managersId?: string;
   managersName?: string;
   designation?: string;
+  accessRole?: AdminAccessRole;
 }): Record<string, string> {
   const managersId = (payload.managersId ?? '').trim();
   const managersName = (payload.managersName ?? '').trim();
+  const accessRole = normalizeAdminAccessRole(payload.accessRole);
+  const isManager = accessRole === 'manager';
+  const designation = (payload.designation ?? '').trim() || (isManager ? 'Manager' : 'Employee');
   return {
     'Employee ID': payload.employeeId.trim(),
     'Employee Name': payload.name.trim(),
@@ -851,8 +865,8 @@ function buildEmployeeDetailsRow(payload: {
     'MOBILE NUMBER': (payload.phone ?? '').trim(),
     'Managers ID': managersId,
     'Managers Name': managersName,
-    'Designation': (payload.designation ?? '').trim() || 'Employee',
-    'PeopleManager/Individual Contributor': 'Individual Contributor',
+    'Designation': designation,
+    'PeopleManager/Individual Contributor': isManager ? 'Manager' : 'Individual Contributor',
   };
 }
 
@@ -908,7 +922,9 @@ export async function createEmployee(payload: AdminEmployeePayload) {
   const phone = String(payload.phone ?? '').trim();
   const managersId = String(payload.managersId ?? '').trim();
   const managersName = String(payload.managersName ?? '').trim();
-  const designation = String(payload.designation ?? 'Employee').trim() || 'Employee';
+  const accessRole = normalizeAdminAccessRole(payload.accessRole);
+  const designation = String(payload.designation ?? (accessRole === 'manager' ? 'Manager' : 'Employee')).trim()
+    || (accessRole === 'manager' ? 'Manager' : 'Employee');
 
   if (!employeeId || !name || !email) {
     const err: any = new Error('Employee ID, name, and email are required.');
@@ -934,7 +950,7 @@ export async function createEmployee(payload: AdminEmployeePayload) {
   }
 
   const row = buildEmployeeDetailsRow({
-    employeeId, name, email, department, address, phone, managersId, managersName, designation,
+    employeeId, name, email, department, address, phone, managersId, managersName, designation, accessRole,
   });
   const supabase = getSupabaseClient();
   const { data: inserted, error } = await supabase
@@ -954,7 +970,7 @@ export async function createEmployee(payload: AdminEmployeePayload) {
     employeeId,
     username: email,
     displayName: name,
-    accessRole: 'official',
+    accessRole,
     overwritePassword: true,
   });
 
@@ -987,8 +1003,12 @@ export async function updateEmployeeAdmin(empId: string, payload: AdminEmployeeP
   const phone = payload.phone !== undefined ? String(payload.phone).trim() : (existing.phone ?? '');
   const managersId = payload.managersId !== undefined ? String(payload.managersId).trim() : (existing.managerId ?? '');
   const managersName = payload.managersName !== undefined ? String(payload.managersName).trim() : (existing.managerName ?? '');
+  const accessRole = normalizeAdminAccessRole(
+    payload.accessRole,
+    existing.accessRole === 'manager' ? 'manager' : 'official'
+  );
   const designation = payload.designation !== undefined
-    ? String(payload.designation).trim() || 'Employee'
+    ? String(payload.designation).trim() || (accessRole === 'manager' ? 'Manager' : 'Employee')
     : existing.role;
 
   if (!name || !email) {
@@ -1008,7 +1028,7 @@ export async function updateEmployeeAdmin(empId: string, payload: AdminEmployeeP
   }
 
   const dbUpdate = buildEmployeeDetailsRow({
-    employeeId: empId, name, email, department, address, phone, managersId, managersName, designation,
+    employeeId: empId, name, email, department, address, phone, managersId, managersName, designation, accessRole,
   });
   delete (dbUpdate as any)['Employee ID'];
 
@@ -1034,7 +1054,7 @@ export async function updateEmployeeAdmin(empId: string, payload: AdminEmployeeP
     employeeId: empId,
     username: email,
     displayName: name,
-    accessRole: existing.accessRole === 'manager' ? 'manager' : 'official',
+    accessRole,
     overwritePassword: !existingAccount?.employee_id,
   });
 

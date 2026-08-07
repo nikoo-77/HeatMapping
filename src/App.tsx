@@ -462,6 +462,7 @@ export default function App() {
     employeeId: '',
     name: '',
     email: '',
+    accessRole: 'official' as 'official' | 'manager',
     department: '',
     address: '',
     phone: '',
@@ -1399,6 +1400,7 @@ export default function App() {
       employeeId: emp.id,
       name: emp.name ?? '',
       email: emp.email ?? '',
+      accessRole: emp.accessRole === 'manager' ? 'manager' : 'official',
       department: emp.department ?? '',
       address: emp.address === 'Needs Update' ? '' : (emp.address ?? ''),
       phone: emp.phone ?? '',
@@ -1416,6 +1418,7 @@ export default function App() {
     const employeeId = newEmpForm.employeeId.trim();
     const name = newEmpForm.name.trim();
     const email = newEmpForm.email.trim().toLowerCase();
+    const accessRole = newEmpForm.accessRole;
     const department = newEmpForm.department.trim();
     const address = newEmpForm.address.trim();
     const phone = newEmpForm.phone.trim();
@@ -1443,6 +1446,7 @@ export default function App() {
             employeeId,
             name,
             email,
+            accessRole,
             department,
             address,
             phone,
@@ -1462,9 +1466,10 @@ export default function App() {
           const without = prev.filter((e) => e.id !== saved.id);
           return [saved, ...without];
         });
-        if (saved.email) {
+        const savedEmail = saved?.email?.trim().toLowerCase();
+        if (savedEmail) {
           setOfficialAccountEmails((prev) =>
-            Array.from(new Set([...prev, saved.email.trim().toLowerCase()]))
+            Array.from(new Set([...prev, savedEmail]))
           );
         }
       } else {
@@ -7226,6 +7231,23 @@ export default function App() {
                     Login password starts as <span className="font-black text-[#002060]">123456</span>; they must change it after first login.
                   </p>
                 )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Account Role *</label>
+                <select
+                  required
+                  disabled={empFormSaving}
+                  value={newEmpForm.accessRole}
+                  onChange={e => setNewEmpForm(prev => ({ ...prev, accessRole: e.target.value as 'official' | 'manager' }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="official">Official (Employee)</option>
+                  <option value="manager">Manager</option>
+                </select>
+                <p className="text-[10px] text-slate-500 font-medium">
+                  Managers get manager access and can switch between manager and official views.
+                </p>
               </div>
 
               <div className="space-y-1">

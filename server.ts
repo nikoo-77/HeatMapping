@@ -710,6 +710,8 @@ function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee | null {
 
 const DEFAULT_EMPLOYEE_PASSWORD = '123456';
 
+type AdminAccessRole = 'official' | 'manager';
+
 type AdminEmployeePayload = {
   employeeId?: string;
   name?: string;
@@ -720,11 +722,22 @@ type AdminEmployeePayload = {
   managersId?: string;
   managersName?: string;
   designation?: string;
+  accessRole?: AdminAccessRole;
 };
+
+function normalizeAdminAccessRole(value: unknown, fallback: AdminAccessRole = 'official'): AdminAccessRole {
+  const role = String(value ?? '').trim().toLowerCase();
+  if (role === 'manager') return 'manager';
+  if (role === 'official') return 'official';
+  return fallback;
+}
 
 function buildEmployeeDetailsRow(payload: Required<Pick<AdminEmployeePayload, 'employeeId' | 'name' | 'email'>> & AdminEmployeePayload): Record<string, string> {
   const managersId = (payload.managersId ?? '').trim();
   const managersName = (payload.managersName ?? '').trim();
+  const accessRole = normalizeAdminAccessRole(payload.accessRole);
+  const isManager = accessRole === 'manager';
+  const designation = (payload.designation ?? '').trim() || (isManager ? 'Manager' : 'Employee');
   return {
     'Employee ID': payload.employeeId.trim(),
     'Employee Name': payload.name.trim(),
@@ -734,8 +747,8 @@ function buildEmployeeDetailsRow(payload: Required<Pick<AdminEmployeePayload, 'e
     'MOBILE NUMBER': (payload.phone ?? '').trim(),
     'Managers ID': managersId,
     'Managers Name': managersName,
-    'Designation': (payload.designation ?? '').trim() || 'Employee',
-    'PeopleManager/Individual Contributor': 'Individual Contributor',
+    'Designation': designation,
+    'PeopleManager/Individual Contributor': isManager ? 'Manager' : 'Individual Contributor',
   };
 }
 
@@ -1859,7 +1872,7 @@ app.post('/api/login', async (req, res) => {
       longitude: account.longitude ?? null,
       // Prompt employees still on the seeded default to change password after login.
       mustChangePassword:
-        account.access_role === 'official' && verifyPassword('123456', account.password_hash),
+        account.access_role !== 'admin' && verifyPassword('123456', account.password_hash),
       // Prompt employees who have never confirmed a precise home pin.
       mustSetLocation:
         account.access_role === 'official' &&
@@ -2868,7 +2881,9 @@ loadEmployees()
         const phone = String(body.phone ?? '').trim();
         const managersId = String(body.managersId ?? '').trim();
         const managersName = String(body.managersName ?? '').trim();
-        const designation = String(body.designation ?? 'Employee').trim() || 'Employee';
+        const accessRole = normalizeAdminAccessRole(body.accessRole);
+        const designation = String(body.designation ?? (accessRole === 'manager' ? 'Manager' : 'Employee')).trim()
+          || (accessRole === 'manager' ? 'Manager' : 'Employee');
 
         if (!employeeId || !name || !email) {
           return res.status(400).json({ message: 'Employee ID, name, and email are required.' });
@@ -2893,6 +2908,7 @@ loadEmployees()
           managersId,
           managersName,
           designation,
+          accessRole,
         });
 
         const { data: inserted, error } = await supabase
@@ -2953,8 +2969,12 @@ loadEmployees()
         const phone = body.phone !== undefined ? String(body.phone).trim() : (existing.phone ?? '');
         const managersId = body.managersId !== undefined ? String(body.managersId).trim() : (existing.managerId ?? '');
         const managersName = body.managersName !== undefined ? String(body.managersName).trim() : (existing.managerName ?? '');
+        const accessRole = normalizeAdminAccessRole(
+          body.accessRole,
+          existing.accessRole === 'manager' ? 'manager' : 'official'
+        );
         const designation = body.designation !== undefined
-          ? String(body.designation).trim() || 'Employee'
+          ? String(body.designation).trim() || (accessRole === 'manager' ? 'Manager' : 'Employee')
           : existing.role;
 
         if (!name || !email) {
@@ -2977,6 +2997,7 @@ loadEmployees()
           managersId,
           managersName,
           designation,
+          accessRole,
         });
         // Do not overwrite primary key column on update
         delete (dbUpdate as any)['Employee ID'];
@@ -3003,6 +3024,7 @@ loadEmployees()
           'Managers ID': managersId,
           'Managers Name': managersName,
           'Designation': designation,
+          'PeopleManager/Individual Contributor': accessRole === 'manager' ? 'Manager' : 'Individual Contributor',
         };
 
         const mapped = mapSupabaseRowToEmployee(sourceRow);
