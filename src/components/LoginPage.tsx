@@ -46,15 +46,9 @@ export default function LoginPage({ onLogin, error, isSubmitting, officialEmailH
 
             <div className="mt-8 space-y-3 text-sm text-blue-100/90">
               
-              <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
-                <p className="font-semibold text-white">Official / employee</p>
-                <p>Official email (or Employee ID) · Default password: 123456</p>
-              </div>
+             
               
-              <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
-                <p className="font-semibold text-white">Administrator</p>
-                <p>Username: admin · Password: admin123</p>
-              </div>
+              
             </div>
           </div>
 
