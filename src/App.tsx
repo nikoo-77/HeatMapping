@@ -463,6 +463,8 @@ export default function App() {
     name: '',
     email: '',
     accessRole: 'official' as 'official' | 'manager' | 'admin',
+    grantManagerAccess: false,
+    grantAdminAccess: false,
     department: '',
     address: '',
     phone: '',
@@ -1401,6 +1403,8 @@ export default function App() {
       name: emp.name ?? '',
       email: emp.email ?? '',
       accessRole: emp.accessRole === 'admin' ? 'admin' : (emp.accessRole === 'manager' ? 'manager' : 'official'),
+      grantManagerAccess: emp.accessRole === 'manager',
+      grantAdminAccess: emp.accessRole === 'admin',
       department: emp.department ?? '',
       address: emp.address === 'Needs Update' ? '' : (emp.address ?? ''),
       phone: emp.phone ?? '',
@@ -1418,7 +1422,11 @@ export default function App() {
     const employeeId = newEmpForm.employeeId.trim();
     const name = newEmpForm.name.trim();
     const email = newEmpForm.email.trim().toLowerCase();
-    const accessRole = newEmpForm.accessRole;
+    const accessRole = editingEmployeeId
+      ? (newEmpForm.grantAdminAccess
+        ? 'admin'
+        : (newEmpForm.grantManagerAccess ? 'manager' : 'official'))
+      : newEmpForm.accessRole;
     const department = newEmpForm.department.trim();
     const address = newEmpForm.address.trim();
     const phone = newEmpForm.phone.trim();
@@ -7233,23 +7241,63 @@ export default function App() {
                 )}
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Account Role *</label>
-                <select
-                  required
-                  disabled={empFormSaving}
-                  value={newEmpForm.accessRole}
-                  onChange={e => setNewEmpForm(prev => ({ ...prev, accessRole: e.target.value as 'official' | 'manager' | 'admin' }))}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="official">Official (Employee)</option>
-                  <option value="manager">Manager</option>
-                  <option value="admin">Admin</option>
-                </select>
-                <p className="text-[10px] text-slate-500 font-medium">
-                  Admins can access admin screens and switch between admin, manager, and official views.
-                </p>
-              </div>
+              {editingEmployeeId ? (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Access Grants</label>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex flex-col gap-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked
+                        disabled
+                        className="h-3.5 w-3.5 accent-[#002060]"
+                      />
+                      Employee access (always enabled)
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        disabled={empFormSaving}
+                        checked={newEmpForm.grantManagerAccess}
+                        onChange={e => setNewEmpForm(prev => ({ ...prev, grantManagerAccess: e.target.checked }))}
+                        className="h-3.5 w-3.5 accent-[#002060]"
+                      />
+                      Manager access
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        disabled={empFormSaving}
+                        checked={newEmpForm.grantAdminAccess}
+                        onChange={e => setNewEmpForm(prev => ({ ...prev, grantAdminAccess: e.target.checked }))}
+                        className="h-3.5 w-3.5 accent-[#002060]"
+                      />
+                      Admin access
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    Granting Admin gives this user admin + employee access.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Account Role *</label>
+                  <select
+                    required
+                    disabled={empFormSaving}
+                    value={newEmpForm.accessRole}
+                    onChange={e => setNewEmpForm(prev => ({ ...prev, accessRole: e.target.value as 'official' | 'manager' | 'admin' }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="official">Official (Employee)</option>
+                    <option value="manager">Manager</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    Admins can access admin screens and switch between admin, manager, and official views.
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-[#002060] uppercase tracking-widest">Complete Address</label>
