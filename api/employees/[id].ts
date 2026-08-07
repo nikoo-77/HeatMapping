@@ -1,4 +1,4 @@
-import { updateEmployeeAdmin } from '../_lib.js';
+import { updateEmployeeAdmin } from './_lib.js';
 
 export default async function handler(req: any, res: any) {
   try {
