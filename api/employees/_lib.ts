@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { resolveEmployeeRegion, parseRegionLabel } from '../../lib/regionResolver.js';
 import { randomBytes, scryptSync } from 'crypto';
 
-type AccessRole = 'employee' | 'manager';
+type AccessRole = 'employee' | 'manager' | 'admin';
+type AccountRole = 'official' | 'manager' | 'admin';
 type IslandGroup = 'Luzon' | 'Visayas' | 'Mindanao';
 type Carrier = 'Globe' | 'Smart' | 'DITO';
 type Status = 'Green' | 'Yellow' | 'Red';
@@ -488,7 +489,7 @@ function mapRowsToEmployees(rows: SupabaseEmployeeRow[]): Employee[] {
       : false;
 
     const rawRole = (row['role'] ?? '').trim().toLowerCase();
-    const accessRole: AccessRole = rawRole === 'manager' || isManager ? 'manager' : 'employee';
+    const accessRole: AccessRole = rawRole === 'admin' ? 'admin' : (rawRole === 'manager' || isManager ? 'manager' : 'employee');
 
     const empSeed = hashString(empId);
 
@@ -544,7 +545,14 @@ type AccountExtrasRow = {
   profile_picture?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  access_role?: AccountRole | null;
 };
+
+function mapAccountRoleToEmployeeAccessRole(role: AccountRole | null | undefined): AccessRole {
+  if (role === 'manager') return 'manager';
+  if (role === 'admin') return 'admin';
+  return 'employee';
+}
 
 function normalizeLookupKey(value: unknown): string {
   return String(value ?? '').trim().toLowerCase();
@@ -555,7 +563,7 @@ async function loadAccountExtras(): Promise<AccountExtrasRow[]> {
   const rows: AccountExtrasRow[] = [];
   let from = 0;
   const pageSize = 1000;
-  let selectCols = 'employee_id, username, profile_picture, latitude, longitude';
+  let selectCols = 'employee_id, username, profile_picture, latitude, longitude, access_role';
   let triedLegacy = false;
 
   while (true) {
@@ -566,7 +574,7 @@ async function loadAccountExtras(): Promise<AccountExtrasRow[]> {
 
     if (error) {
       if (!triedLegacy && /latitude|longitude/i.test(error.message)) {
-        selectCols = 'employee_id, username, profile_picture';
+        selectCols = 'employee_id, username, profile_picture, access_role';
         triedLegacy = true;
         from = 0;
         rows.length = 0;
@@ -644,6 +652,7 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
 
     const picById = new Map<string, string>();
     const gpsByKey = new Map<string, { lat: number; lng: number }>();
+    const roleByKey = new Map<string, AccessRole>();
     for (const row of data) {
       const id = String(row.employee_id ?? '').trim();
       const username = normalizeLookupKey(row.username);
@@ -659,6 +668,10 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
         if (id) gpsByKey.set(normalizeLookupKey(id), gps);
         if (username) gpsByKey.set(username, gps);
       }
+
+      const accessRole = mapAccountRoleToEmployeeAccessRole(row.access_role);
+      if (id) roleByKey.set(normalizeLookupKey(id), accessRole);
+      if (username) roleByKey.set(username, accessRole);
     }
 
     return employees.map((emp) => {
@@ -666,8 +679,10 @@ async function attachProfilePictures(employees: Employee[]): Promise<Employee[]>
       const emailKey = normalizeLookupKey(emp.email);
       const payment = paymentById.get(empIdKey) ?? (emailKey ? paymentById.get(emailKey) : undefined);
       const gps = gpsByKey.get(empIdKey) ?? (emailKey ? gpsByKey.get(emailKey) : undefined);
+      const accessRole = roleByKey.get(empIdKey) ?? (emailKey ? roleByKey.get(emailKey) : undefined) ?? emp.accessRole;
       const base: Employee = {
         ...emp,
+        accessRole,
         profilePicture: picById.get(empIdKey) ?? (emailKey ? picById.get(emailKey) : undefined) ?? emp.profilePicture ?? null,
         gcashNumber: payment?.gcashNumber ?? emp.gcashNumber,
         gcashAccountName: payment?.gcashAccountName ?? emp.gcashAccountName,
@@ -811,7 +826,7 @@ export async function updateEmployeeProfile(empId: string, payload: {
 
 const DEFAULT_EMPLOYEE_PASSWORD = '123456';
 
-type AdminAccessRole = 'official' | 'manager';
+type AdminAccessRole = 'official' | 'manager' | 'admin';
 
 type AdminEmployeePayload = {
   employeeId?: string;
@@ -829,6 +844,7 @@ type AdminEmployeePayload = {
 function normalizeAdminAccessRole(value: unknown, fallback: AdminAccessRole = 'official'): AdminAccessRole {
   const role = String(value ?? '').trim().toLowerCase();
   if (role === 'manager') return 'manager';
+  if (role === 'admin') return 'admin';
   if (role === 'official') return 'official';
   return fallback;
 }
@@ -855,7 +871,8 @@ function buildEmployeeDetailsRow(payload: {
   const managersName = (payload.managersName ?? '').trim();
   const accessRole = normalizeAdminAccessRole(payload.accessRole);
   const isManager = accessRole === 'manager';
-  const designation = (payload.designation ?? '').trim() || (isManager ? 'Manager' : 'Employee');
+  const designation = (payload.designation ?? '').trim()
+    || (accessRole === 'admin' ? 'Administrator' : (isManager ? 'Manager' : 'Employee'));
   return {
     'Employee ID': payload.employeeId.trim(),
     'Employee Name': payload.name.trim(),
@@ -874,7 +891,7 @@ async function upsertEmployeeAccount(input: {
   employeeId: string;
   username: string;
   displayName: string;
-  accessRole: 'manager' | 'official';
+  accessRole: AdminAccessRole;
   overwritePassword: boolean;
 }) {
   const supabase = getSupabaseClient();
@@ -923,8 +940,10 @@ export async function createEmployee(payload: AdminEmployeePayload) {
   const managersId = String(payload.managersId ?? '').trim();
   const managersName = String(payload.managersName ?? '').trim();
   const accessRole = normalizeAdminAccessRole(payload.accessRole);
-  const designation = String(payload.designation ?? (accessRole === 'manager' ? 'Manager' : 'Employee')).trim()
-    || (accessRole === 'manager' ? 'Manager' : 'Employee');
+  const designation = String(
+    payload.designation
+      ?? (accessRole === 'admin' ? 'Administrator' : (accessRole === 'manager' ? 'Manager' : 'Employee'))
+  ).trim() || (accessRole === 'admin' ? 'Administrator' : (accessRole === 'manager' ? 'Manager' : 'Employee'));
 
   if (!employeeId || !name || !email) {
     const err: any = new Error('Employee ID, name, and email are required.');
@@ -1005,10 +1024,11 @@ export async function updateEmployeeAdmin(empId: string, payload: AdminEmployeeP
   const managersName = payload.managersName !== undefined ? String(payload.managersName).trim() : (existing.managerName ?? '');
   const accessRole = normalizeAdminAccessRole(
     payload.accessRole,
-    existing.accessRole === 'manager' ? 'manager' : 'official'
+    existing.accessRole === 'admin' ? 'admin' : (existing.accessRole === 'manager' ? 'manager' : 'official')
   );
   const designation = payload.designation !== undefined
-    ? String(payload.designation).trim() || (accessRole === 'manager' ? 'Manager' : 'Employee')
+    ? String(payload.designation).trim()
+      || (accessRole === 'admin' ? 'Administrator' : (accessRole === 'manager' ? 'Manager' : 'Employee'))
     : existing.role;
 
   if (!name || !email) {

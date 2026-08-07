@@ -26,33 +26,23 @@ function normalizeAccountText(value: string | null | undefined): string {
 }
 
 function resolveSwitchableRoles(account: AccountRow): { canSwitchRoles: boolean; switchableRoles: SwitchableRole[] } {
-  const employeeId = normalizeAccountText(account.employee_id);
-  const username = normalizeAccountText(account.username);
-  const displayName = normalizeAccountText(account.display_name);
-
-  const isPrivilegedAccount =
-    employeeId === '7rf' ||
-    username === '7rf' ||
-    username === 'zulueta vladimir' ||
-    displayName === 'zulueta vladimir';
-
-  if (!isPrivilegedAccount) {
-    if (account.access_role === 'manager') {
-      return {
-        canSwitchRoles: true,
-        switchableRoles: ['official', 'manager'],
-      };
-    }
-
+  if (account.access_role === 'admin') {
     return {
-      canSwitchRoles: false,
-      switchableRoles: [account.access_role],
+      canSwitchRoles: true,
+      switchableRoles: ['official', 'manager', 'admin'],
+    };
+  }
+
+  if (account.access_role === 'manager') {
+    return {
+      canSwitchRoles: true,
+      switchableRoles: ['official', 'manager'],
     };
   }
 
   return {
-    canSwitchRoles: true,
-    switchableRoles: ['official', 'manager', 'admin'],
+    canSwitchRoles: false,
+    switchableRoles: [account.access_role],
   };
 }
 

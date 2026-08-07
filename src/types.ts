@@ -105,7 +105,7 @@ export interface Employee {
   address?: string; // Primary address
   islandGroup?: 'Luzon' | 'Visayas' | 'Mindanao';
   region?: string;         // Philippine admin region code e.g. 'NCR', 'VII', 'XI'
-  accessRole?: 'employee' | 'manager';
+  accessRole?: 'employee' | 'manager' | 'admin';
   managerId?: string;
   managerName?: string;
   team?: EmployeeTeam;

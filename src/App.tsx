@@ -462,7 +462,7 @@ export default function App() {
     employeeId: '',
     name: '',
     email: '',
-    accessRole: 'official' as 'official' | 'manager',
+    accessRole: 'official' as 'official' | 'manager' | 'admin',
     department: '',
     address: '',
     phone: '',
@@ -1400,7 +1400,7 @@ export default function App() {
       employeeId: emp.id,
       name: emp.name ?? '',
       email: emp.email ?? '',
-      accessRole: emp.accessRole === 'manager' ? 'manager' : 'official',
+      accessRole: emp.accessRole === 'admin' ? 'admin' : (emp.accessRole === 'manager' ? 'manager' : 'official'),
       department: emp.department ?? '',
       address: emp.address === 'Needs Update' ? '' : (emp.address ?? ''),
       phone: emp.phone ?? '',
@@ -7239,14 +7239,15 @@ export default function App() {
                   required
                   disabled={empFormSaving}
                   value={newEmpForm.accessRole}
-                  onChange={e => setNewEmpForm(prev => ({ ...prev, accessRole: e.target.value as 'official' | 'manager' }))}
+                  onChange={e => setNewEmpForm(prev => ({ ...prev, accessRole: e.target.value as 'official' | 'manager' | 'admin' }))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="official">Official (Employee)</option>
                   <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
                 </select>
                 <p className="text-[10px] text-slate-500 font-medium">
-                  Managers get manager access and can switch between manager and official views.
+                  Admins can access admin screens and switch between admin, manager, and official views.
                 </p>
               </div>
 
